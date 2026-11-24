@@ -1,0 +1,45 @@
+{
+  "name": "delegate",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.23.0",
+  "engines": {
+    "node": ">=26",
+    "pnpm": ">=12.23.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint lint:root",
+    "test": "turbo run test test:root",
+    "check": "turbo run typecheck lint lint:root test test:root build",
+    "gate": "pnpm check && echo 'gate: pnpm check passed. Evals arrive in M1 and the red-team suite in M4; until then the gate equals pnpm check.'",
+    "smoke": "echo 'pnpm smoke (provider smoke test for every configured model) arrives in M1. Nothing was called.'",
+    "db:generate": "pnpm --filter @delegate/db db:generate",
+    "db:migrate": "pnpm --filter @delegate/db db:migrate",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint:root": "eslint scripts eslint.config.mjs prettier.config.mjs",
+    "test:root": "vitest run --dir scripts",
+    "prepare": "simple-git-hooks"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "node scripts/scan-secrets.mjs --staged && node scripts/format-staged.mjs",
+    "pre-push": "pnpm check"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "@next/eslint-plugin-next": "catalog:",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "eslint-plugin-react-hooks": "catalog:",
+    "globals": "catalog:",
+    "prettier": "catalog:",
+    "simple-git-hooks": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:"
+  }
+}

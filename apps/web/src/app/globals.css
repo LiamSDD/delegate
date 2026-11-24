@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+
+  --color-background: oklch(0.99 0 0);
+  --color-foreground: oklch(0.18 0 0);
+  --color-muted: oklch(0.95 0 0);
+  --color-border: oklch(0.9 0 0);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: oklch(0.16 0 0);
+    --color-foreground: oklch(0.96 0 0);
+    --color-muted: oklch(0.22 0 0);
+    --color-border: oklch(0.3 0 0);
+  }
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
