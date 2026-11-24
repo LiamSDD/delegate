@@ -1,0 +1,513 @@
+import { z } from "zod";
+
+export const RUN_EVENT_TYPES = [
+  "run.created",
+  "plan.proposed",
+  "plan.approved",
+  "plan.revised",
+  "step.started",
+  "agent.spawned",
+  "agent.message",
+  "tool.called",
+  "tool.result",
+  "policy.decided",
+  "artifact.created",
+  "artifact.updated",
+  "critic.flagged",
+  "approval.requested",
+  "approval.resolved",
+  "usage.updated",
+  "step.completed",
+  "run.completed",
+  "run.failed",
+  "model.fallback",
+] as const;
+
+export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
+
+const id = z.string().min(1);
+const tokenCount = z.number().int().nonnegative();
+export const MicroUsdSchema = z.number().int().nonnegative();
+
+export const AGENT_ROLES = [
+  "researcher",
+  "analyst",
+  "builder",
+  "engineer",
+  "critic",
+  "editor",
+] as const;
+export const AgentRoleSchema = z.enum(AGENT_ROLES);
+export type AgentRole = z.infer<typeof AgentRoleSchema>;
+
+export const MODEL_ROLES = ["planner", "worker", "fast"] as const;
+export const ModelRoleSchema = z.enum(MODEL_ROLES);
+export type ModelRole = z.infer<typeof ModelRoleSchema>;
+
+export const ActorSchema = z.object({
+  type: z.enum(["member", "guest", "agent", "system"]),
+  id,
+});
+export type Actor = z.infer<typeof ActorSchema>;
+
+export const PlanStepSchema = z.object({
+  id,
+  role: AgentRoleSchema,
+  objective: z.string().min(1),
+  inputs: z.array(id),
+  capabilities: z.array(id),
+  acceptance: z.array(z.string().min(1)),
+  budgetShare: z.number().min(0).max(1),
+});
+export type PlanStep = z.infer<typeof PlanStepSchema>;
+
+export const UsageSchema = z.object({
+  inputTokens: tokenCount,
+  outputTokens: tokenCount,
+  cacheReadTokens: tokenCount,
+  cacheWriteTokens: tokenCount,
+  costMicroUsd: MicroUsdSchema,
+  provider: id,
+  model: id,
+});
+export type Usage = z.infer<typeof UsageSchema>;
+
+export const PolicyDecisionKindSchema = z.enum(["allow", "deny", "require_approval"]);
+export type PolicyDecisionKind = z.infer<typeof PolicyDecisionKindSchema>;
+
+export const ServingModelSchema = z.object({ provider: id, model: id });
+export type ServingModel = z.infer<typeof ServingModelSchema>;
+
+export const FALLBACK_REASONS = [
+  "rate_limited",
+  "server_error",
+  "timeout",
+  "network_error",
+  "context_too_small",
+  "tools_unsupported",
+  "unhealthy",
+] as const;
+export const FallbackReasonSchema = z.enum(FALLBACK_REASONS);
+export type FallbackReason = z.infer<typeof FallbackReasonSchema>;
+
+export const ModelFallbackPayloadSchema = z.object({
+  role: ModelRoleSchema,
+  from: ServingModelSchema,
+  to: ServingModelSchema.nullable(),
+  reason: FallbackReasonSchema,
+  retryAfterMs: z.number().int().nonnegative().optional(),
+});
+export type ModelFallbackPayload = z.infer<typeof ModelFallbackPayloadSchema>;
+
+const envelope = {
+  runId: id,
+  seq: z.number().int().nonnegative(),
+  at: z.iso.datetime({ offset: true }),
+  stepId: id.optional(),
+  agentId: id.optional(),
+};
+
+function event<T extends RunEventType, P extends z.ZodType>(type: T, payload: P) {
+  return z.object({ ...envelope, type: z.literal(type), payload });
+}
+
+function stepEvent<T extends RunEventType, P extends z.ZodType>(type: T, payload: P) {
+  return z.object({ ...envelope, stepId: id, type: z.literal(type), payload });
+}
+
+const planSteps = z.array(PlanStepSchema);
+
+export const RunEventSchema = z.discriminatedUnion("type", [
+  event(
+    "run.created",
+    z.object({
+      workspaceId: id,
+      missionId: id,
+      input: z.record(z.string(), z.unknown()),
+      actor: ActorSchema,
+      budget: z.object({ maxTokens: tokenCount, maxMicroUsd: MicroUsdSchema }),
+    }),
+  ),
+  event("plan.proposed", z.object({ version: z.number().int().positive(), steps: planSteps })),
+  event(
+    "plan.approved",
+    z.object({ version: z.number().int().positive(), approvedBy: ActorSchema }),
+  ),
+  event(
+    "plan.revised",
+    z.object({ version: z.number().int().positive(), steps: planSteps, reason: z.string().min(1) }),
+  ),
+  stepEvent("step.started", z.object({})),
+  stepEvent(
+    "agent.spawned",
+    z.object({ role: AgentRoleSchema, modelRole: ModelRoleSchema }),
+  ).extend({ agentId: id }),
+  stepEvent("agent.message", z.object({ text: z.string() })).extend({ agentId: id }),
+  stepEvent(
+    "tool.called",
+    z.object({ toolCallId: id, tool: id, capability: id, argsSummary: z.string() }),
+  ),
+  stepEvent(
+    "tool.result",
+    z.object({
+      toolCallId: id,
+      tool: id,
+      ok: z.boolean(),
+      summary: z.string(),
+      durationMs: z.number().int().nonnegative(),
+      artifactId: id.optional(),
+      error: z.string().optional(),
+    }),
+  ),
+  event(
+    "policy.decided",
+    z.object({
+      toolCallId: id.optional(),
+      tool: id,
+      decision: PolicyDecisionKindSchema,
+      policyId: id,
+      reason: z.string().min(1),
+    }),
+  ),
+  event(
+    "artifact.created",
+    z.object({ artifactId: id, kind: id, title: z.string().min(1), version: z.literal(1) }),
+  ),
+  event(
+    "artifact.updated",
+    z.object({
+      artifactId: id,
+      version: z.number().int().min(2),
+      title: z.string().min(1).optional(),
+    }),
+  ),
+  event(
+    "critic.flagged",
+    z.object({
+      claimId: id,
+      claim: z.string().min(1),
+      reason: z.string().min(1),
+      severity: z.enum(["info", "warn", "error"]),
+      sourceId: id.optional(),
+    }),
+  ),
+  event(
+    "approval.requested",
+    z.object({
+      approvalId: id,
+      toolCallId: id.optional(),
+      policyId: id,
+      reason: z.string().min(1),
+      summary: z.string().min(1),
+    }),
+  ),
+  event(
+    "approval.resolved",
+    z.object({
+      approvalId: id,
+      resolution: z.enum(["approved", "rejected"]),
+      resolvedBy: ActorSchema,
+      note: z.string().optional(),
+    }),
+  ),
+  event("usage.updated", UsageSchema),
+  stepEvent(
+    "step.completed",
+    z.object({
+      outcome: z.enum(["succeeded", "failed"]),
+      summary: z.string(),
+      confidence: z.number().min(0).max(1).optional(),
+      artifactIds: z.array(id),
+    }),
+  ),
+  event("run.completed", z.object({ summary: z.string() })),
+  event("run.failed", z.object({ error: z.object({ code: id, message: z.string() }) })),
+  event("model.fallback", ModelFallbackPayloadSchema),
+]);
+
+export type RunEvent = z.infer<typeof RunEventSchema>;
+export type RunEventOf<T extends RunEventType> = Extract<RunEvent, { type: T }>;
+
+export function parseRunEvent(input: unknown): RunEvent {
+  return RunEventSchema.parse(input);
+}
+
+export interface PlanDiff {
+  added: string[];
+  removed: string[];
+  changed: string[];
+}
+
+export function diffPlans(previous: readonly PlanStep[], next: readonly PlanStep[]): PlanDiff {
+  const before = new Map(previous.map((step) => [step.id, step]));
+  const after = new Map(next.map((step) => [step.id, step]));
+  return {
+    added: next.filter((step) => !before.has(step.id)).map((step) => step.id),
+    removed: previous.filter((step) => !after.has(step.id)).map((step) => step.id),
+    changed: next
+      .filter((step) => {
+        const old = before.get(step.id);
+        return old !== undefined && JSON.stringify(old) !== JSON.stringify(step);
+      })
+      .map((step) => step.id),
+  };
+}
+
+export type RunStatus =
+  "planning" | "awaiting_plan_approval" | "running" | "awaiting_approval" | "completed" | "failed";
+
+export type StepStatus = "pending" | "running" | "succeeded" | "failed";
+
+export interface StepState {
+  id: string;
+  status: StepStatus;
+  startedAt?: string;
+  completedAt?: string;
+  summary?: string;
+  servedBy?: ServingModel;
+}
+
+export interface RunTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costMicroUsd: number;
+  toolCalls: number;
+  policyDenials: number;
+}
+
+export interface PendingApproval {
+  approvalId: string;
+  policyId: string;
+  reason: string;
+  summary: string;
+  seq: number;
+  stepId?: string;
+  toolCallId?: string;
+}
+
+export interface ArtifactIndexEntry {
+  artifactId: string;
+  kind: string;
+  title: string;
+  version: number;
+  stepId?: string;
+}
+
+export interface PlanRevision {
+  version: number;
+  reason: string;
+  diff: PlanDiff;
+  seq: number;
+}
+
+export interface FallbackRecord extends ModelFallbackPayload {
+  seq: number;
+  stepId?: string;
+}
+
+export interface RunState {
+  runId: string;
+  status: RunStatus;
+  workspaceId?: string;
+  missionId?: string;
+  plan: { version: number; steps: PlanStep[]; approved: boolean } | null;
+  planRevisions: PlanRevision[];
+  steps: StepState[];
+  totals: RunTotals;
+  pendingApprovals: PendingApproval[];
+  artifacts: Record<string, ArtifactIndexEntry>;
+  fallbacks: FallbackRecord[];
+  summary?: string;
+  error?: { code: string; message: string };
+  lastSeq: number;
+}
+
+export class EventOrderError extends Error {
+  override readonly name = "EventOrderError";
+}
+
+type Lifecycle = "planning" | "awaiting_plan_approval" | "running" | "completed" | "failed";
+
+function stepsForPlan(plan: readonly PlanStep[], existing: readonly StepState[]): StepState[] {
+  const known = new Map(existing.map((step) => [step.id, step]));
+  return plan.map((step) => known.get(step.id) ?? { id: step.id, status: "pending" });
+}
+
+export function foldRun(events: readonly RunEvent[]): RunState {
+  const first = events[0];
+  if (first === undefined) throw new EventOrderError("Cannot fold an empty event log");
+
+  let lifecycle: Lifecycle = "planning";
+  const state: RunState = {
+    runId: first.runId,
+    status: "planning",
+    plan: null,
+    planRevisions: [],
+    steps: [],
+    totals: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costMicroUsd: 0,
+      toolCalls: 0,
+      policyDenials: 0,
+    },
+    pendingApprovals: [],
+    artifacts: {},
+    fallbacks: [],
+    lastSeq: -1,
+  };
+
+  const updateStep = (stepId: string, update: (step: StepState) => StepState) => {
+    const index = state.steps.findIndex((step) => step.id === stepId);
+    const current = index === -1 ? { id: stepId, status: "pending" as const } : state.steps[index];
+    if (current === undefined) return;
+    const next = update(current);
+    if (index === -1) state.steps.push(next);
+    else state.steps[index] = next;
+  };
+
+  for (const event of events) {
+    if (event.runId !== state.runId) {
+      throw new EventOrderError(
+        `Event seq ${event.seq} belongs to run ${event.runId}, not ${state.runId}`,
+      );
+    }
+    if (event.seq <= state.lastSeq) {
+      throw new EventOrderError(`Event seq ${event.seq} is not after ${state.lastSeq}`);
+    }
+    state.lastSeq = event.seq;
+
+    switch (event.type) {
+      case "run.created":
+        state.workspaceId = event.payload.workspaceId;
+        state.missionId = event.payload.missionId;
+        lifecycle = "planning";
+        break;
+      case "plan.proposed":
+        state.plan = {
+          version: event.payload.version,
+          steps: event.payload.steps,
+          approved: false,
+        };
+        state.steps = stepsForPlan(event.payload.steps, []);
+        lifecycle = "awaiting_plan_approval";
+        break;
+      case "plan.approved":
+        if (state.plan?.version === event.payload.version) state.plan.approved = true;
+        lifecycle = "running";
+        break;
+      case "plan.revised":
+        state.planRevisions.push({
+          version: event.payload.version,
+          reason: event.payload.reason,
+          diff: diffPlans(state.plan?.steps ?? [], event.payload.steps),
+          seq: event.seq,
+        });
+        state.plan = {
+          version: event.payload.version,
+          steps: event.payload.steps,
+          approved: state.plan?.approved ?? false,
+        };
+        state.steps = stepsForPlan(event.payload.steps, state.steps);
+        break;
+      case "step.started":
+        updateStep(event.stepId, (step) => ({ ...step, status: "running", startedAt: event.at }));
+        break;
+      case "step.completed":
+        updateStep(event.stepId, (step) => ({
+          ...step,
+          status: event.payload.outcome,
+          completedAt: event.at,
+          summary: event.payload.summary,
+        }));
+        break;
+      case "tool.called":
+        state.totals.toolCalls += 1;
+        break;
+      case "policy.decided":
+        if (event.payload.decision === "deny") state.totals.policyDenials += 1;
+        break;
+      case "usage.updated": {
+        const usage = event.payload;
+        state.totals.inputTokens += usage.inputTokens;
+        state.totals.outputTokens += usage.outputTokens;
+        state.totals.cacheReadTokens += usage.cacheReadTokens;
+        state.totals.cacheWriteTokens += usage.cacheWriteTokens;
+        state.totals.costMicroUsd += usage.costMicroUsd;
+        if (event.stepId !== undefined) {
+          updateStep(event.stepId, (step) => ({
+            ...step,
+            servedBy: { provider: usage.provider, model: usage.model },
+          }));
+        }
+        break;
+      }
+      case "artifact.created":
+        state.artifacts[event.payload.artifactId] = {
+          artifactId: event.payload.artifactId,
+          kind: event.payload.kind,
+          title: event.payload.title,
+          version: event.payload.version,
+          ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
+        };
+        break;
+      case "artifact.updated": {
+        const existing = state.artifacts[event.payload.artifactId];
+        if (existing !== undefined) {
+          state.artifacts[event.payload.artifactId] = {
+            ...existing,
+            version: event.payload.version,
+            ...(event.payload.title === undefined ? {} : { title: event.payload.title }),
+          };
+        }
+        break;
+      }
+      case "approval.requested":
+        state.pendingApprovals.push({
+          approvalId: event.payload.approvalId,
+          policyId: event.payload.policyId,
+          reason: event.payload.reason,
+          summary: event.payload.summary,
+          seq: event.seq,
+          ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
+          ...(event.payload.toolCallId === undefined
+            ? {}
+            : { toolCallId: event.payload.toolCallId }),
+        });
+        break;
+      case "approval.resolved":
+        state.pendingApprovals = state.pendingApprovals.filter(
+          (approval) => approval.approvalId !== event.payload.approvalId,
+        );
+        break;
+      case "model.fallback":
+        state.fallbacks.push({
+          ...event.payload,
+          seq: event.seq,
+          ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
+        });
+        break;
+      case "run.completed":
+        state.summary = event.payload.summary;
+        lifecycle = "completed";
+        break;
+      case "run.failed":
+        state.error = event.payload.error;
+        lifecycle = "failed";
+        break;
+      case "agent.spawned":
+      case "agent.message":
+      case "tool.result":
+      case "critic.flagged":
+        break;
+    }
+  }
+
+  state.status =
+    lifecycle === "running" && state.pendingApprovals.length > 0 ? "awaiting_approval" : lifecycle;
+  return state;
+}

@@ -8,6 +8,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./telemetry": {
+      "types": "./src/telemetry.ts",
+      "default": "./src/telemetry.ts"
     }
   },
   "scripts": {
