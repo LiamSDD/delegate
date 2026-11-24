@@ -11,3 +11,6 @@ coverage/
 next-env.d.ts
 playwright-report/
 test-results/
+
+.claude/harness/
+.claude/settings.local.json
