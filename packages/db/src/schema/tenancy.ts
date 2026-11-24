@@ -36,7 +36,7 @@ export const users = pgTable(
       using: sql`${t.id} = ${currentUserId}`,
       withCheck: sql`${t.id} = ${currentUserId}`,
     }),
-    ...definerPolicies("users", ["select"]),
+    ...definerPolicies("users", ["select", "insert"]),
   ],
 ).enableRLS();
 
@@ -54,6 +54,7 @@ export const orgs = pgTable(
       to: appRole,
       using: sql`app_is_org_member(${t.id})`,
     }),
+    ...definerPolicies("orgs", ["select", "insert"]),
   ],
 ).enableRLS();
 
@@ -91,7 +92,7 @@ export const workspaces = pgTable(
       using: hasWorkspaceRole(t.id, admins),
       withCheck: hasWorkspaceRole(t.id, admins),
     }),
-    ...definerPolicies("workspaces", ["select"]),
+    ...definerPolicies("workspaces", ["select", "insert"]),
   ],
 ).enableRLS();
 
@@ -135,7 +136,7 @@ export const members = pgTable(
         to: appRole,
         using: manages,
       }),
-      ...definerPolicies("members", ["select"]),
+      ...definerPolicies("members", ["select", "insert"]),
     ];
   },
 ).enableRLS();

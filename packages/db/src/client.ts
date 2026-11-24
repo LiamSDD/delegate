@@ -222,3 +222,20 @@ export async function purgeExpiredDemoRuns(maintenance: Executor): Promise<numbe
   );
   return row.purged;
 }
+
+export interface GuestWorkspace {
+  userId: string;
+  workspaceId: string;
+}
+
+export async function createGuestWorkspace(db: Database): Promise<GuestWorkspace> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`set local role delegate_app`);
+    const row = await onlyRow(
+      z.object({ user_id: z.uuid(), workspace_id: z.uuid() }),
+      tx,
+      sql`select user_id, workspace_id from create_guest_workspace()`,
+    );
+    return { userId: row.user_id, workspaceId: row.workspace_id };
+  });
+}

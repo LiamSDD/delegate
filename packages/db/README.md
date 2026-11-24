@@ -48,6 +48,7 @@ The migration owner needs `CREATEROLE` (Neon's owner role has it). Migration `00
 | Add usage to a run | `addRunUsage(tx, runId, usage)` → `add_run_usage()` | Non-negative deltas only; operator+. A trigger rejects any decrease of `runs.totals`. |
 | Read a user's email | `visibleUserEmail(tx, userId)` → `visible_user_email()` | `users.email` has no column grant for `delegate_app`. Returns the email to the user themselves and to owners/admins of a workspace the user belongs to; otherwise `null`. |
 | Append a run event | `appendRunEvent(tx, event)` | Validates `{type, payload, stepId, agentId}` against `@delegate/runtime`'s `RunEventSchema`. Locks the run row with `SELECT ... FOR UPDATE` under RLS (operator+ only) before computing `seq`. A caller who cannot write the run gets `RunNotWritableError` and takes no lock. |
+| Create a guest tenant | `createGuestWorkspace(db)` → `create_guest_workspace()` | Takes no arguments. Runs as `delegate_app` (no `app.user_id` needed) and inserts an anonymous `guest` user, an org with a random slug, a demo workspace (7-day retention) and the owner membership in one transaction. `delegate_app` still has no `INSERT` on `users`, `orgs` or `workspaces`; only `delegate_definer` does, through `*_definer_insert` policies (migration `0003`). Rate limiting stays in the app (per guest and per IP). |
 | Purge demo data | `purgeExpiredDemoRuns(conn)` → `purge_expired_demo_runs()` | See retention below. |
 
 `runs` column privileges for `delegate_app`: `INSERT` plus `UPDATE (status, started_at, finished_at)`. The insert policy forces `created_by = app.user_id` (also the column default) and zero `totals`. A trigger keeps `budget`, `mission`, `input`, lineage and `prompt_versions` immutable for everyone.
@@ -84,7 +85,7 @@ The append-only triggers on `run_events` and `audit_log` allow a `DELETE` only w
 ## Commands
 
 ```bash
-pnpm --filter @delegate/db db:generate   # after schema changes; custom SQL lives in 0000 and 0002
+pnpm --filter @delegate/db db:generate   # after schema changes; custom SQL lives in 0000, 0002 and the tail of 0003
 pnpm --filter @delegate/db db:check      # drizzle-kit check: journal and snapshots consistent
 pnpm --filter @delegate/db db:migrate    # uses DATABASE_URL_UNPOOLED (owner)
 ```
