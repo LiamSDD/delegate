@@ -11,9 +11,30 @@ datasets/
     CHANGELOG.md      what changed between versions and why
 ```
 
-- `<mission>` is the mission id (`xray`, `automation-audit`, ...).
+- `<mission>` is the runtime mission id (`company-xray`, `automation-audit`, ...). Cases carry the short CLI name in `mission` (`xray`).
 - A dataset version is immutable once an eval baseline references it. Adding, removing or editing a case creates `v<N+1>.jsonl`; baselines compare like with like.
 - At least 8 cases per mission (SPEC: real companies and repositories of different sizes, industries and languages).
+
+## Company X-ray (`company-xray/`)
+
+- `v1.jsonl`: one `XrayCaseSchema` case per line (`src/datasets/xray.ts`); `schema.v1.json` is the same schema as JSON Schema and a test keeps them in sync. Each case adds `company` (name, ISO country, industry, size), 2 to 5 `expectedFacts` (checkable proposition, justification, source URL, verification date) and `difficulty` notes to the generic case fields below. See `CHANGELOG.md` for the case table and exclusions.
+- `human-labels.v1.jsonl`: judge calibration labels, empty until the owner labels trials. One `HumanLabelSchema` object per line:
+
+  ```json
+  {"caseId":"zed","run":"2026-11-24T10-00-00-000Z","trial":0,"labeller":"owner","labelledAt":"2026-11-25","scores":{"accuracy":4,"specificity":4,"actionability":3,"citationFaithfulness":5},"notes":"optional"}
+  ```
+
+  `run` is a results directory name; the label is matched to `results/<run>/<caseId>/<trial>.judge.json`. `pnpm --filter @delegate/evals agreement` reports exact-match rate, within-one rate and Cohen's kappa per criterion, or says plainly that there are no human labels yet.
+
+## Running
+
+```bash
+pnpm eval --mission xray [--trials 3] [--cases id,id] [--audience public-demo|owner] [--offline | --replay <dir>] [--concurrency 1] [--no-judge] [--baseline]
+pnpm gate            # pnpm check, then 3 gate-tagged cases x 1 trial; GATE_FULL=1 runs every case x 3
+pnpm gate -- --offline   # re-grade the latest stored event logs, no network
+```
+
+Results go to `packages/evals/results/<timestamp>/` (`<case>/<trial>.events.jsonl`, `.trial.json`, `.judge.json`, `summary.json`, `summary.md`); only `results/baseline.json` is tracked and it is written only with `--baseline`. Trials run sequentially by default; a trial whose run fails with `no_model_available` is retried twice with 60 s and 120 s backoff, and the failed attempt's log is kept. Deterministic checks marked hard (`run_completed`, `schema_valid`, `claims_cited`, `citations_resolve`, `quotes_in_sources`) fail the gate; infrastructure failures (`no_model_available`, `site_unreachable`, `cancelled`) count as errored rather than invalid output. The judge (`prompts/xray-judge.v1.md`, role `planner`) scores 1 to 5, stored normalised as (score − 1) / 4.
 
 ## Case format
 
