@@ -6,7 +6,7 @@ Every prompt the runtime sends lives here as a versioned file. Prompts are code:
 
 `<name>.v<N>.md`, for example `planner.v1.md`, `critic.v3.md`.
 
-- `name` is lowercase kebab-case and matches the runtime component that uses it.
+- `name` is lowercase kebab-case and matches the runtime component that uses it. Mission-specific prompts prefix the mission id with a dot, for example `company-xray.synthesis.v1.md`.
 - `N` is a positive integer. A behaviour change (new instructions, new output fields, reordered rules) is a **new file** with `N + 1`; the old file stays until no eval baseline or replayable run references it, then its status becomes `retired`.
 - Typos and formatting fixes that cannot change model behaviour may be edited in place. When in doubt, bump the version.
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { type ModelFallbackPayload } from "./events";
-import { parseModelsConfig, type ChainEntry } from "./models";
+import { type ModelsConfig, parseModelsConfig, type ChainEntry } from "./models";
 import {
   ProviderHttpError,
   ProviderNetworkError,
@@ -54,7 +54,14 @@ const config = parseModelsConfig({
   ],
   roles: {
     planner: [
-      { provider: "a", model: "a-1", contextWindow: 8000, supportsTools: true, quirks: ["q-a"] },
+      {
+        provider: "a",
+        model: "a-1",
+        contextWindow: 8000,
+        supportsTools: true,
+        quirks: ["q-a"],
+        reasoningEffort: "low",
+      },
       { provider: "b", model: "b-1", contextWindow: 32000, supportsTools: false },
       { provider: "c", model: "c-1", contextWindow: 128000, supportsTools: true },
     ],
@@ -102,7 +109,7 @@ class FakeProvider implements ModelProvider {
   }
 }
 
-function setup() {
+function setup(routerConfig: ModelsConfig = config) {
   let now = 1_000_000;
   const providers = {
     a: new FakeProvider("a"),
@@ -112,7 +119,12 @@ function setup() {
   const fallbacks: ModelFallbackPayload[] = [];
   const router = new ModelRouter({
     env: {},
-    context: { config, audience: "public-demo", environment: "server", classification: "public" },
+    context: {
+      config: routerConfig,
+      audience: "public-demo",
+      environment: "server",
+      classification: "public",
+    },
     createProvider: (entry: ChainEntry) => providers[entry.provider.id as keyof typeof providers],
     emitFallback: (payload) => fallbacks.push(payload),
     now: () => now,
@@ -164,8 +176,34 @@ describe("ModelRouter", () => {
     const routed = await router.open("planner", request);
     expect(routed).toMatchObject({ provider: "a", model: "a-1" });
     expect(await drain(routed.events)).toBe("from a");
-    expect(providers.a.calls[0]).toMatchObject({ model: "a-1", quirks: ["q-a"] });
+    expect(providers.a.calls[0]).toMatchObject({
+      model: "a-1",
+      quirks: ["q-a"],
+      reasoningEffort: "low",
+    });
     expect(fallbacks).toEqual([]);
+  });
+
+  it("clamps maxTokens to the entry's output cap", async () => {
+    const capped = parseModelsConfig({
+      ...config,
+      roles: {
+        ...config.roles,
+        worker: [
+          {
+            provider: "c",
+            model: "c-1",
+            contextWindow: 128000,
+            supportsTools: true,
+            maxOutputTokens: 1500,
+          },
+        ],
+      },
+    });
+    const { router, providers } = setup(capped);
+    const routed = await router.open("worker", { ...request, maxTokens: 6000 });
+    await drain(routed.events);
+    expect(providers.c.calls[0]?.maxTokens).toBe(1500);
   });
 
   it("falls back on 429 and honours retry-after before trying the provider again", async () => {
@@ -216,6 +254,7 @@ describe("ModelRouter", () => {
     [402, "", "client_error"],
     [403, "", "client_error"],
     [404, "model not found", "model_unavailable"],
+    [410, "model retired", "model_unavailable"],
     [408, "", "client_error"],
     [413, "", "context_too_small"],
     [422, "", "client_error"],

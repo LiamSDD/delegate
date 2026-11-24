@@ -61,3 +61,40 @@ export const defaultPolicy: Policy = PolicySchema.parse({
     },
   ],
 });
+
+export const ownerDefaultPolicy: Policy = PolicySchema.parse({
+  id: "owner-research",
+  name: "Owner research runs",
+  description:
+    "Owner-run evaluations and recordings: the same research-only capabilities and egress rules as the guest demo, any configured provider (including evaluation-only trial tiers), and a spend cap for bring-your-own-key models.",
+  rules: [
+    {
+      id: "read-only-capabilities",
+      kind: "capability_allowlist",
+      capabilities: [
+        CAPABILITIES.webFetch,
+        CAPABILITIES.artifactWrite,
+        CAPABILITIES.scratchpadWrite,
+      ],
+    },
+    {
+      id: "fetch-only-egress",
+      kind: "egress_allowlist",
+      capabilities: [CAPABILITIES.webFetch],
+      domains: ["*"],
+    },
+    {
+      id: "owner-spend-cap",
+      kind: "spend_cap",
+      perRunMicroUsd: 2_000_000,
+      perDayMicroUsd: 10_000_000,
+      onExceed: "deny",
+    },
+    {
+      id: "no-confidential-data",
+      kind: "classification",
+      classifications: ["confidential", "restricted"],
+      forbiddenTools: ["*"],
+    },
+  ],
+});

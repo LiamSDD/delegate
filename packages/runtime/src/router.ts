@@ -18,7 +18,7 @@ import {
   type StreamOptions,
 } from "./providers/types";
 
-export type RouterRequest = Omit<ModelRequest, "model" | "quirks">;
+export type RouterRequest = Omit<ModelRequest, "model" | "quirks" | "reasoningEffort">;
 
 export interface RouterOptions {
   env: Env;
@@ -146,7 +146,7 @@ const REASONS_WITHOUT_HEALTH_PENALTY = new Set<FallbackReason>([
 
 function classifyHttp(error: ProviderHttpError): Rejection | undefined {
   if (error.status >= 500) return { reason: "server_error" };
-  if (error.status === 404) return { reason: "model_unavailable" };
+  if (error.status === 404 || error.status === 410) return { reason: "model_unavailable" };
   if (error.status === 413) return { reason: "context_too_small" };
   if (CLIENT_ERROR_STATUSES.has(error.status)) return { reason: "client_error" };
   if (error.status === 400 && CONTEXT_ERROR_PATTERN.test(error.bodySnippet))
@@ -402,7 +402,13 @@ export class ModelRouter {
     const streamOptions: StreamOptions =
       options.signal === undefined ? {} : { signal: options.signal };
     const stream = this.provider(entry).stream(
-      { ...request, model: entry.model, quirks: entry.quirks },
+      {
+        ...request,
+        maxTokens: Math.min(request.maxTokens, entry.maxOutputTokens ?? request.maxTokens),
+        model: entry.model,
+        quirks: entry.quirks,
+        ...(entry.reasoningEffort === undefined ? {} : { reasoningEffort: entry.reasoningEffort }),
+      },
       streamOptions,
     );
     const iterator = stream[Symbol.asyncIterator]();

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const PromptHeaderSchema = z.strictObject({
-  name: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  name: z.string().regex(/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$/),
   version: z.coerce.number().int().positive(),
   status: z.enum(["draft", "active", "retired"]),
   intent: z.string().min(1),
@@ -15,7 +15,7 @@ export interface PromptFile extends PromptHeader {
   body: string;
 }
 
-const FILE_NAME = /^([a-z][a-z0-9-]*)\.v(\d+)\.md$/;
+const FILE_NAME = /^([a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*)\.v(\d+)\.md$/;
 const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 function parseValue(raw: string): string | string[] {

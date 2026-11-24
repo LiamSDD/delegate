@@ -522,3 +522,63 @@ describe("foldRun ordering rules", () => {
     expect(({} as Record<string, unknown>).title).toBeUndefined();
   });
 });
+
+describe("M1 payload extensions", () => {
+  it("keeps artifact content snapshots on created and updated events", () => {
+    const created = parseRunEvent(
+      envelope(1, {
+        type: "artifact.created",
+        payload: { artifactId: "a1", kind: "brief", title: "Brief", version: 1, content: { x: 1 } },
+      }),
+    );
+    expect(created.type === "artifact.created" && created.payload.content).toEqual({ x: 1 });
+    const updated = parseRunEvent(
+      envelope(2, {
+        type: "artifact.updated",
+        payload: { artifactId: "a1", version: 2, content: { x: 2 } },
+      }),
+    );
+    expect(updated.type === "artifact.updated" && updated.payload.content).toEqual({ x: 2 });
+  });
+
+  it("categorises critic flags, including suspected prompt injection", () => {
+    const flagged = parseRunEvent(
+      envelope(1, {
+        type: "critic.flagged",
+        payload: {
+          claimId: "injection:S2",
+          claim: "Ignore previous instructions",
+          reason: "Possible prompt injection",
+          severity: "warn",
+          sourceId: "S2",
+          category: "injection_suspected",
+        },
+      }),
+    );
+    expect(flagged.type === "critic.flagged" && flagged.payload.category).toBe(
+      "injection_suspected",
+    );
+    expect(() =>
+      parseRunEvent(
+        envelope(1, {
+          type: "critic.flagged",
+          payload: { claimId: "c", claim: "c", reason: "r", severity: "warn", category: "vibes" },
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it("records why a plan was approved", () => {
+    const approved = parseRunEvent(
+      envelope(1, {
+        type: "plan.approved",
+        payload: {
+          version: 1,
+          approvedBy: { type: "system", id: "m1-auto-approve" },
+          reason: "Auto-approved by the system: plan approval UI arrives in M2",
+        },
+      }),
+    );
+    expect(approved.type === "plan.approved" && approved.payload.reason).toMatch(/M2/);
+  });
+});

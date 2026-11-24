@@ -99,7 +99,17 @@ const fixture: ModelsConfig = parseModelsConfig({
       { provider: "free", model: "f-1", contextWindow: 131072, supportsTools: true },
       { provider: "claude", model: "big", contextWindow: 200000, supportsTools: true },
     ],
-    worker: [{ provider: "keyless", model: "k-2", contextWindow: 32000, supportsTools: true }],
+    worker: [
+      {
+        provider: "trial",
+        model: "t-slow",
+        contextWindow: 256000,
+        supportsTools: true,
+        interactive: false,
+      },
+      { provider: "trial", model: "t-2", contextWindow: 128000, supportsTools: true },
+      { provider: "keyless", model: "k-2", contextWindow: 32000, supportsTools: true },
+    ],
     fast: [{ provider: "browser", model: "b-2", contextWindow: 4096, supportsTools: false }],
   },
 });
@@ -121,18 +131,28 @@ describe("config/models.json", () => {
     expect(() => ModelsConfigSchema.parse(rootConfig)).not.toThrow();
   });
 
-  it("orders every role keyless first, then browser, local, optional keys and BYOK last", () => {
+  it("orders every role as ADR 0003 Amendment 2: optional evaluation-only owner entries first, then keyless, browser, local, optional keys and BYOK last", () => {
     const config = parseModelsConfig(rootConfig);
-    const rank = (providerId: string): number => {
+    const providerOf = (providerId: string) => {
       const provider = config.providers.find((candidate) => candidate.id === providerId);
       if (provider === undefined) throw new Error(providerId);
+      return provider;
+    };
+    const rank = (providerId: string): number => {
+      const provider = providerOf(providerId);
       if (provider.kind === "webllm") return 1;
       if (provider.kind === "ollama") return 2;
       if (provider.terms === "byok") return 4;
       return provider.keyless ? 0 : 3;
     };
     for (const role of ["planner", "worker", "fast"] as const) {
-      const ranks = config.roles[role].map((entry) => rank(entry.provider));
+      const entries = config.roles[role];
+      const firstKeyless = entries.findIndex((entry) => providerOf(entry.provider).keyless);
+      const leading = entries.slice(0, firstKeyless);
+      expect(leading.every((entry) => providerOf(entry.provider).terms === "evaluation-only")).toBe(
+        true,
+      );
+      const ranks = entries.slice(firstKeyless).map((entry) => rank(entry.provider));
       expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
       expect(ranks[0]).toBe(0);
     }
@@ -304,6 +324,18 @@ describe("resolveChain", () => {
     ).toEqual(["free"]);
   });
 
+  it("skips non-interactive entries unless the run has no latency budget", () => {
+    const models = (latency?: "interactive" | "offline") =>
+      resolveChain(
+        "worker",
+        { TRIAL_KEY: "t" },
+        { config: fixture, ...server, ...(latency === undefined ? {} : { latency }) },
+      ).map((entry) => entry.model);
+    expect(models()).toEqual(["t-2", "k-2"]);
+    expect(models("interactive")).toEqual(["t-2", "k-2"]);
+    expect(models("offline")).toEqual(["t-slow", "t-2", "k-2"]);
+  });
+
   it("returns entry details with quirks defaulted", () => {
     const [trial] = resolveChain(
       "planner",
@@ -315,7 +347,77 @@ describe("resolveChain", () => {
       contextWindow: 256000,
       quirks: ["echo-reasoning-content"],
       unverified: false,
+      interactive: true,
     });
+  });
+});
+
+describe("provider limits", () => {
+  it("accepts a maximum number of concurrent requests", () => {
+    expect(
+      ProviderConfigSchema.parse({
+        id: "p",
+        kind: "openai-compatible",
+        baseUrl: "https://p.test/v1",
+        keyless: true,
+        terms: "public-demo-ok",
+        maxClassification: "public",
+        dataPolicy: "x",
+        limits: { requestsPerMinute: 10, maxConcurrent: 1 },
+      }).limits?.maxConcurrent,
+    ).toBe(1);
+  });
+});
+
+describe("reasoning effort", () => {
+  it("passes an optional per-entry reasoningEffort through to the chain entry", () => {
+    const config = parseModelsConfig({
+      version: 1,
+      providers: [
+        {
+          id: "keyless",
+          kind: "openai-compatible",
+          baseUrl: "https://keyless.test/v1",
+          keyless: true,
+          terms: "public-demo-ok",
+          maxClassification: "public",
+          dataPolicy: "community",
+        },
+      ],
+      roles: {
+        planner: [
+          {
+            provider: "keyless",
+            model: "k",
+            contextWindow: 1000,
+            supportsTools: true,
+            reasoningEffort: "low",
+          },
+        ],
+        worker: [{ provider: "keyless", model: "k", contextWindow: 1000, supportsTools: true }],
+        fast: [],
+      },
+    });
+    const context = { config, ...server };
+    expect(resolveChain("planner", {}, context)[0]?.reasoningEffort).toBe("low");
+    expect(resolveChain("worker", {}, context)[0]?.reasoningEffort).toBeUndefined();
+    expect(() =>
+      parseModelsConfig({
+        ...config,
+        roles: {
+          ...config.roles,
+          fast: [
+            {
+              provider: "keyless",
+              model: "k",
+              contextWindow: 1,
+              supportsTools: true,
+              reasoningEffort: "max",
+            },
+          ],
+        },
+      }),
+    ).toThrow();
   });
 });
 

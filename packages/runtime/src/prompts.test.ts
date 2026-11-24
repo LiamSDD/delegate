@@ -24,6 +24,15 @@ describe("parsePromptFile", () => {
     });
   });
 
+  it("accepts mission-scoped names with dot-separated kebab segments", () => {
+    const prompt = parsePromptFile(
+      "company-xray.synthesis.v1.md",
+      "---\nname: company-xray.synthesis\nversion: 1\nstatus: active\nintent: x\ninputs: []\noutput: X\n---\nB",
+    );
+    expect(prompt.name).toBe("company-xray.synthesis");
+    expect(() => parsePromptFile("company-xray..synthesis.v1.md", "---\n---\n")).toThrow();
+  });
+
   it("rejects a file whose name and header disagree", () => {
     expect(() =>
       parsePromptFile(

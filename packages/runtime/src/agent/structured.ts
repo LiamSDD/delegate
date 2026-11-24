@@ -1,0 +1,187 @@
+import { type z } from "zod";
+
+import { type ModelRole } from "../events";
+import { type ChatMessage } from "../providers/types";
+import { type RunContext } from "./context";
+import { callModel, type ModelCallResult } from "./model-call";
+
+const MAX_ISSUES_IN_REPAIR = 12;
+const MAX_ECHOED_ANSWER_CHARS = 12_000;
+const MAX_CLOSING_CANDIDATES = 20;
+
+export class StructuredOutputError extends Error {
+  override readonly name = "StructuredOutputError";
+  constructor(
+    message: string,
+    readonly issues: string,
+  ) {
+    super(message);
+  }
+}
+
+export interface StructuredCallOptions<T> {
+  role: ModelRole;
+  stepId: string;
+  system: string;
+  user: string;
+  schema: z.ZodType<T>;
+  maxTokens: number;
+  temperature?: number;
+}
+
+export interface StructuredResult<T> {
+  value: T;
+  repaired: boolean;
+  calls: ModelCallResult[];
+}
+
+function parseStrict(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function tryParse(text: string): unknown {
+  return parseStrict(text) ?? parseStrict(text.replace(/,\s*([}\]])/g, "$1"));
+}
+
+function closeUnbalanced(text: string): string {
+  const open: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") open.push("}");
+    else if (char === "[") open.push("]");
+    else if ((char === "}" || char === "]") && open.at(-1) === char) open.pop();
+  }
+  const body = inString ? `${text}"` : text.replace(/[\s,]+$/, "");
+  return body + open.reverse().join("");
+}
+
+export function extractJson(text: string): unknown {
+  const trimmed = text.trim();
+  const direct = tryParse(trimmed);
+  if (direct !== undefined) return direct;
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed)?.[1];
+  if (fenced !== undefined) {
+    const parsed = tryParse(fenced.trim());
+    if (parsed !== undefined) return parsed;
+  }
+  const start = trimmed.search(/[{[]/);
+  if (start === -1) return undefined;
+  const balanced = tryParse(closeUnbalanced(trimmed.slice(start)));
+  if (balanced !== undefined) return balanced;
+  const closer = trimmed[start] === "{" ? "}" : "]";
+  let end = trimmed.lastIndexOf(closer);
+  for (let attempt = 0; end > start && attempt < MAX_CLOSING_CANDIDATES; attempt += 1) {
+    const parsed = tryParse(trimmed.slice(start, end + 1));
+    if (parsed !== undefined) return parsed;
+    end = trimmed.lastIndexOf(closer, end - 1);
+  }
+  return undefined;
+}
+
+type Issue = z.core.$ZodIssue;
+
+function flattenIssues(
+  issues: readonly Issue[],
+  prefix: readonly PropertyKey[],
+): { path: PropertyKey[]; message: string }[] {
+  return issues.flatMap((issue) => {
+    const path = [...prefix, ...issue.path];
+    if (issue.code === "invalid_union" && issue.errors.length > 0) {
+      const closest = [...issue.errors].sort((a, b) => a.length - b.length)[0] ?? [];
+      if (closest.length > 0) return flattenIssues(closest, path);
+    }
+    return [{ path, message: issue.message }];
+  });
+}
+
+function describeIssues(error: z.ZodError): string {
+  return flattenIssues(error.issues, [])
+    .slice(0, MAX_ISSUES_IN_REPAIR)
+    .map(
+      (issue) =>
+        `- ${issue.path.length === 0 ? "(root)" : issue.path.map(String).join(".")}: ${issue.message}`,
+    )
+    .join("\n");
+}
+
+function validate<T>(
+  schema: z.ZodType<T>,
+  result: ModelCallResult,
+): { ok: true; value: T } | { ok: false; issues: string } {
+  if (result.stopReason === "refusal") {
+    throw new StructuredOutputError(
+      `${result.provider}/${result.model} refused the request`,
+      "refusal",
+    );
+  }
+  if (result.text.trim() === "") {
+    return {
+      ok: false,
+      issues:
+        "- (root): the answer was empty; the model returned only reasoning. Reply with the JSON object itself.",
+    };
+  }
+  const json = extractJson(result.text);
+  if (json === undefined) {
+    const truncated =
+      result.stopReason === "max_tokens"
+        ? " The answer was cut off at the token limit; be more concise."
+        : "";
+    return {
+      ok: false,
+      issues: `- (root): the answer did not contain a parseable JSON value.${truncated}`,
+    };
+  }
+  const parsed = schema.safeParse(json);
+  return parsed.success
+    ? { ok: true, value: parsed.data }
+    : { ok: false, issues: describeIssues(parsed.error) };
+}
+
+export async function callStructured<T>(
+  ctx: RunContext,
+  options: StructuredCallOptions<T>,
+): Promise<StructuredResult<T>> {
+  const messages: ChatMessage[] = [{ role: "user", content: options.user }];
+  const request = (history: ChatMessage[]) => ({
+    role: options.role,
+    stepId: options.stepId,
+    request: {
+      system: options.system,
+      messages: history,
+      maxTokens: options.maxTokens,
+      ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
+    },
+  });
+  const first = await callModel(ctx, request(messages));
+  const firstCheck = validate(options.schema, first);
+  if (firstCheck.ok) return { value: firstCheck.value, repaired: false, calls: [first] };
+
+  const repairHistory: ChatMessage[] = [
+    ...messages,
+    { role: "assistant", content: first.text.slice(0, MAX_ECHOED_ANSWER_CHARS) },
+    {
+      role: "user",
+      content: `Your previous answer could not be used because it failed validation:\n${firstCheck.issues}\n\nReply with only the corrected JSON object. No prose, no code fences.`,
+    },
+  ];
+  const second = await callModel(ctx, request(repairHistory));
+  const secondCheck = validate(options.schema, second);
+  if (secondCheck.ok) return { value: secondCheck.value, repaired: true, calls: [first, second] };
+  throw new StructuredOutputError(
+    "Model output failed validation after one repair attempt",
+    secondCheck.issues,
+  );
+}

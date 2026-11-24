@@ -40,6 +40,7 @@ export const ProviderConfigSchema = z.strictObject({
     .strictObject({
       requestsPerMinute: z.number().positive().optional(),
       tokensPerMinute: z.number().positive().optional(),
+      maxConcurrent: z.number().int().positive().optional(),
     })
     .optional(),
   pricing: z.record(z.string(), ModelPriceSchema).optional(),
@@ -48,12 +49,19 @@ export const ProviderConfigSchema = z.strictObject({
 });
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
+export const REASONING_EFFORTS = ["low", "medium", "high"] as const;
+export const ReasoningEffortSchema = z.enum(REASONING_EFFORTS);
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
+
 export const RoleEntrySchema = z.strictObject({
   provider: z.string().min(1),
   model: z.string().min(1),
   contextWindow: z.number().int().positive(),
   supportsTools: z.boolean(),
   quirks: z.array(z.string().min(1)).optional(),
+  reasoningEffort: ReasoningEffortSchema.optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+  interactive: z.boolean().optional(),
   unverified: z.boolean().optional(),
 });
 export type RoleEntry = z.infer<typeof RoleEntrySchema>;
@@ -121,6 +129,9 @@ export function parseModelsConfig(input: unknown): ModelsConfig {
   return ModelsConfigSchema.parse(input);
 }
 
+export const LATENCY_MODES = ["interactive", "offline"] as const;
+export type LatencyMode = (typeof LATENCY_MODES)[number];
+
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export interface ChainContext {
@@ -130,6 +141,7 @@ export interface ChainContext {
   classification: DataClassification;
   byokKeys?: Readonly<Record<string, string | undefined>>;
   localOptIn?: boolean;
+  latency?: LatencyMode;
 }
 
 export interface ChainEntry {
@@ -139,6 +151,9 @@ export interface ChainEntry {
   contextWindow: number;
   supportsTools: boolean;
   quirks: string[];
+  reasoningEffort?: ReasoningEffort;
+  maxOutputTokens?: number;
+  interactive: boolean;
   unverified: boolean;
 }
 
@@ -198,7 +213,10 @@ export function isProviderAvailable(
 export function resolveChain(role: ModelRole, env: Env, context: ChainContext): ChainEntry[] {
   const providers = new Map(context.config.providers.map((provider) => [provider.id, provider]));
   const chain: ChainEntry[] = [];
+  const offline = context.latency === "offline";
   for (const entry of context.config.roles[role]) {
+    const interactive = entry.interactive !== false;
+    if (!interactive && !offline) continue;
     const provider = providers.get(entry.provider);
     if (provider === undefined || !isProviderAvailable(provider, env, context)) continue;
     chain.push({
@@ -208,6 +226,9 @@ export function resolveChain(role: ModelRole, env: Env, context: ChainContext): 
       contextWindow: entry.contextWindow,
       supportsTools: entry.supportsTools,
       quirks: entry.quirks ?? [],
+      ...(entry.reasoningEffort === undefined ? {} : { reasoningEffort: entry.reasoningEffort }),
+      ...(entry.maxOutputTokens === undefined ? {} : { maxOutputTokens: entry.maxOutputTokens }),
+      interactive,
       unverified: entry.unverified === true || provider.unverified === true,
     });
   }

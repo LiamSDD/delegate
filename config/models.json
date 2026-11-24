@@ -10,21 +10,11 @@
       "terms": "public-demo-ok",
       "maxClassification": "public",
       "dataPolicy": "Community-run anonymous tier; retention and training terms not yet verified. Treat as public: never send confidential data.",
-      "limits": { "requestsPerMinute": 4 },
-      "unverified": true,
-      "notes": "Classic OpenAI-compatible text endpoint. Base URL, path, model aliases, tool calling and anonymous limits to be confirmed by pnpm smoke in M1."
-    },
-    {
-      "id": "llm7",
-      "kind": "openai-compatible",
-      "baseUrl": "https://api.llm7.io/v1",
-      "keyless": true,
-      "terms": "public-demo-ok",
-      "maxClassification": "public",
-      "dataPolicy": "Community-run anonymous access; retention and training terms not yet verified. Treat as public: never send confidential data.",
-      "limits": { "requestsPerMinute": 20 },
-      "unverified": true,
-      "notes": "Anonymous access without a token. Model IDs and limits to be confirmed by pnpm smoke in M1."
+      "limits": {
+        "requestsPerMinute": 1.5,
+        "maxConcurrent": 1
+      },
+      "notes": "Classic OpenAI-compatible text endpoint. Probed 2026-11-24: model \"openai\" serves gpt-oss-20b with tool calling, streaming and usage incl. cached tokens; streamed reasoning arrives in delta.reasoning. \"openai-fast\" returns 402 and is not used. Concurrent anonymous requests were answered with 429 (no retry-after) on 2026-11-24, so calls are serialised. Completions stop at 1500 tokens including reasoning (observed), and calls after the first in a run were answered about 40 s apart, so the router spaces requests at 1.5 per minute."
     },
     {
       "id": "webllm",
@@ -55,9 +45,10 @@
       "terms": "evaluation-only",
       "maxClassification": "public",
       "dataPolicy": "NVIDIA API catalog trial terms: development and evaluation, not production. Owner evals and recordings only.",
-      "limits": { "requestsPerMinute": 40 },
-      "unverified": true,
-      "notes": "About 40 RPM per key (unofficial)."
+      "limits": {
+        "requestsPerMinute": 40
+      },
+      "notes": "About 40 RPM per key (unofficial). Probed 2026-11-24 with a streaming tool-calling request (pnpm --filter @delegate/runtime live:nvidia): nemotron-3-ultra-550b-a55b and mistral-large-4-1t-a52b answer with a correct tool call in 1-4 s; nemotron-3.5-lightning-30b-a3b in under 0.5 s; kimi-k3.1-pro gave no first token within 75 s (3-4 min observed), so it is interactive: false and used only by offline runs. kimi-k3, deepseek-v4-pro and glm-5.3 return 410 and were removed. Used only when NVIDIA_API_KEY is set; evaluation-only terms keep it out of the public demo."
     },
     {
       "id": "groq",
@@ -68,7 +59,10 @@
       "terms": "public-demo-ok",
       "maxClassification": "internal",
       "dataPolicy": "Zero data retention can be enabled in the Groq console.",
-      "limits": { "requestsPerMinute": 30, "tokensPerMinute": 8000 }
+      "limits": {
+        "requestsPerMinute": 30,
+        "tokensPerMinute": 8000
+      }
     },
     {
       "id": "cerebras",
@@ -79,7 +73,9 @@
       "terms": "public-demo-ok",
       "maxClassification": "internal",
       "dataPolicy": "No training on customer data, per Cerebras documentation.",
-      "limits": { "requestsPerMinute": 30 },
+      "limits": {
+        "requestsPerMinute": 30
+      },
       "unverified": true,
       "notes": "Per-model limits differ (qwen up to 300 RPM); 30 RPM is a conservative provider-wide bucket."
     },
@@ -92,7 +88,9 @@
       "terms": "public-demo-ok",
       "maxClassification": "public",
       "dataPolicy": "Data policy depends on the upstream provider serving the :free model.",
-      "limits": { "requestsPerMinute": 20 }
+      "limits": {
+        "requestsPerMinute": 20
+      }
     },
     {
       "id": "cloudflare",
@@ -140,18 +138,34 @@
   "roles": {
     "planner": [
       {
-        "provider": "pollinations",
-        "model": "openai",
-        "contextWindow": 32000,
+        "provider": "nvidia",
+        "model": "moonshotai/kimi-k3.1-pro",
+        "contextWindow": 256000,
+        "supportsTools": true,
+        "quirks": ["echo-reasoning-content"],
+        "reasoningEffort": "low",
+        "interactive": false
+      },
+      {
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "contextWindow": 128000,
         "supportsTools": true,
         "unverified": true
       },
       {
-        "provider": "llm7",
-        "model": "gpt-oss-120b",
-        "contextWindow": 32000,
+        "provider": "nvidia",
+        "model": "mistralai/mistral-large-4-1t-a52b",
+        "contextWindow": 128000,
         "supportsTools": true,
         "unverified": true
+      },
+      {
+        "provider": "pollinations",
+        "model": "openai",
+        "contextWindow": 32000,
+        "supportsTools": true,
+        "maxOutputTokens": 1500
       },
       {
         "provider": "webllm",
@@ -167,21 +181,6 @@
         "contextWindow": 32768,
         "supportsTools": true,
         "quirks": ["num-ctx-must-be-set"],
-        "unverified": true
-      },
-      {
-        "provider": "nvidia",
-        "model": "moonshotai/kimi-k3",
-        "contextWindow": 256000,
-        "supportsTools": true,
-        "quirks": ["echo-reasoning-content"],
-        "unverified": true
-      },
-      {
-        "provider": "nvidia",
-        "model": "deepseek-ai/deepseek-v4-pro",
-        "contextWindow": 128000,
-        "supportsTools": true,
         "unverified": true
       },
       {
@@ -209,18 +208,25 @@
     ],
     "worker": [
       {
-        "provider": "pollinations",
-        "model": "openai",
-        "contextWindow": 32000,
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "contextWindow": 128000,
         "supportsTools": true,
         "unverified": true
       },
       {
-        "provider": "llm7",
-        "model": "gpt-oss-120b",
-        "contextWindow": 32000,
+        "provider": "nvidia",
+        "model": "mistralai/mistral-large-4-1t-a52b",
+        "contextWindow": 128000,
         "supportsTools": true,
         "unverified": true
+      },
+      {
+        "provider": "pollinations",
+        "model": "openai",
+        "contextWindow": 32000,
+        "supportsTools": true,
+        "maxOutputTokens": 1500
       },
       {
         "provider": "webllm",
@@ -244,13 +250,6 @@
         "contextWindow": 131072,
         "supportsTools": true,
         "quirks": ["free-tier-8k-tpm"]
-      },
-      {
-        "provider": "nvidia",
-        "model": "z-ai/glm-5.3",
-        "contextWindow": 128000,
-        "supportsTools": true,
-        "unverified": true
       },
       {
         "provider": "cerebras",
@@ -277,18 +276,18 @@
     ],
     "fast": [
       {
-        "provider": "pollinations",
-        "model": "openai-fast",
-        "contextWindow": 32000,
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "contextWindow": 65536,
         "supportsTools": true,
         "unverified": true
       },
       {
-        "provider": "llm7",
-        "model": "gpt-oss-20b",
+        "provider": "pollinations",
+        "model": "openai",
         "contextWindow": 32000,
         "supportsTools": true,
-        "unverified": true
+        "maxOutputTokens": 1500
       },
       {
         "provider": "webllm",

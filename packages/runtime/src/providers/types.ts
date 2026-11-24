@@ -35,6 +35,7 @@ export interface ModelRequest {
   responseFormat?: ResponseFormat;
   temperature?: number;
   quirks?: readonly string[];
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 export interface TokenUsage {

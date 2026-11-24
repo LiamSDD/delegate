@@ -12,15 +12,23 @@
     "./telemetry": {
       "types": "./src/telemetry.ts",
       "default": "./src/telemetry.ts"
+    },
+    "./server": {
+      "types": "./src/server.ts",
+      "default": "./src/server.ts"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke": "vitest run --config vitest.live.config.ts src/live/smoke.live.test.ts",
+    "live:xray": "vitest run --config vitest.live.config.ts src/live/company-xray.live.test.ts",
+    "live:nvidia": "vitest run --config vitest.live.config.ts src/live/nvidia-discovery.live.test.ts"
   },
   "dependencies": {
+    "@delegate/policy": "workspace:*",
     "@anthropic-ai/sdk": "catalog:",
     "@opentelemetry/api": "catalog:",
     "@opentelemetry/context-async-hooks": "catalog:",

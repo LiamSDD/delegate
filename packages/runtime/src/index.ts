@@ -6,3 +6,11 @@ export * from "./budget";
 export * from "./router";
 export * from "./prompts";
 export * from "./providers";
+export * from "./missions";
+export {
+  SOURCE_KINDS,
+  SourceKindSchema,
+  SourceRecordSchema,
+  type SourceKind,
+  type SourceRecord,
+} from "./tools/sources";

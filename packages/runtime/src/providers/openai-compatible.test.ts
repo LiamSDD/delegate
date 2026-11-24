@@ -364,6 +364,19 @@ describe("OpenAI-compatible adapter", () => {
     });
   });
 
+  it("sends reasoning_effort only when the chain entry sets it", async () => {
+    const captured: Captured[] = [];
+    const provider = createOpenAICompatibleProvider({
+      id: "nvidia",
+      baseUrl: "https://nvidia.test/v1",
+      fetch: fakeFetch(() => sseResponse(fixture("text.sse")), captured),
+    });
+    await collect(provider.stream({ ...request, reasoningEffort: "low" }));
+    await collect(provider.stream(request));
+    expect(captured[0]?.body.reasoning_effort).toBe("low");
+    expect("reasoning_effort" in (captured[1]?.body ?? {})).toBe(false);
+  });
+
   it("assembles multiple interleaved tool calls and reasoning", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "nvidia",

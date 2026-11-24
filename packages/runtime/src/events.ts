@@ -100,6 +100,10 @@ export const UsageSchema = z.object({
 });
 export type Usage = z.infer<typeof UsageSchema>;
 
+export const CRITIC_CATEGORIES = ["claim", "uncited", "injection_suspected"] as const;
+export const CriticCategorySchema = z.enum(CRITIC_CATEGORIES);
+export type CriticCategory = z.infer<typeof CriticCategorySchema>;
+
 export const PolicyDecisionKindSchema = z.enum(["allow", "deny", "require_approval"]);
 export type PolicyDecisionKind = z.infer<typeof PolicyDecisionKindSchema>;
 
@@ -162,7 +166,11 @@ export const RunEventSchema = z.discriminatedUnion("type", [
   event("plan.proposed", z.object({ version: z.number().int().positive(), steps: planSteps })),
   event(
     "plan.approved",
-    z.object({ version: z.number().int().positive(), approvedBy: ActorSchema }),
+    z.object({
+      version: z.number().int().positive(),
+      approvedBy: ActorSchema,
+      reason: z.string().min(1).optional(),
+    }),
   ),
   event(
     "plan.revised",
@@ -202,7 +210,13 @@ export const RunEventSchema = z.discriminatedUnion("type", [
   ),
   event(
     "artifact.created",
-    z.object({ artifactId: id, kind: id, title: z.string().min(1), version: z.literal(1) }),
+    z.object({
+      artifactId: id,
+      kind: id,
+      title: z.string().min(1),
+      version: z.literal(1),
+      content: z.unknown().optional(),
+    }),
   ),
   event(
     "artifact.updated",
@@ -210,6 +224,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       artifactId: id,
       version: z.number().int().min(2),
       title: z.string().min(1).optional(),
+      content: z.unknown().optional(),
     }),
   ),
   event(
@@ -220,6 +235,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       reason: z.string().min(1),
       severity: z.enum(["info", "warn", "error"]),
       sourceId: id.optional(),
+      category: CriticCategorySchema.optional(),
     }),
   ),
   event(
@@ -258,6 +274,9 @@ export const RunEventSchema = z.discriminatedUnion("type", [
 
 export type RunEvent = z.infer<typeof RunEventSchema>;
 export type RunEventOf<T extends RunEventType> = Extract<RunEvent, { type: T }>;
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+export type RunEventDraft = DistributiveOmit<RunEvent, "seq" | "at">;
 
 export function parseRunEvent(input: unknown): RunEvent {
   return RunEventSchema.parse(input);
