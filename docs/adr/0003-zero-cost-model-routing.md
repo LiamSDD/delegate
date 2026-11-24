@@ -1,4 +1,4 @@
-# ADR 0003: Zero-cost model routing across free open-weight providers
+# ADR 0003: Zero-cost, keyless-first model routing
 
 - Status: Accepted
 - Date: 2026-11-24
@@ -37,3 +37,17 @@ The owner runs Delegate for $0, indefinitely: no paid API, no card on file. Dele
 - Prompt caching is provider-dependent; the cache hit rate is reported where the provider exposes it and shown as "n/a" otherwise, never estimated.
 - Claude-specific features (server-side web search, Claude Agent SDK) are not used on the default path. Web research uses keyless sources (ADR 0004, M1). The Engineer sub-agent (M5) will be redesigned on the hand-written runtime with a free sandbox option; a new ADR will record that.
 - Data-use differs by provider; `docs/SECURITY.md` lists it, and the policy engine can block providers for workspaces that classify data as confidential.
+
+## Amendment (2026-11-24, same day): keyless first, no hosted CI
+
+The owner will not create provider accounts or manage keys, so the default path must need **no keys at all**. Chain order per role:
+
+1. **Keyless hosted open models:** Pollinations classic text endpoint (tool-capable gpt-oss) and LLM7 anonymous access, both OpenAI-compatible. Community-run, smaller models, limits change without notice; verified with `pnpm smoke` before demos.
+2. **In-browser models:** WebLLM on WebGPU (Chrome/Edge), with OpenAI-style function calling; runs on the visitor's GPU, keyless and private ("Private mode"). Small models, so used for the fast role and as the last fallback.
+3. **Local Ollama:** keyless; self-hosting, owner evals and demo recordings.
+4. **Optional free-tier keys** (NVIDIA Kimi K3, Groq, Cerebras, OpenRouter, Cloudflare): supported by the same adapter, used only if their env vars are present. The owner may add them later; nothing depends on them.
+5. **BYOK Claude.**
+
+Quality on the keyless path is lower than Kimi K3 or Claude; evals record the serving model so this is visible, never hidden.
+
+There is no hosted CI. `pnpm check` (typecheck, lint, test, build) runs locally and in a pre-push hook; `pnpm gate` adds evals and the red-team suite; the `code-reviewer` and `security-reviewer` agents review changes locally.

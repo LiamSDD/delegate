@@ -16,3 +16,8 @@ Append one entry per completed task: date, shipped, next, known issues, metrics.
 - **Research sources (read 2026-11-24):** NVIDIA NIM catalog and Kimi K3 card (docs.api.nvidia.com), OpenRouter limits and privacy docs, Groq rate limits and data docs, Cerebras rate limits and models, Cloudflare Workers AI pricing, Z.ai pricing, Tavily/Jina/Brave search docs. Retired in 2026: GitHub Models (2026-07-30), Hugging Face free credits, Chutes free tier.
 - **Unverified (check in M1 with real keys):** actual NVIDIA limits, Cerebras/Groq card requirements, Kimi tool calling on Cloudflare, Z.ai limits.
 - **Next:** owner approval of the revised M0 plan.
+
+## 2026-11-24 · Keyless default and no hosted CI
+
+- **Decided:** no hosted CI (local `pnpm check` + pre-push hook, `pnpm gate` for evals/red-team). Default inference needs no keys: keyless hosted open models (Pollinations, LLM7) → in-browser WebLLM → local Ollama; free-tier keys and BYOK Claude are optional extras. ADR 0003 amended.
+- **To verify in M1:** current Pollinations/LLM7 endpoints, limits, terms and tool calling; WebLLM model list with function calling.

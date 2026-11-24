@@ -108,9 +108,14 @@ The agent runtime is written by hand on the Anthropic TypeScript SDK (Messages A
 
 ### 2. Model routing (zero-cost, see ADR 0003)
 
-**Operating constraint: the owner spends $0, forever.** No paid API, no card on file. Default inference runs on free tiers of hosted open-weight models; Claude is an optional bring-your-own-key provider.
+**Operating constraint: the owner spends $0, forever, and works keyless by default.** No paid API, no card on file, no accounts needed to run the product. Claude is an optional bring-your-own-key provider.
 
-- The runtime asks for roles (`planner`, `worker`, `fast`); `config/models.json` maps each role to an ordered fallback chain across free providers (NVIDIA API catalog with Kimi K3 / DeepSeek V4 Pro / GLM-5.3, Groq, Cerebras, OpenRouter free models, Cloudflare Workers AI).
+- The runtime asks for roles (`planner`, `worker`, `fast`); `config/models.json` maps each role to an ordered fallback chain:
+  1. **Keyless hosted open models** (default for the public demo): Pollinations (classic endpoint) and LLM7 anonymous access, OpenAI-compatible, tool-capable models such as gpt-oss.
+  2. **In-browser models** (WebLLM on WebGPU): run on the visitor's GPU, keyless and private; "Private mode" in the UI.
+  3. **Local models** (Ollama) for self-hosting, owner evals and demo recordings.
+  4. **Optional free-tier keys** the owner may add later (NVIDIA Kimi K3 / DeepSeek V4 Pro / GLM-5.3, Groq, Cerebras, OpenRouter `:free`, Cloudflare); unused unless present in env.
+  5. **BYOK Claude** for visitors or self-hosters with their own key.
 - A router handles per-provider rate limits, `retry-after`, context-window checks and health, and emits `model.fallback` events so every step shows which model served it.
 - `ModelProvider` has two adapters: OpenAI-compatible (all free providers) and Anthropic (BYOK, used when a visitor or self-hoster supplies a Claude key; Bedrock and Vertex later through the same interface).
 - The public demo uses providers whose terms allow it, with per-visitor quotas and a designed "free capacity used up" state. NVIDIA's trial tier is used for owner-run evals and recordings only.
@@ -161,7 +166,7 @@ Versions checked on 2026-11-24 (re-check before upgrading):
 | App | Next.js 16.4 (App Router, RSC, Route Handlers), React 19.3, TypeScript strict, pnpm monorepo + Turborepo 2.11 |
 | Packages | `apps/web`, `packages/runtime`, `packages/policy`, `packages/sdk`, `packages/mcp-server`, `packages/cli`, `packages/evals` |
 | UI | Tailwind CSS 4.3 + shadcn/ui, Motion 14, Recharts 3 |
-| AI | OpenAI-compatible HTTP adapter for free providers (NVIDIA, Groq, Cerebras, OpenRouter, Cloudflare); `@anthropic-ai/sdk` 1.13 for BYOK Claude; `@modelcontextprotocol/sdk` 1.32 (protocol 2025-11-25) |
+| AI | OpenAI-compatible HTTP adapter (keyless Pollinations / LLM7, local Ollama, optional free-tier keys); `@mlc-ai/web-llm` for in-browser models; `@anthropic-ai/sdk` 1.13 for BYOK Claude; `@modelcontextprotocol/sdk` 1.32 (protocol 2025-11-25) |
 | Research sources | Keyless only: the company's own site, sitemap and RSS, Wikipedia/Wikidata, GitHub public API; Jina Reader (keyless) for clean page text |
 | Data and jobs | Postgres on Neon free tier + Drizzle ORM 0.45 + pgvector, Inngest free tier, Upstash Redis free tier (rate limits, quotas); sandbox behind an interface (free option decided in M5) |
 | Cost | $0: Vercel Hobby, Neon, Inngest, Upstash and every model provider on free tiers, no card on file |
@@ -194,7 +199,7 @@ Evals start in M1.
 - **Trajectory evals:** right tools used, wasted steps, redundant searches, attempted policy violations.
 - **Statistics:** at least 3 trials per case, mean ± 95% CI; regressions only when statistically meaningful.
 - **Comparisons:** model × prompt-version matrix with the cost-quality Pareto chart; Message Batches API for cheap bulk runs.
-- **CI gate:** a PR fails if quality drops beyond the threshold, the attack success rate rises above 0%, or cost per mission rises more than 20%.
+- **Local gate (`pnpm gate`, run before every merge; no hosted CI):** a change is rejected if quality drops beyond the threshold, the attack success rate rises above 0%, or cost per mission rises more than 20%.
 - **Production feedback:** thumbs and corrections on deliverables are saved and can be promoted to eval cases.
 
 | Metric | Target |
@@ -207,7 +212,7 @@ Evals start in M1.
 | Eval pass rate | ≥ 85% |
 | Attack success rate | 0% |
 | Cache hit rate on repeated missions | ≥ 60% where the provider reports caching; "n/a" otherwise |
-| Provider smoke test | Every configured model passes daily, or is removed from its chain |
+| Provider smoke test | Every configured model passes `pnpm smoke` before each demo and each merge touching the runtime, or is removed from its chain |
 
 **Honesty:** never fake live output or hard-code AI responses in product paths. Demo fallbacks are real recorded runs, visibly labelled "Replay". Every estimate shows its assumptions.
 
@@ -218,8 +223,8 @@ Part of the portfolio; set up in M0 and kept sharp:
 - `CLAUDE.md` under 150 lines (role, session routine, definition of done, rules, commands); nested `CLAUDE.md` where package conventions differ.
 - `.claude/commands/`: `next-task`, `verify`, `eval`, `redteam`, `demo-check`, `adr`.
 - `.claude/agents/`: `code-reviewer`, `security-reviewer` (checks against `docs/SECURITY.md`), `eval-analyst`, `ux-critic` (Playwright screenshots at desktop and mobile, critiqued against the design direction).
-- Hooks: fast typecheck and lint on edited files; block commits containing secrets.
-- CI: a GitHub Action running Claude Code headless to review every PR against `CLAUDE.md` and `docs/SECURITY.md`.
+- Hooks: fast typecheck and lint on edited files; block commits containing secrets; pre-push runs `pnpm check`.
+- No hosted CI (owner decision): the `code-reviewer` and `security-reviewer` agents review every change locally against `CLAUDE.md` and `docs/SECURITY.md` before merge.
 - Git worktrees and parallel sub-agents for independent workstreams.
 
 ## Engineering rules
@@ -249,13 +254,13 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 
 ### M0 · Foundation
 - [ ] Monorepo (pnpm + Turborepo) with `apps/web` and the six packages
-- [ ] CI: typecheck, lint, test, build
+- [ ] Local quality gate (no hosted CI): `pnpm check` runs typecheck, lint, test and build; a git pre-push hook runs it
 - [ ] Drizzle schema: orgs, workspaces, members, runs, run_events, artifacts, approvals, audit_log, policies, memories, documents, chunks (pgvector); RLS policies and migration
 - [ ] Typed `RunEvent` union, `models.ts`, budget module, policy-engine skeleton, OpenTelemetry setup
 - [ ] Design tokens and the home page shell
 - [ ] `docs/`: ARCHITECTURE, SECURITY, adr/, PROGRESS, DEMO_SCRIPT
-- [ ] Claude Code workflow: CLAUDE.md, commands, agents, hooks, headless review Action
-- [ ] *Done when:* CI is green, the app is deployed, and the home page already looks premium
+- [ ] Claude Code workflow: CLAUDE.md, commands, agents, hooks (secret scan, pre-push `pnpm check`)
+- [ ] *Done when:* `pnpm check` is green, the app is deployed, and the home page already looks premium
 
 ### M1 · Agent runtime + Company X-ray
 - [ ] Explicit streaming tool-use loop; `web_search` (server tool), `web_fetch`, quarantined reader, `extract`
@@ -265,7 +270,7 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 
 ### M2 · Multi-agent + Automation Audit
 - [ ] Planner DAG with approve/edit, dynamic replanning, parallel lanes, critic with claim verification
-- [ ] Audit with interactive ROI model; exports; next actions; trace waterfall; CI eval gate
+- [ ] Audit with interactive ROI model; exports; next actions; trace waterfall; local eval gate (`pnpm gate`)
 - [ ] *Done when:* the X-ray → Audit chain gives company-specific results for 5 very different companies
 
 ### M3 · Build-it + durability + human-in-the-loop
@@ -274,7 +279,7 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 - [ ] *Done when:* **Demo A works end to end** and killing the server mid-run still completes the run
 
 ### M4 · Trust layer
-- [ ] Policy engine fully enforced, audit log, red-team suite in CI, PII redaction
+- [ ] Policy engine fully enforced, audit log, red-team suite in the local gate, PII redaction
 - [ ] Deterministic replay, fork-from-step, run compare
 - [ ] `/evals` with CIs, Pareto chart and judge calibration
 - [ ] *Done when:* attack success rate is 0% and a fork-and-diff starts in under 10 s

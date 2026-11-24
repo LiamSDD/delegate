@@ -40,10 +40,10 @@ You are the principal AI engineer, platform architect and product designer on th
 
 ## Model facts that bite
 
-- **$0 operating constraint (ADR 0003).** No paid API, ever. Default inference is free open-weight models; Claude is BYOK only. Never add a dependency, service or default that costs money.
-- The runtime asks for roles (`planner`, `worker`, `fast`); `config/models.json` maps roles to fallback chains (NVIDIA Kimi K3 / DeepSeek V4 Pro / GLM-5.3, Groq, Cerebras, OpenRouter `:free`, Cloudflare). Never hard-code a model ID elsewhere.
-- Free tiers are small and change often: respect `retry-after`, check context windows before routing (Groq 8K TPM, Cerebras free 64k context), emit `model.fallback`, keep the daily smoke test green.
-- NVIDIA's free tier is trial/evaluation only: owner evals and recordings may use it; the public guest workspace must not by default.
+- **$0 and keyless by default (ADR 0003).** No paid API, no accounts required. Chain order: keyless hosted (Pollinations, LLM7) → in-browser WebLLM → local Ollama → optional free-tier keys if present in env → BYOK Claude. Never add a dependency, service or default that costs money or needs an account.
+- The runtime asks for roles (`planner`, `worker`, `fast`); `config/models.json` maps roles to chains. Never hard-code a model ID elsewhere.
+- Keyless services are community-run and change often: respect `retry-after`, check context windows before routing, emit `model.fallback`, run `pnpm smoke` before demos.
+- No hosted CI: `pnpm check` (and the pre-push hook) is the gate; reviewers are the local agents.
 - Kimi models expect reasoning content and tool calls echoed back on the next turn; provider quirks live in adapters with tests.
 - Anthropic BYOK path: Opus 5.5 / Sonnet 5.5 reject forced `tool_choice` (use `auto` + `strict`, or structured outputs); Opus 5.5 thinking can't be disabled (use `effort`); check `stop_reason` (`refusal`, `max_tokens`, `pause_turn`).
 - Research is keyless: company site, sitemap, RSS, Wikipedia/Wikidata, GitHub API, Jina Reader. No scraping of search engines.
