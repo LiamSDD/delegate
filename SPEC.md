@@ -269,8 +269,8 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 - [ ] *Done when:* a real URL gives a cited brief under the targets, reloading resumes the stream, and the evals run
 
 ### M2 · Multi-agent + Automation Audit
-- [ ] Planner DAG with approve/edit, dynamic replanning, parallel lanes, critic with claim verification
-- [ ] Audit with interactive ROI model; exports; next actions; trace waterfall; local eval gate (`pnpm gate`)
+- [x] Planner DAG with approve/edit, dynamic replanning, parallel lanes, critic with claim verification
+- [x] Audit with interactive ROI model; exports; next actions; trace waterfall; local eval gate (`pnpm gate`)
 - [ ] *Done when:* the X-ray → Audit chain gives company-specific results for 5 very different companies
 
 ### M3 · Build-it + durability + human-in-the-loop
