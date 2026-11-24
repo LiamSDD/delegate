@@ -152,6 +152,29 @@ function stepEvent<T extends RunEventType, P extends z.ZodType>(type: T, payload
 
 const planSteps = PlanStepsSchema;
 
+export const PlanDiffSchema = z.object({
+  added: z.array(id),
+  removed: z.array(id),
+  changed: z.array(id),
+});
+
+export const PLAN_SOURCES = ["planner", "default", "reviewer"] as const;
+export const PlanSourceSchema = z.enum(PLAN_SOURCES);
+export type PlanSource = z.infer<typeof PlanSourceSchema>;
+
+export const CriticReportSchema = z.object({
+  claimsChecked: tokenCount,
+  supported: tokenCount,
+  fixed: tokenCount,
+  weak: tokenCount.optional(),
+  removed: tokenCount,
+  unverified: tokenCount,
+  fixLoops: tokenCount,
+  citationAccuracy: z.number().min(0).max(1).nullable(),
+  draftCitationAccuracy: z.number().min(0).max(1).nullable(),
+});
+export type CriticReport = z.infer<typeof CriticReportSchema>;
+
 export const RunEventSchema = z.discriminatedUnion("type", [
   event(
     "run.created",
@@ -163,7 +186,15 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       budget: z.object({ maxTokens: tokenCount, maxMicroUsd: MicroUsdSchema }),
     }),
   ),
-  event("plan.proposed", z.object({ version: z.number().int().positive(), steps: planSteps })),
+  event(
+    "plan.proposed",
+    z.object({
+      version: z.number().int().positive(),
+      steps: planSteps,
+      source: PlanSourceSchema.optional(),
+      rationale: z.string().max(2000).optional(),
+    }),
+  ),
   event(
     "plan.approved",
     z.object({
@@ -174,7 +205,13 @@ export const RunEventSchema = z.discriminatedUnion("type", [
   ),
   event(
     "plan.revised",
-    z.object({ version: z.number().int().positive(), steps: planSteps, reason: z.string().min(1) }),
+    z.object({
+      version: z.number().int().positive(),
+      steps: planSteps,
+      reason: z.string().min(1),
+      diff: PlanDiffSchema.optional(),
+      source: PlanSourceSchema.optional(),
+    }),
   ),
   stepEvent("step.started", z.object({})),
   stepEvent(
@@ -265,6 +302,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       summary: z.string(),
       confidence: z.number().min(0).max(1).optional(),
       artifactIds: z.array(id),
+      critic: CriticReportSchema.optional(),
     }),
   ),
   event("run.completed", z.object({ summary: z.string() })),
@@ -282,11 +320,7 @@ export function parseRunEvent(input: unknown): RunEvent {
   return RunEventSchema.parse(input);
 }
 
-export interface PlanDiff {
-  added: string[];
-  removed: string[];
-  changed: string[];
-}
+export type PlanDiff = z.infer<typeof PlanDiffSchema>;
 
 export function diffPlans(previous: readonly PlanStep[], next: readonly PlanStep[]): PlanDiff {
   const before = new Map(previous.map((step) => [step.id, step]));

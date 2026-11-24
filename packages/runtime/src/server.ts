@@ -6,7 +6,7 @@ import { defaultPolicy, ownerDefaultPolicy } from "@delegate/policy";
 import { createRunContext, type Audience } from "./agent/context";
 import { createRunEmitter } from "./agent/emitter";
 import { Budget, type RunBudgetLimits } from "./budget";
-import { type RunEventDraft } from "./events";
+import { type Actor, type RunEventDraft } from "./events";
 import {
   parseModelsConfig,
   resolveBaseUrl,
@@ -16,8 +16,9 @@ import {
   type ModelsConfig,
 } from "./models";
 import { MISSIONS, type MissionId } from "./missions";
-import { XRAY_PLAN } from "./missions/company-xray/plan";
-import { runCompanyXray, type CompanyXrayPrompts } from "./missions/company-xray/run";
+import { runAutomationAudit } from "./missions/automation-audit/run";
+import { runCompanyXray } from "./missions/company-xray/run";
+import { type AwaitPlanApproval } from "./plan-approval";
 import { parsePromptFile, type PromptFile } from "./prompts";
 import { createAnthropicProvider } from "./providers/anthropic";
 import { createOpenAICompatibleProvider } from "./providers/openai-compatible";
@@ -41,9 +42,25 @@ export interface RunMissionOptions {
   sleep?: (ms: number) => Promise<void>;
   workspaceId?: string;
   modelsConfig?: unknown;
-  prompts?: CompanyXrayPrompts;
+  prompts?: Partial<RuntimePrompts>;
   latency?: LatencyMode;
+  awaitPlanApproval?: AwaitPlanApproval;
+  planApprover?: Actor;
+  concurrency?: number;
 }
+
+export const RUNTIME_PROMPT_FILES = {
+  reader: "quarantine-reader.v1.md",
+  researcher: "company-xray.researcher.v1.md",
+  synthesis: "company-xray.synthesis.v1.md",
+  planner: "planner.v2.md",
+  critic: "critic.v1.md",
+  editor: "editor.v1.md",
+  analyst: "automation-audit.analyst.v1.md",
+  auditEditor: "automation-audit.editor.v1.md",
+} as const;
+
+export type RuntimePrompts = Record<keyof typeof RUNTIME_PROMPT_FILES, PromptFile>;
 
 export interface RunMissionResult {
   status: "completed" | "failed";
@@ -73,12 +90,19 @@ export function loadModelsConfig(override?: unknown): ModelsConfig {
   );
 }
 
-export function loadCompanyXrayPrompts(): CompanyXrayPrompts {
-  return {
-    reader: loadPrompt("quarantine-reader.v1.md"),
-    researcher: loadPrompt("company-xray.researcher.v1.md"),
-    synthesis: loadPrompt("company-xray.synthesis.v1.md"),
-  };
+export function loadRuntimePrompts(provided: Partial<RuntimePrompts> = {}): RuntimePrompts {
+  const entries = Object.entries(RUNTIME_PROMPT_FILES) as [keyof RuntimePrompts, string][];
+  return Object.fromEntries(
+    entries.map(([key, file]) => [key, provided[key] ?? loadPrompt(file)]),
+  ) as RuntimePrompts;
+}
+
+export function loadCompanyXrayPrompts(): Pick<
+  RuntimePrompts,
+  "reader" | "researcher" | "synthesis"
+> {
+  const prompts = loadRuntimePrompts();
+  return { reader: prompts.reader, researcher: prompts.researcher, synthesis: prompts.synthesis };
 }
 
 export function createServerProvider(
@@ -152,7 +176,7 @@ export async function runMission(options: RunMissionOptions): Promise<RunMission
     config: loadModelsConfig(options.modelsConfig),
     env: options.env,
     emitter: createRunEmitter(options.emit),
-    budget: Budget.forPlan(RUN_BUDGETS[audience], XRAY_PLAN),
+    budget: new Budget({ run: RUN_BUDGETS[audience] }),
     policies: [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy],
     createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
     environment: "server",
@@ -167,11 +191,18 @@ export async function runMission(options: RunMissionOptions): Promise<RunMission
     now,
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
   });
-  const status = await runCompanyXray({
-    ctx,
-    input: parsed.data,
-    fetcher,
-    prompts: options.prompts ?? loadCompanyXrayPrompts(),
-  });
-  return { status };
+  const prompts = loadRuntimePrompts(options.prompts);
+  const run = {
+    ...(options.awaitPlanApproval === undefined
+      ? {}
+      : { awaitPlanApproval: options.awaitPlanApproval }),
+    ...(options.planApprover === undefined ? {} : { approver: options.planApprover }),
+    ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+  };
+  if (mission.id === "automation-audit") {
+    const input = MISSIONS["automation-audit"].inputSchema.parse(parsed.data);
+    return { status: await runAutomationAudit({ ctx, input, fetcher, prompts, run }) };
+  }
+  const input = MISSIONS["company-xray"].inputSchema.parse(parsed.data);
+  return { status: await runCompanyXray({ ctx, input, fetcher, prompts, run }) };
 }

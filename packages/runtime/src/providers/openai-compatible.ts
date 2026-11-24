@@ -18,6 +18,7 @@ import {
 } from "./types";
 
 export const QUIRK_ECHO_REASONING_CONTENT = "echo-reasoning-content";
+export const QUIRK_DISABLE_THINKING = "disable-thinking";
 
 export interface OpenAICompatibleOptions {
   id: string;
@@ -130,6 +131,8 @@ function toWireBody(request: ModelRequest): Record<string, unknown> {
   };
   if (request.temperature !== undefined) body.temperature = request.temperature;
   if (request.reasoningEffort !== undefined) body.reasoning_effort = request.reasoningEffort;
+  if (request.quirks?.includes(QUIRK_DISABLE_THINKING) === true)
+    body.chat_template_kwargs = { enable_thinking: false };
   if (request.tools !== undefined && request.tools.length > 0) {
     body.tools = request.tools.map((tool) => ({
       type: "function",

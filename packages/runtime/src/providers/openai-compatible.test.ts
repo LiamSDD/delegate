@@ -377,6 +377,19 @@ describe("OpenAI-compatible adapter", () => {
     expect("reasoning_effort" in (captured[1]?.body ?? {})).toBe(false);
   });
 
+  it("turns thinking off through chat_template_kwargs for the disable-thinking quirk", async () => {
+    const captured: Captured[] = [];
+    const provider = createOpenAICompatibleProvider({
+      id: "nvidia",
+      baseUrl: "https://nvidia.test/v1",
+      fetch: fakeFetch(() => sseResponse(fixture("text.sse")), captured),
+    });
+    await collect(provider.stream({ ...request, quirks: ["disable-thinking"] }));
+    await collect(provider.stream(request));
+    expect(captured[0]?.body.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect("chat_template_kwargs" in (captured[1]?.body ?? {})).toBe(false);
+  });
+
   it("assembles multiple interleaved tool calls and reasoning", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "nvidia",

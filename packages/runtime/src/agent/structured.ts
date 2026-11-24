@@ -21,7 +21,7 @@ export class StructuredOutputError extends Error {
 
 export interface StructuredCallOptions<T> {
   role: ModelRole;
-  stepId: string;
+  stepId?: string | undefined;
   system: string;
   user: string;
   schema: z.ZodType<T>;
@@ -43,8 +43,20 @@ function parseStrict(text: string): unknown {
   }
 }
 
+function withoutTrailingCommas(text: string): string {
+  return text.replace(/,\s*([}\]])/g, "$1");
+}
+
+function quoteBareKeys(text: string): string {
+  return text.replace(/([{,]\s*)"?([A-Za-z_][A-Za-z0-9_]*)"?\s*:/g, '$1"$2":');
+}
+
 function tryParse(text: string): unknown {
-  return parseStrict(text) ?? parseStrict(text.replace(/,\s*([}\]])/g, "$1"));
+  return (
+    parseStrict(text) ??
+    parseStrict(withoutTrailingCommas(text)) ??
+    parseStrict(withoutTrailingCommas(quoteBareKeys(text)))
+  );
 }
 
 function closeUnbalanced(text: string): string {

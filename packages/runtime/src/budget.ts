@@ -83,7 +83,7 @@ function remainingOf(limit: number | undefined, spent: number): number {
 export class Budget {
   private readonly runSpent: BudgetAmount = { tokens: 0, microUsd: 0 };
   private readonly stepSpent = new Map<string, BudgetAmount>();
-  private readonly stepLimits: Map<string, BudgetLimits>;
+  private stepLimits: Map<string, BudgetLimits>;
 
   private readonly run: RunBudgetLimits;
 
@@ -105,6 +105,22 @@ export class Budget {
       };
     }
     return new Budget({ run: limits, steps: stepLimits });
+  }
+
+  allocate(steps: readonly { id: string; budgetShare: number }[], minShare = 0): void {
+    const limits = new Map<string, BudgetLimits>();
+    for (const step of steps) {
+      const share = Math.max(step.budgetShare, minShare);
+      limits.set(step.id, {
+        maxTokens: Math.floor(this.run.maxTokens * share),
+        maxMicroUsd: Math.floor(this.run.maxMicroUsd * share),
+      });
+    }
+    this.stepLimits = limits;
+  }
+
+  limits(stepId: string): BudgetLimits | undefined {
+    return this.stepLimits.get(stepId);
   }
 
   spent(stepId?: string): BudgetAmount {

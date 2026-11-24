@@ -1,7 +1,9 @@
 import { type Policy } from "@delegate/policy";
 
 import { type Budget } from "../budget";
+import { type ModelRole } from "../events";
 import {
+  resolveChain,
   type ChainEntry,
   type DataClassification,
   type Env,
@@ -30,6 +32,53 @@ export interface RunContext {
   sleep: (ms: number) => Promise<void>;
   nextId: (prefix: string) => string;
   attributeTo: (stepId: string | undefined) => void;
+  gate: ProviderGate;
+}
+
+export interface ProviderGate {
+  acquire(role: ModelRole): Promise<() => void>;
+}
+
+class Semaphore {
+  private active = 0;
+  private readonly waiting: (() => void)[] = [];
+
+  constructor(private readonly capacity: number) {}
+
+  async acquire(): Promise<() => void> {
+    if (this.active >= this.capacity) {
+      await new Promise<void>((resolve) => this.waiting.push(resolve));
+    } else {
+      this.active += 1;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = this.waiting.shift();
+      if (next === undefined) this.active -= 1;
+      else next();
+    };
+  }
+}
+
+export function createProviderGate(
+  headOf: (role: ModelRole) => ChainEntry | undefined,
+): ProviderGate {
+  const semaphores = new Map<string, Semaphore>();
+  return {
+    acquire(role) {
+      const head = headOf(role);
+      const capacity = head?.provider.limits?.maxConcurrent;
+      if (head === undefined || capacity === undefined) return Promise.resolve(() => undefined);
+      let semaphore = semaphores.get(head.provider.id);
+      if (semaphore === undefined) {
+        semaphore = new Semaphore(capacity);
+        semaphores.set(head.provider.id, semaphore);
+      }
+      return semaphore.acquire();
+    },
+  };
 }
 
 export interface RunContextOptions {
@@ -81,6 +130,14 @@ export function createRunContext(options: RunContextOptions): RunContext {
   const now = options.now ?? (() => new Date());
   let attributedStep: string | undefined;
   const counters = new Map<string, number>();
+  const routing = {
+    config: options.config,
+    audience: options.audience,
+    environment: options.environment ?? "server",
+    classification: options.classification,
+    ...(options.localOptIn === undefined ? {} : { localOptIn: options.localOptIn }),
+    ...(options.latency === undefined ? {} : { latency: options.latency }),
+  } as const;
   const router = new ModelRouter({
     env: options.env,
     context: {
@@ -124,5 +181,6 @@ export function createRunContext(options: RunContextOptions): RunContext {
     attributeTo: (stepId) => {
       attributedStep = stepId;
     },
+    gate: createProviderGate((role) => resolveChain(role, options.env, routing)[0]),
   };
 }

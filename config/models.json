@@ -48,7 +48,7 @@
       "limits": {
         "requestsPerMinute": 40
       },
-      "notes": "About 40 RPM per key (unofficial). Probed 2026-11-24 with a streaming tool-calling request (pnpm --filter @delegate/runtime live:nvidia): nemotron-3-ultra-550b-a55b and mistral-large-4-1t-a52b answer with a correct tool call in 1-4 s; nemotron-3.5-lightning-30b-a3b in under 0.5 s; kimi-k3.1-pro gave no first token within 75 s (3-4 min observed), so it is interactive: false and used only by offline runs. kimi-k3, deepseek-v4-pro and glm-5.3 return 410 and were removed. Used only when NVIDIA_API_KEY is set; evaluation-only terms keep it out of the public demo."
+      "notes": "About 40 RPM per key (unofficial). Probed 2026-11-24 with a streaming tool-calling request (pnpm --filter @delegate/runtime live:nvidia): nemotron-3-ultra-550b-a55b and mistral-large-4-1t-a52b answer with a correct tool call in 1-4 s; nemotron-3.5-lightning-30b-a3b in under 0.5 s; kimi-k3.1-pro gave no first token within 75 s (3-4 min observed), so it is interactive: false and used only by offline runs. kimi-k3, deepseek-v4-pro and glm-5.3 return 410 and were removed. Used only when NVIDIA_API_KEY is set; evaluation-only terms keep it out of the public demo. Probed 2026-11-24 with the quarantine-reader prompt: Nemotron models reason by default and ignore reasoning_effort and /no_think; nemotron-3.5-lightning spent its whole 6,000-token budget reasoning on 3 KB pages, so every reader call failed. chat_template_kwargs.enable_thinking=false (quirk disable-thinking) gives valid JSON in about 1.5 s (Lightning) and 3.7 s (Ultra, down from 12 s). Mistral Large 4 also reasons (about 27 s for the same call) and has no switch configured."
     },
     {
       "id": "groq",
@@ -151,7 +151,8 @@
         "model": "nvidia/nemotron-3-ultra-550b-a55b",
         "contextWindow": 128000,
         "supportsTools": true,
-        "unverified": true
+        "unverified": true,
+        "quirks": ["disable-thinking"]
       },
       {
         "provider": "nvidia",
@@ -212,7 +213,8 @@
         "model": "nvidia/nemotron-3-ultra-550b-a55b",
         "contextWindow": 128000,
         "supportsTools": true,
-        "unverified": true
+        "unverified": true,
+        "quirks": ["disable-thinking"]
       },
       {
         "provider": "nvidia",
@@ -280,7 +282,8 @@
         "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "contextWindow": 65536,
         "supportsTools": true,
-        "unverified": true
+        "unverified": true,
+        "quirks": ["disable-thinking"]
       },
       {
         "provider": "pollinations",

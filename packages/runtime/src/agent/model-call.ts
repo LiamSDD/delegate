@@ -10,7 +10,7 @@ const RATE_LIMIT_SLACK_MS = 50;
 
 export interface ModelCallOptions {
   role: ModelRole;
-  stepId: string;
+  stepId?: string | undefined;
   request: RouterRequest;
   onText?: (text: string) => void;
   onStreamEnd?: () => void;
@@ -94,6 +94,15 @@ export async function callModel(
   ctx: RunContext,
   options: ModelCallOptions,
 ): Promise<ModelCallResult> {
+  const release = await ctx.gate.acquire(options.role);
+  try {
+    return await streamCall(ctx, options);
+  } finally {
+    release();
+  }
+}
+
+async function streamCall(ctx: RunContext, options: ModelCallOptions): Promise<ModelCallResult> {
   ctx.attributeTo(options.stepId);
   const routed = await openPatiently(ctx, options);
   let text = "";
@@ -148,7 +157,7 @@ export async function callModel(
   await ctx.emitter.emit({
     runId: ctx.runId,
     type: "usage.updated",
-    stepId: options.stepId,
+    ...(options.stepId === undefined ? {} : { stepId: options.stepId }),
     payload: usage,
   });
   ctx.budget.charge(usage, options.stepId);

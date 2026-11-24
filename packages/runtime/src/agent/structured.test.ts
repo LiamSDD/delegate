@@ -7,6 +7,16 @@ import { StructuredOutputError, callStructured, extractJson } from "./structured
 const Schema = z.object({ name: z.string(), count: z.number().int() });
 
 describe("extractJson", () => {
+  it("repairs bare and half-quoted keys as a last resort", () => {
+    expect(
+      extractJson(
+        '{"facts":[{"claim":"Collects payments.",quote":"Collect payments.", topic:"offering"}]}',
+      ),
+    ).toEqual({
+      facts: [{ claim: "Collects payments.", quote: "Collect payments.", topic: "offering" }],
+    });
+  });
+
   it.each([
     ['{"a":1}', { a: 1 }],
     ['Here you go:\n```json\n{"a":2}\n```', { a: 2 }],

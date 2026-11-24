@@ -39,9 +39,12 @@ const CitationsSchema = z.preprocess((value) => {
   return Array.isArray(list) ? list.map(cleanCitation).filter((entry) => entry !== "") : list;
 }, z.array(SourceIdSchema).min(1).max(8));
 
+export const ClaimSupportSchema = z.enum(["weak", "unverified"]);
+
 export const ClaimSchema = z.object({
   text: z.string().trim().min(1).max(600),
   citations: CitationsSchema,
+  support: ClaimSupportSchema.optional(),
 });
 export type Claim = z.infer<typeof ClaimSchema>;
 

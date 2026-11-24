@@ -7,6 +7,13 @@ export * from "./router";
 export * from "./prompts";
 export * from "./providers";
 export * from "./missions";
+export * from "./plan-approval";
+export {
+  FindingSchema,
+  SubAgentResultSchema,
+  type Finding,
+  type SubAgentResult,
+} from "./agent/subagent";
 export {
   SOURCE_KINDS,
   SourceKindSchema,

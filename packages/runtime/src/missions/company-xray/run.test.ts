@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
+import { type AwaitPlanApproval } from "../../plan-approval";
 import { runMission } from "../../server";
+import { NextActionsSchema } from "../next-actions";
 import { FIXTURE_ORIGIN, fixtureDns, fixtureFetch } from "../../testing/fixture-site";
 import { CompanyXrayBriefSchema, SECTION_KEYS, type CompanyXrayBrief } from "./brief";
 
@@ -172,6 +174,43 @@ function synthesisReply(user: string): Response {
   return textReply(JSON.stringify(brief));
 }
 
+function plannerReply(user: string): Response {
+  const reference =
+    /## Reference plan[^\n]*\n\n(\{[\s\S]*?\})\n\nReturn only/.exec(user)?.[1] ?? "{}";
+  const { steps } = JSON.parse(reference) as { steps: unknown[] };
+  return textReply(JSON.stringify({ steps, rationale: "The reference plan fits this company." }));
+}
+
+function criticReply(user: string): Response {
+  const results = user
+    .split("\n")
+    .filter((line) => line.startsWith('{"id"'))
+    .map((line) => {
+      const { id, claim } = JSON.parse(line) as { id: string; claim: string };
+      const verdict =
+        id.startsWith("techStack") && !claim.startsWith("Narrowed:")
+          ? "not_enough_info"
+          : "supported";
+      return { id, atoms: [{ text: claim.slice(0, 40), verdict }] };
+    });
+  return textReply(JSON.stringify({ results }));
+}
+
+function editorReply(user: string): Response {
+  const fixes = user
+    .split("\n")
+    .filter((line) => line.startsWith('{"id"'))
+    .map((line) => {
+      const { id, claim, citations } = JSON.parse(line) as {
+        id: string;
+        claim: string;
+        citations: string[];
+      };
+      return { id, action: "rewrite", text: `Narrowed: ${claim}`.slice(0, 500), citations };
+    });
+  return textReply(JSON.stringify({ fixes }));
+}
+
 interface Harness {
   events: RunEvent[];
   requested: string[];
@@ -182,6 +221,7 @@ async function runFixture(
   options: {
     input?: unknown;
     extra?: (url: URL, init: RequestInit | undefined) => Response | undefined;
+    awaitPlanApproval?: AwaitPlanApproval;
   } = {},
 ): Promise<Harness & { status: string }> {
   const providerBodies: WireBody[] = [];
@@ -195,6 +235,9 @@ async function runFixture(
     const system = body.messages[0]?.content ?? "";
     const user = body.messages.find((message) => message.role === "user")?.content ?? "";
     if (system.includes("quarantined reader")) return readerReply(user);
+    if (system.includes("You are the planner")) return plannerReply(user);
+    if (system.includes("You are the critic")) return criticReply(user);
+    if (system.includes("You are the editor of Delegate.")) return editorReply(user);
     if (system.includes("You are the researcher")) {
       researcherTurns += 1;
       return researcherTurns === 1
@@ -235,6 +278,9 @@ async function runFixture(
     resolveDns: fixtureDns,
     sleep: () => Promise.resolve(),
     modelsConfig: unthrottledConfig,
+    ...(options.awaitPlanApproval === undefined
+      ? {}
+      : { awaitPlanApproval: options.awaitPlanApproval }),
   });
   return { status: result.status, events, requested: site.requested, providerBodies };
 }
@@ -254,9 +300,17 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
     expect(state.status).toBe("completed");
     expect(state.steps.map((step) => [step.id, step.status])).toEqual([
       ["research", "succeeded"],
+      ["research_external", "succeeded"],
       ["read", "succeeded"],
+      ["fill_gaps", "succeeded"],
       ["synthesise", "succeeded"],
+      ["critic", "succeeded"],
     ]);
+    expect(events.find((event) => event.type === "plan.proposed")).toMatchObject({
+      payload: { source: "planner" },
+    });
+    const spawned = events.filter((event) => event.type === "agent.spawned");
+    expect(spawned.map((event) => event.payload.role)).toContain("editor");
     expect(
       state.steps.every(
         (step) => step.servedBy === undefined || step.servedBy.provider === "pollinations",
@@ -266,7 +320,10 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
 
     const approved = events.find((event) => event.type === "plan.approved");
     expect(approved).toMatchObject({
-      payload: { approvedBy: { type: "system" }, reason: expect.stringMatching(/M2/) as unknown },
+      payload: {
+        approvedBy: { type: "system" },
+        reason: expect.stringMatching(/no reviewer/) as unknown,
+      },
     });
 
     const brief = finalBrief(events);
@@ -290,14 +347,39 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
       "quarantine-reader@1",
       "company-xray.researcher@1",
       "company-xray.synthesis@1",
+      "planner@2",
+      "critic@1",
+      "editor@1",
     ]);
+    const techStack = brief.sections.techStack;
+    expect(
+      techStack.status === "ok" &&
+        techStack.claims.every((claim) => claim.text.startsWith("Narrowed:")),
+    ).toBe(true);
+    const criticDone = events.find(
+      (event) => event.type === "step.completed" && event.stepId === "critic",
+    );
+    expect(criticDone).toMatchObject({
+      payload: { critic: { fixLoops: 1, removed: 0, unverified: 0, citationAccuracy: 1 } },
+    });
+    const next = events.find(
+      (event) => event.type === "artifact.created" && event.payload.kind === "next-actions",
+    );
+    const actions = NextActionsSchema.parse(
+      next?.type === "artifact.created" ? next.payload.content : undefined,
+    );
+    expect(actions.actions[0]).toMatchObject({
+      missionId: "automation-audit",
+      available: true,
+      input: { url: `${FIXTURE_ORIGIN}/` },
+    });
 
     const created = events.filter(
       (event) => event.type === "artifact.created" && event.payload.kind === "company-xray-brief",
     );
     expect(created).toHaveLength(1);
     expect(events.filter((event) => event.type === "artifact.updated")).toHaveLength(
-      SECTION_KEYS.length,
+      SECTION_KEYS.length + 1,
     );
     expect(events.at(-1)?.type).toBe("run.completed");
   });
@@ -334,6 +416,11 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
     );
     expect(readers.length).toBeGreaterThan(0);
     for (const reader of readers) expect(reader.tools).toBeUndefined();
+    const toolless = providerBodies.filter((body) =>
+      /You are the (planner|critic|editor)/.test(body.messages[0]?.content ?? ""),
+    );
+    expect(toolless.length).toBeGreaterThanOrEqual(3);
+    for (const body of toolless) expect(body.tools).toBeUndefined();
     expect(synthesis?.tools).toBeUndefined();
     expect(
       (researcher?.tools ?? []).map(
@@ -395,6 +482,55 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
     expect(state.error?.code).toBe("no_model_available");
     expect(state.fallbacks.length).toBeGreaterThan(0);
     expect(state.steps.find((step) => step.id === "read")?.status).toBe("failed");
+  });
+});
+
+describe("plan review", () => {
+  it("emits plan.revised with a diff for reviewer edits, then approves the edited version", async () => {
+    const { status, events } = await runFixture({
+      awaitPlanApproval: (plan) =>
+        Promise.resolve({
+          decision: "approved",
+          steps: plan.steps
+            .filter((step) => step.id !== "fill_gaps")
+            .map((step) =>
+              step.id === "synthesise" ? { ...step, inputs: ["read", "research_external"] } : step,
+            ),
+        }),
+    });
+    expect(status).toBe("completed");
+    const revised = events.find((event) => event.type === "plan.revised");
+    expect(revised).toMatchObject({
+      payload: {
+        version: 2,
+        source: "reviewer",
+        diff: { removed: ["fill_gaps"], changed: ["synthesise"], added: [] },
+      },
+    });
+    expect(events.find((event) => event.type === "plan.approved")).toMatchObject({
+      payload: { version: 2, approvedBy: { type: "member" } },
+    });
+    const state = foldRun(events);
+    expect(state.steps.map((step) => step.id)).not.toContain("fill_gaps");
+    expect(state.status).toBe("completed");
+  });
+
+  it("fails cleanly when the reviewer rejects the plan or submits an invalid edit", async () => {
+    const rejected = await runFixture({
+      awaitPlanApproval: () => Promise.resolve({ decision: "rejected", reason: "Not now" }),
+    });
+    expect(foldRun(rejected.events).error).toEqual({ code: "plan_rejected", message: "Not now" });
+    expect(rejected.events.some((event) => event.type === "step.started")).toBe(false);
+    const invalid = await runFixture({
+      awaitPlanApproval: (plan) =>
+        Promise.resolve({
+          decision: "approved",
+          steps: plan.steps.map((step) =>
+            step.id === "read" ? { ...step, capabilities: ["message.send"] } : step,
+          ),
+        }),
+    });
+    expect(foldRun(invalid.events).error?.code).toBe("invalid_plan");
   });
 });
 
