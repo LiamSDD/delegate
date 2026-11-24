@@ -253,8 +253,8 @@ Part of the portfolio; set up in M0 and kept sharp:
 Every milestone ends deployed and demoable. `main` is always shippable; unfinished work sits behind feature flags. Never start a milestone while an earlier milestone's definition of done is regressed.
 
 ### M0 · Foundation
-- [ ] Monorepo (pnpm + Turborepo) with `apps/web` and the six packages
-- [ ] Local quality gate (no hosted CI): `pnpm check` runs typecheck, lint, test and build; a git pre-push hook runs it
+- [x] Monorepo (pnpm + Turborepo) with `apps/web` and the six packages
+- [x] Local quality gate (no hosted CI): `pnpm check` runs typecheck, lint, test and build; a git pre-push hook runs it
 - [ ] Drizzle schema: orgs, workspaces, members, runs, run_events, artifacts, approvals, audit_log, policies, memories, documents, chunks (pgvector); RLS policies and migration
 - [ ] Typed `RunEvent` union, `models.ts`, budget module, policy-engine skeleton, OpenTelemetry setup
 - [ ] Design tokens and the home page shell
