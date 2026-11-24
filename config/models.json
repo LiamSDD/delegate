@@ -8,6 +8,7 @@
       "chatPath": "/openai",
       "keyless": true,
       "terms": "public-demo-ok",
+      "maxClassification": "public",
       "dataPolicy": "Community-run anonymous tier; retention and training terms not yet verified. Treat as public: never send confidential data.",
       "limits": { "requestsPerMinute": 4 },
       "unverified": true,
@@ -19,6 +20,7 @@
       "baseUrl": "https://api.llm7.io/v1",
       "keyless": true,
       "terms": "public-demo-ok",
+      "maxClassification": "public",
       "dataPolicy": "Community-run anonymous access; retention and training terms not yet verified. Treat as public: never send confidential data.",
       "limits": { "requestsPerMinute": 20 },
       "unverified": true,
@@ -29,6 +31,7 @@
       "kind": "webllm",
       "keyless": true,
       "terms": "local-only",
+      "maxClassification": "confidential",
       "dataPolicy": "Runs on the visitor's GPU via WebGPU; prompts never leave the browser.",
       "unverified": true,
       "notes": "Private mode. Requires WebGPU (Chrome/Edge). Function-calling model list to be confirmed in M1."
@@ -39,6 +42,7 @@
       "baseUrl": "http://localhost:11434/v1",
       "keyless": true,
       "terms": "local-only",
+      "maxClassification": "restricted",
       "dataPolicy": "Local inference on the operator's machine; nothing leaves the host.",
       "notes": "Opt-in only (self-hosting, owner evals, demo recordings). Uses Ollama's OpenAI-compatible endpoint."
     },
@@ -49,6 +53,7 @@
       "apiKeyEnv": "NVIDIA_API_KEY",
       "keyless": false,
       "terms": "evaluation-only",
+      "maxClassification": "public",
       "dataPolicy": "NVIDIA API catalog trial terms: development and evaluation, not production. Owner evals and recordings only.",
       "limits": { "requestsPerMinute": 40 },
       "unverified": true,
@@ -61,6 +66,7 @@
       "apiKeyEnv": "GROQ_API_KEY",
       "keyless": false,
       "terms": "public-demo-ok",
+      "maxClassification": "internal",
       "dataPolicy": "Zero data retention can be enabled in the Groq console.",
       "limits": { "requestsPerMinute": 30, "tokensPerMinute": 8000 }
     },
@@ -71,6 +77,7 @@
       "apiKeyEnv": "CEREBRAS_API_KEY",
       "keyless": false,
       "terms": "public-demo-ok",
+      "maxClassification": "internal",
       "dataPolicy": "No training on customer data, per Cerebras documentation.",
       "limits": { "requestsPerMinute": 30 },
       "unverified": true,
@@ -83,6 +90,7 @@
       "apiKeyEnv": "OPENROUTER_API_KEY",
       "keyless": false,
       "terms": "public-demo-ok",
+      "maxClassification": "public",
       "dataPolicy": "Data policy depends on the upstream provider serving the :free model.",
       "limits": { "requestsPerMinute": 20 }
     },
@@ -94,6 +102,7 @@
       "requiredEnv": ["CLOUDFLARE_ACCOUNT_ID"],
       "keyless": false,
       "terms": "public-demo-ok",
+      "maxClassification": "internal",
       "dataPolicy": "Cloudflare states no training on customer data in Workers AI.",
       "notes": "Free allowance is 10,000 neurons per day rather than a request rate."
     },
@@ -103,6 +112,7 @@
       "apiKeyEnv": "ANTHROPIC_API_KEY",
       "keyless": false,
       "terms": "byok",
+      "maxClassification": "confidential",
       "dataPolicy": "Bring your own key; Anthropic commercial terms of the key owner apply.",
       "pricing": {
         "claude-opus-5-5": {

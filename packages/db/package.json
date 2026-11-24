@@ -16,15 +16,18 @@
     "lint": "eslint .",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:check": "drizzle-kit check"
   },
   "dependencies": {
+    "@delegate/runtime": "workspace:*",
     "@neondatabase/serverless": "catalog:",
     "drizzle-orm": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@delegate/runtime": "workspace:*",
+    "@delegate/evals": "workspace:*",
+    "@delegate/policy": "workspace:*",
     "@electric-sql/pglite": "catalog:",
     "@electric-sql/pglite-pgvector": "catalog:",
     "@types/node": "catalog:",

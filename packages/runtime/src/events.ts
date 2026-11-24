@@ -61,6 +61,33 @@ export const PlanStepSchema = z.object({
 });
 export type PlanStep = z.infer<typeof PlanStepSchema>;
 
+const BUDGET_SHARE_TOLERANCE = 1e-9;
+
+export const PlanStepsSchema = z.array(PlanStepSchema).superRefine((steps, ctx) => {
+  const ids = new Set<string>();
+  for (const step of steps) {
+    if (ids.has(step.id)) ctx.addIssue({ code: "custom", message: `Duplicate step id ${step.id}` });
+    ids.add(step.id);
+  }
+  for (const step of steps) {
+    for (const input of step.inputs) {
+      if (!ids.has(input)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Step ${step.id} input references unknown step ${input}`,
+        });
+      }
+    }
+  }
+  const totalShare = steps.reduce((sum, step) => sum + step.budgetShare, 0);
+  if (totalShare > 1 + BUDGET_SHARE_TOLERANCE) {
+    ctx.addIssue({
+      code: "custom",
+      message: `Plan budgetShare values sum to ${totalShare}, more than 1`,
+    });
+  }
+});
+
 export const UsageSchema = z.object({
   inputTokens: tokenCount,
   outputTokens: tokenCount,
@@ -69,6 +96,7 @@ export const UsageSchema = z.object({
   costMicroUsd: MicroUsdSchema,
   provider: id,
   model: id,
+  estimated: z.boolean().optional(),
 });
 export type Usage = z.infer<typeof UsageSchema>;
 
@@ -86,6 +114,9 @@ export const FALLBACK_REASONS = [
   "context_too_small",
   "tools_unsupported",
   "unhealthy",
+  "client_error",
+  "model_unavailable",
+  "exceeds_provider_capacity",
 ] as const;
 export const FallbackReasonSchema = z.enum(FALLBACK_REASONS);
 export type FallbackReason = z.infer<typeof FallbackReasonSchema>;
@@ -115,7 +146,7 @@ function stepEvent<T extends RunEventType, P extends z.ZodType>(type: T, payload
   return z.object({ ...envelope, stepId: id, type: z.literal(type), payload });
 }
 
-const planSteps = z.array(PlanStepSchema);
+const planSteps = PlanStepsSchema;
 
 export const RunEventSchema = z.discriminatedUnion("type", [
   event(
@@ -335,9 +366,20 @@ function stepsForPlan(plan: readonly PlanStep[], existing: readonly StepState[])
   return plan.map((step) => known.get(step.id) ?? { id: step.id, status: "pending" });
 }
 
+function emptyArtifacts(): Record<string, ArtifactIndexEntry> {
+  return Object.create(null) as Record<string, ArtifactIndexEntry>;
+}
+
+function isTerminal(lifecycle: Lifecycle): boolean {
+  return lifecycle === "completed" || lifecycle === "failed";
+}
+
 export function foldRun(events: readonly RunEvent[]): RunState {
   const first = events[0];
   if (first === undefined) throw new EventOrderError("Cannot fold an empty event log");
+  if (first.type !== "run.created") {
+    throw new EventOrderError(`First event must be run.created, got ${first.type}`);
+  }
 
   let lifecycle: Lifecycle = "planning";
   const state: RunState = {
@@ -356,18 +398,16 @@ export function foldRun(events: readonly RunEvent[]): RunState {
       policyDenials: 0,
     },
     pendingApprovals: [],
-    artifacts: {},
+    artifacts: emptyArtifacts(),
     fallbacks: [],
     lastSeq: -1,
   };
 
   const updateStep = (stepId: string, update: (step: StepState) => StepState) => {
     const index = state.steps.findIndex((step) => step.id === stepId);
-    const current = index === -1 ? { id: stepId, status: "pending" as const } : state.steps[index];
-    if (current === undefined) return;
-    const next = update(current);
-    if (index === -1) state.steps.push(next);
-    else state.steps[index] = next;
+    const current = state.steps[index];
+    if (current === undefined) throw new EventOrderError(`Event refers to unknown step ${stepId}`);
+    state.steps[index] = update(current);
   };
 
   for (const event of events) {
@@ -378,6 +418,19 @@ export function foldRun(events: readonly RunEvent[]): RunState {
     }
     if (event.seq <= state.lastSeq) {
       throw new EventOrderError(`Event seq ${event.seq} is not after ${state.lastSeq}`);
+    }
+    if (isTerminal(lifecycle)) {
+      throw new EventOrderError(
+        `Event seq ${event.seq} (${event.type}) arrived after the run reached terminal state ${lifecycle}`,
+      );
+    }
+    if (event.type === "run.created" && event !== first) {
+      throw new EventOrderError(`Event seq ${event.seq} repeats run.created`);
+    }
+    if (event.stepId !== undefined && !state.steps.some((step) => step.id === event.stepId)) {
+      throw new EventOrderError(
+        `Event seq ${event.seq} (${event.type}) refers to unknown step ${event.stepId}`,
+      );
     }
     state.lastSeq = event.seq;
 
@@ -397,7 +450,12 @@ export function foldRun(events: readonly RunEvent[]): RunState {
         lifecycle = "awaiting_plan_approval";
         break;
       case "plan.approved":
-        if (state.plan?.version === event.payload.version) state.plan.approved = true;
+        if (state.plan?.version !== event.payload.version) {
+          throw new EventOrderError(
+            `plan.approved for version ${event.payload.version} does not match the current plan version ${state.plan?.version ?? "none"}`,
+          );
+        }
+        state.plan.approved = true;
         lifecycle = "running";
         break;
       case "plan.revised":

@@ -19,11 +19,18 @@ export const SIDE_EFFECT_CAPABILITIES: readonly Capability[] = [
   CAPABILITIES.webhookSend,
 ];
 
+export const EGRESS_CAPABILITIES: readonly Capability[] = [
+  CAPABILITIES.webFetch,
+  CAPABILITIES.repoWrite,
+  CAPABILITIES.messageSend,
+  CAPABILITIES.webhookSend,
+];
+
 export const defaultPolicy: Policy = PolicySchema.parse({
   id: "guest-demo",
   name: "Guest demo workspace",
   description:
-    "Public demo: research and drafting only, keyless public-demo providers, outbound requests only through fetch tools (SSRF guard in the fetch tool), no spend.",
+    "Public demo: research and drafting only, keyless public-demo providers, outbound requests only through fetch tools to public hostnames (the engine always denies IP literals, localhost, link-local, metadata and private hosts; DNS-level SSRF checks stay in the fetch tool), no spend.",
   rules: [
     {
       id: "read-only-capabilities",

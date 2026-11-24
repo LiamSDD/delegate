@@ -16,8 +16,8 @@ const EXAMPLES: readonly ExampleTarget[] = [
   },
 ];
 
-export default async function HomePage() {
-  const chain = await loadKeylessChain();
+export default function HomePage() {
+  const chain = loadKeylessChain();
   return (
     <div className="mx-auto flex max-w-content flex-col px-6">
       <section

@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.join(import.meta.dirname, "src"),
+      "@config": path.join(import.meta.dirname, "..", "..", "config"),
     },
   },
   test: {

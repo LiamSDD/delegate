@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { orgs, workspaces } from "./schema";
-import { createTestDb, type TestDb } from "./testing/pglite";
+import { createTestDb, expectDatabaseError, type TestDb } from "./testing/pglite";
 
 describe("workspace retention", () => {
   let harness: Awaited<ReturnType<typeof createTestDb>>;
@@ -60,5 +60,26 @@ describe("workspace retention", () => {
       .where(eq(workspaces.id, created.id))
       .returning();
     expect(updated?.retentionDays).toBe(7);
+  });
+
+  it("refuses a demo workspace that keeps data longer than 7 days", async () => {
+    await expectDatabaseError(
+      db
+        .insert(workspaces)
+        .values({ orgId, name: "Long demo", slug: "long-demo", isDemo: true, retentionDays: 30 }),
+      /workspaces_demo_retention_max_7_days/,
+    );
+  });
+
+  it("refuses to turn a long-retention workspace into a demo", async () => {
+    const [created] = await db
+      .insert(workspaces)
+      .values({ orgId, name: "Archive", slug: "archive", retentionDays: 365 })
+      .returning();
+    if (!created) throw new Error("workspace not created");
+    await expectDatabaseError(
+      db.update(workspaces).set({ isDemo: true }).where(eq(workspaces.id, created.id)),
+      /workspaces_demo_retention_max_7_days/,
+    );
   });
 });

@@ -44,7 +44,7 @@ export const memories = pgTable(
       name: "memories_run_fk",
       columns: [t.runId, t.workspaceId],
       foreignColumns: [runs.id, runs.workspaceId],
-    }),
+    }).onDelete("cascade"),
     unique("memories_scope_key_unique").on(t.workspaceId, t.runId, t.key).nullsNotDistinct(),
     ...tenantPolicies("memories", t.workspaceId, {
       select: readers,

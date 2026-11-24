@@ -2,8 +2,10 @@ import { fileURLToPath } from "node:url";
 
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite-pgvector";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
+import { z } from "zod";
 
 import * as schema from "../schema";
 
@@ -47,4 +49,26 @@ export async function expectDatabaseError(
   if (!pattern.test(message)) {
     throw new Error(`expected a database error matching ${pattern.source}, got: ${message}`);
   }
+}
+
+export const APP_LOGIN_ROLE = "delegate_app_login";
+
+export async function asSessionRole<T>(db: TestDb, role: string, fn: () => Promise<T>): Promise<T> {
+  await db.execute(sql`set session authorization ${sql.identifier(role)}`);
+  try {
+    return await fn();
+  } finally {
+    await db.execute(sql`set session authorization postgres`);
+  }
+}
+
+export function asAppLogin<T>(db: TestDb, fn: () => Promise<T>): Promise<T> {
+  return asSessionRole(db, APP_LOGIN_ROLE, fn);
+}
+
+export async function rowsOf<T extends z.ZodType>(
+  row: T,
+  result: Promise<unknown>,
+): Promise<z.infer<T>[]> {
+  return z.object({ rows: z.array(row) }).parse(await result).rows;
 }

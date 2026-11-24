@@ -1,4 +1,4 @@
-import { count, eq } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { TransactionRollbackError } from "drizzle-orm/errors";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -63,7 +63,7 @@ const cases: TenantTableCase[] = [
     update: (tx, workspaceId) =>
       tx
         .update(members)
-        .set({ role: "viewer" })
+        .set({ role: sql`${members.role}` })
         .where(eq(members.workspaceId, workspaceId))
         .returning({ id: members.id }),
     remove: (tx, workspaceId) =>
@@ -78,7 +78,7 @@ const cases: TenantTableCase[] = [
     update: (tx, workspaceId) =>
       tx
         .update(runs)
-        .set({ status: "cancelled" })
+        .set({ status: "failed" })
         .where(eq(runs.workspaceId, workspaceId))
         .returning({ id: runs.id }),
   },
@@ -124,17 +124,12 @@ const cases: TenantTableCase[] = [
         stepId: "planted",
         action: {},
       }),
-    update: (tx, workspaceId) =>
-      tx
-        .update(approvals)
-        .set({ status: "approved", resolvedAt: new Date() })
-        .where(eq(approvals.workspaceId, workspaceId))
-        .returning({ id: approvals.id }),
   },
   {
     name: "audit_log",
     table: auditLog,
     workspaceColumn: auditLog.workspaceId,
+    insertError: /permission denied for table audit_log/,
     insertInto: (tx, target, actorId) =>
       tx.insert(auditLog).values({
         workspaceId: target.workspace.id,

@@ -5,12 +5,26 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'delegate_app') THEN
     CREATE ROLE delegate_app NOLOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'delegate_app_login') THEN
+    CREATE ROLE delegate_app_login LOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'delegate_definer') THEN
+    CREATE ROLE delegate_definer NOLOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'delegate_system') THEN
+    CREATE ROLE delegate_system NOLOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'delegate_maintenance') THEN
+    CREATE ROLE delegate_maintenance NOLOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
+  END IF;
 END
 $$;
 --> statement-breakpoint
-GRANT delegate_app TO CURRENT_USER;
+GRANT delegate_app TO delegate_app_login;
 --> statement-breakpoint
-GRANT USAGE ON SCHEMA public TO delegate_app;
+GRANT delegate_definer TO CURRENT_USER;
+--> statement-breakpoint
+GRANT USAGE ON SCHEMA public TO delegate_app, delegate_definer, delegate_maintenance;
 --> statement-breakpoint
 CREATE OR REPLACE FUNCTION app_workspace_role(target_workspace uuid)
 RETURNS text
@@ -64,6 +78,12 @@ BEGIN
   );
 END
 $$;
+--> statement-breakpoint
+ALTER FUNCTION app_workspace_role(uuid) OWNER TO delegate_definer;
+--> statement-breakpoint
+ALTER FUNCTION app_is_org_member(uuid) OWNER TO delegate_definer;
+--> statement-breakpoint
+ALTER FUNCTION app_shares_workspace(uuid) OWNER TO delegate_definer;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION app_workspace_role(uuid), app_is_org_member(uuid), app_shares_workspace(uuid) FROM PUBLIC;
 --> statement-breakpoint

@@ -5,19 +5,18 @@ export const userKind = pgEnum("user_kind", ["member", "guest", "agent"]);
 export const memberRole = pgEnum("member_role", ["owner", "admin", "operator", "viewer"]);
 
 export const runStatus = pgEnum("run_status", [
-  "pending",
   "planning",
-  "awaiting_approval",
+  "awaiting_plan_approval",
   "running",
+  "awaiting_approval",
   "completed",
   "failed",
-  "cancelled",
 ]);
 
 export const approvalStatus = pgEnum("approval_status", [
   "pending",
   "approved",
-  "denied",
+  "rejected",
   "expired",
 ]);
 
@@ -29,4 +28,5 @@ export const documentClassification = pgEnum("document_classification", [
   "public",
   "internal",
   "confidential",
+  "restricted",
 ]);

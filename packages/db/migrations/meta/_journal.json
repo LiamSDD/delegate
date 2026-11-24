@@ -5,29 +5,22 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1795543028284,
+      "when": 1795546905539,
       "tag": "0000_bootstrap_roles_and_helpers",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1795543053923,
+      "when": 1795546905911,
       "tag": "0001_schema",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1795543054184,
-      "tag": "0002_grants_triggers_retention",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1795545158064,
-      "tag": "0003_event_type_model_fallback",
+      "when": 1795546906281,
+      "tag": "0002_privileges_functions_triggers",
       "breakpoints": true
     }
   ]

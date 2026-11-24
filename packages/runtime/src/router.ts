@@ -1,5 +1,11 @@
 import { type FallbackReason, type ModelFallbackPayload, type ModelRole } from "./events";
-import { resolveChain, type ChainContext, type ChainEntry, type Env } from "./models";
+import {
+  resolveChain,
+  type ChainContext,
+  type ChainEntry,
+  type DataClassification,
+  type Env,
+} from "./models";
 import {
   ProviderHttpError,
   ProviderNetworkError,
@@ -26,6 +32,7 @@ export interface RouterOptions {
 
 export interface OpenOptions extends StreamOptions {
   estimatedPromptTokens?: number;
+  classification?: DataClassification;
 }
 
 export interface RoutedStream {
@@ -44,6 +51,7 @@ export interface RouteAttempt {
 
 export interface ProviderHealth {
   healthy: boolean;
+  blocked: boolean;
   consecutiveFailures: number;
   unhealthyUntil?: number;
   blockedUntil?: number;
@@ -128,16 +136,134 @@ interface Rejection {
   retryAfterMs?: number;
 }
 
+const CLIENT_ERROR_STATUSES = new Set([401, 402, 403, 408, 422]);
+const CONTEXT_ERROR_PATTERN = /context|length|token/i;
+const REASONS_WITHOUT_HEALTH_PENALTY = new Set<FallbackReason>([
+  "client_error",
+  "model_unavailable",
+  "context_too_small",
+]);
+
+function classifyHttp(error: ProviderHttpError): Rejection | undefined {
+  if (error.status >= 500) return { reason: "server_error" };
+  if (error.status === 404) return { reason: "model_unavailable" };
+  if (error.status === 413) return { reason: "context_too_small" };
+  if (CLIENT_ERROR_STATUSES.has(error.status)) return { reason: "client_error" };
+  if (error.status === 400 && CONTEXT_ERROR_PATTERN.test(error.bodySnippet))
+    return { reason: "context_too_small" };
+  return undefined;
+}
+
 function classify(error: unknown): Rejection | undefined {
   if (error instanceof RateLimitedError) {
     return error.retryAfterMs === undefined
       ? { reason: "rate_limited" }
       : { reason: "rate_limited", retryAfterMs: error.retryAfterMs };
   }
-  if (error instanceof ProviderHttpError && error.status >= 500) return { reason: "server_error" };
+  if (error instanceof ProviderHttpError) return classifyHttp(error);
   if (error instanceof ProviderTimeoutError) return { reason: "timeout" };
   if (error instanceof ProviderNetworkError) return { reason: "network_error" };
   return undefined;
+}
+
+function isInBandError(event: ModelStreamEvent): boolean {
+  return event.type === "stop" && event.reason === "error";
+}
+
+function outputCharacters(event: ModelStreamEvent): number {
+  switch (event.type) {
+    case "text_delta":
+    case "reasoning_delta":
+      return event.text.length;
+    case "tool_call_complete":
+      return event.call.name.length + event.call.argumentsJson.length;
+    default:
+      return 0;
+  }
+}
+
+class RoutedEvents implements AsyncIterableIterator<ModelStreamEvent> {
+  private readonly queue: ModelStreamEvent[];
+  private closed = false;
+  private released = false;
+  private sawUsage = false;
+  private outputChars = 0;
+
+  constructor(
+    private readonly source: AsyncIterator<ModelStreamEvent>,
+    first: ModelStreamEvent,
+    private readonly promptTokens: number,
+    private readonly onFailure: (rejection: Rejection) => void,
+  ) {
+    this.queue = this.observe(first);
+  }
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<ModelStreamEvent> {
+    return this;
+  }
+
+  async next(): Promise<IteratorResult<ModelStreamEvent>> {
+    const queued = this.queue.shift();
+    if (queued !== undefined) return { done: false, value: queued };
+    if (this.closed) return { done: true, value: undefined };
+    let result: IteratorResult<ModelStreamEvent>;
+    try {
+      result = await this.source.next();
+    } catch (error) {
+      this.closed = true;
+      this.released = true;
+      const rejection = classify(error);
+      if (rejection !== undefined) this.onFailure(rejection);
+      throw error;
+    }
+    if (result.done === true) {
+      this.closed = true;
+      this.released = true;
+      return { done: true, value: undefined };
+    }
+    this.queue.push(...this.observe(result.value));
+    return this.next();
+  }
+
+  async return(): Promise<IteratorResult<ModelStreamEvent>> {
+    this.closed = true;
+    this.queue.length = 0;
+    await this.release();
+    return { done: true, value: undefined };
+  }
+
+  async throw(error?: unknown): Promise<IteratorResult<ModelStreamEvent>> {
+    await this.return();
+    throw error;
+  }
+
+  private async release(): Promise<void> {
+    if (this.released) return;
+    this.released = true;
+    await this.source.return?.();
+  }
+
+  private observe(event: ModelStreamEvent): ModelStreamEvent[] {
+    this.outputChars += outputCharacters(event);
+    if (event.type === "usage") this.sawUsage = true;
+    if (event.type !== "stop") return [event];
+    if (isInBandError(event)) this.onFailure({ reason: "server_error" });
+    if (this.sawUsage) return [event];
+    this.sawUsage = true;
+    return [
+      {
+        type: "usage",
+        estimated: true,
+        usage: {
+          inputTokens: this.promptTokens,
+          outputTokens: Math.ceil(this.outputChars / 4),
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+      event,
+    ];
+  }
 }
 
 export class ModelRouter {
@@ -155,10 +281,12 @@ export class ModelRouter {
 
   health(providerId: string): ProviderHealth {
     const state = this.states.get(providerId);
-    if (state === undefined) return { healthy: true, consecutiveFailures: 0 };
+    if (state === undefined) return { healthy: true, blocked: false, consecutiveFailures: 0 };
     const now = this.now();
+    const blocked = state.blockedUntil > now;
     return {
-      healthy: state.unhealthyUntil <= now,
+      healthy: state.unhealthyUntil <= now && !blocked,
+      blocked,
       consecutiveFailures: state.consecutiveFailures,
       ...(state.unhealthyUntil > now ? { unhealthyUntil: state.unhealthyUntil } : {}),
       ...(state.blockedUntil > now ? { blockedUntil: state.blockedUntil } : {}),
@@ -170,20 +298,27 @@ export class ModelRouter {
     request: RouterRequest,
     options: OpenOptions = {},
   ): Promise<RoutedStream> {
-    const chain = resolveChain(role, this.options.env, this.options.context);
+    const chain = resolveChain(role, this.options.env, {
+      ...this.options.context,
+      classification: options.classification ?? this.options.context.classification,
+    });
     const promptTokens = options.estimatedPromptTokens ?? estimatePromptTokens(request);
     const attempts: RouteAttempt[] = [];
 
     for (const [index, entry] of chain.entries()) {
       let rejection = this.precheck(entry, request, promptTokens);
       if (rejection === undefined) {
+        let outcome: RoutedStream | Rejection;
         try {
-          return await this.attempt(entry, request, options);
+          outcome = await this.attempt(entry, request, options, promptTokens);
         } catch (error) {
-          rejection = classify(error);
-          if (rejection === undefined) throw error;
-          this.recordFailure(entry.provider.id, rejection);
+          const classified = classify(error);
+          if (classified === undefined) throw error;
+          outcome = classified;
         }
+        if ("events" in outcome) return outcome;
+        rejection = outcome;
+        this.recordFailure(entry.provider.id, rejection);
       }
       attempts.push({
         provider: entry.provider.id,
@@ -241,7 +376,8 @@ export class ModelRouter {
     const tokenCost = promptTokens + request.maxTokens;
     const requestWait = state.requests === undefined ? 0 : state.requests.waitMs(1, now);
     const tokenWait = state.tokens === undefined ? 0 : state.tokens.waitMs(tokenCost, now);
-    if (requestWait === undefined || tokenWait === undefined) return { reason: "rate_limited" };
+    if (requestWait === undefined || tokenWait === undefined)
+      return { reason: "exceeds_provider_capacity" };
     const wait = Math.max(requestWait, tokenWait);
     if (wait > 0) return { reason: "rate_limited", retryAfterMs: wait };
     state.requests?.take(1);
@@ -261,7 +397,8 @@ export class ModelRouter {
     entry: ChainEntry,
     request: RouterRequest,
     options: StreamOptions,
-  ): Promise<RoutedStream> {
+    promptTokens: number,
+  ): Promise<RoutedStream | Rejection> {
     const streamOptions: StreamOptions =
       options.signal === undefined ? {} : { signal: options.signal };
     const stream = this.provider(entry).stream(
@@ -270,27 +407,16 @@ export class ModelRouter {
     );
     const iterator = stream[Symbol.asyncIterator]();
     const first = await iterator.next();
+    if (first.done === true || isInBandError(first.value)) {
+      if (first.done !== true) await iterator.return?.();
+      return { reason: "server_error" };
+    }
     this.recordSuccess(entry.provider.id);
 
-    const recordFailure = (rejection: Rejection) => {
+    const events = new RoutedEvents(iterator, first.value, promptTokens, (rejection) => {
       this.recordFailure(entry.provider.id, rejection);
-    };
-    async function* events(): AsyncGenerator<ModelStreamEvent> {
-      if (first.done === true) return;
-      yield first.value;
-      try {
-        for (let next = await iterator.next(); next.done !== true; next = await iterator.next())
-          yield next.value;
-      } catch (error) {
-        const rejection = classify(error);
-        if (rejection !== undefined) recordFailure(rejection);
-        throw error;
-      } finally {
-        await iterator.return?.();
-      }
-    }
-
-    return { provider: entry.provider.id, model: entry.model, entry, events: events() };
+    });
+    return { provider: entry.provider.id, model: entry.model, entry, events };
   }
 
   private recordSuccess(providerId: string): void {
@@ -300,7 +426,7 @@ export class ModelRouter {
 
   private recordFailure(providerId: string, rejection: Rejection): void {
     const state = this.states.get(providerId);
-    if (state === undefined) return;
+    if (state === undefined || REASONS_WITHOUT_HEALTH_PENALTY.has(rejection.reason)) return;
     const now = this.now();
     state.consecutiveFailures += 1;
     if (rejection.reason === "rate_limited" && rejection.retryAfterMs !== undefined) {

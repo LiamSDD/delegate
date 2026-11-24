@@ -28,6 +28,7 @@ const config = parseModelsConfig({
       baseUrl: "https://a.test/v1",
       keyless: true,
       terms: "public-demo-ok",
+      maxClassification: "public",
       dataPolicy: "x",
       limits: { requestsPerMinute: 2 },
     },
@@ -37,6 +38,7 @@ const config = parseModelsConfig({
       baseUrl: "https://b.test/v1",
       keyless: true,
       terms: "public-demo-ok",
+      maxClassification: "internal",
       dataPolicy: "x",
       limits: { tokensPerMinute: 9000 },
     },
@@ -46,6 +48,7 @@ const config = parseModelsConfig({
       baseUrl: "https://c.test/v1",
       keyless: true,
       terms: "public-demo-ok",
+      maxClassification: "internal",
       dataPolicy: "x",
     },
   ],
@@ -60,22 +63,42 @@ const config = parseModelsConfig({
   },
 });
 
-type Behaviour = "ok" | Error | "fail-mid-stream";
+type Behaviour =
+  "ok" | Error | "fail-mid-stream" | "error-stop" | "error-stop-mid-stream" | "with-usage";
 
 class FakeProvider implements ModelProvider {
   readonly calls: ModelRequest[] = [];
   behaviours: Behaviour[] = [];
+  released = 0;
   constructor(readonly id: string) {}
 
   async *stream(request: ModelRequest): AsyncGenerator<ModelStreamEvent> {
     this.calls.push(request);
     const behaviour = this.behaviours.shift() ?? "ok";
-    await Promise.resolve();
-    if (behaviour instanceof Error) throw behaviour;
-    yield { type: "text_delta", text: `from ${this.id}` };
-    if (behaviour === "fail-mid-stream")
-      throw new ProviderNetworkError(this.id, "connection reset");
-    yield { type: "stop", reason: "end" };
+    try {
+      await Promise.resolve();
+      if (behaviour instanceof Error) throw behaviour;
+      if (behaviour === "error-stop") {
+        yield { type: "stop", reason: "error", raw: "provider_error" };
+        return;
+      }
+      yield { type: "text_delta", text: `from ${this.id}` };
+      if (behaviour === "fail-mid-stream")
+        throw new ProviderNetworkError(this.id, "connection reset");
+      if (behaviour === "error-stop-mid-stream") {
+        yield { type: "stop", reason: "error", raw: "provider_error" };
+        return;
+      }
+      if (behaviour === "with-usage") {
+        yield {
+          type: "usage",
+          usage: { inputTokens: 7, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        };
+      }
+      yield { type: "stop", reason: "end" };
+    } finally {
+      this.released += 1;
+    }
   }
 }
 
@@ -89,7 +112,7 @@ function setup() {
   const fallbacks: ModelFallbackPayload[] = [];
   const router = new ModelRouter({
     env: {},
-    context: { config, audience: "public-demo", environment: "server" },
+    context: { config, audience: "public-demo", environment: "server", classification: "public" },
     createProvider: (entry: ChainEntry) => providers[entry.provider.id as keyof typeof providers],
     emitFallback: (payload) => fallbacks.push(payload),
     now: () => now,
@@ -180,12 +203,126 @@ describe("ModelRouter", () => {
     expect(fallbacks[0]?.reason).toBe(reason);
   });
 
-  it("does not fall back on client errors", async () => {
+  it("does not fall back on a plain 400, which signals a bug in the request", async () => {
     const { router, providers, fallbacks } = setup();
     providers.a.behaviours = [new ProviderHttpError("a", 400, "bad request")];
     await expect(router.open("planner", request)).rejects.toBeInstanceOf(ProviderHttpError);
     expect(providers.b.calls).toHaveLength(0);
     expect(fallbacks).toEqual([]);
+  });
+
+  it.each([
+    [401, "", "client_error"],
+    [402, "", "client_error"],
+    [403, "", "client_error"],
+    [404, "model not found", "model_unavailable"],
+    [408, "", "client_error"],
+    [413, "", "context_too_small"],
+    [422, "", "client_error"],
+    [400, "This model's maximum context length is 8192 tokens", "context_too_small"],
+    [400, "max_tokens is too large", "context_too_small"],
+  ] as const)(
+    "falls back on HTTP %i without counting it against health",
+    async (status, body, reason) => {
+      const { router, providers, fallbacks } = setup();
+      providers.a.behaviours = [
+        new ProviderHttpError("a", status, body),
+        new ProviderHttpError("a", status, body),
+      ];
+      expect((await router.open("planner", request)).provider).toBe("b");
+      expect((await router.open("planner", request)).provider).toBe("b");
+      expect(fallbacks.map((fallback) => fallback.reason)).toEqual([reason, reason]);
+      expect(router.health("a")).toMatchObject({ healthy: true, consecutiveFailures: 0 });
+    },
+  );
+
+  it("treats an in-band error as the first event as a server error and falls back", async () => {
+    const { router, providers, fallbacks } = setup();
+    providers.a.behaviours = ["error-stop", "error-stop"];
+    const routed = await router.open("planner", request);
+    expect(routed.provider).toBe("b");
+    expect(await drain(routed.events)).toBe("from b");
+    expect(fallbacks[0]).toMatchObject({ from: { provider: "a" }, reason: "server_error" });
+    expect(providers.a.released).toBe(1);
+    expect(router.health("a").consecutiveFailures).toBe(1);
+    await router.open("planner", request);
+    expect(router.health("a")).toMatchObject({ healthy: false });
+  });
+
+  it("counts an in-band error after the first event against provider health", async () => {
+    const { router, providers } = setup();
+    providers.a.behaviours = ["error-stop-mid-stream"];
+    const routed = await router.open("planner", request);
+    const events: ModelStreamEvent[] = [];
+    for await (const event of routed.events) events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: "stop", reason: "error" });
+    expect(router.health("a").consecutiveFailures).toBe(1);
+  });
+
+  it("releases the provider stream when the caller abandons it before reading", async () => {
+    const { router, providers } = setup();
+    const routed = await router.open("planner", request);
+    const iterator = routed.events[Symbol.asyncIterator]();
+    await iterator.return?.();
+    expect(providers.a.released).toBe(1);
+    expect(await iterator.next()).toEqual({ done: true, value: undefined });
+  });
+
+  it("releases the provider stream when the caller stops part way", async () => {
+    const { router, providers } = setup();
+    const routed = await router.open("planner", request);
+    for await (const event of routed.events) if (event.type === "text_delta") break;
+    expect(providers.a.released).toBe(1);
+  });
+
+  it("estimates and flags usage when the provider reports none", async () => {
+    const { router } = setup();
+    const routed = await router.open("planner", request, { estimatedPromptTokens: 40 });
+    const events: ModelStreamEvent[] = [];
+    for await (const event of routed.events) events.push(event);
+    expect(events.slice(-2)).toEqual([
+      {
+        type: "usage",
+        estimated: true,
+        usage: {
+          inputTokens: 40,
+          outputTokens: Math.ceil("from a".length / 4),
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+      { type: "stop", reason: "end" },
+    ]);
+  });
+
+  it("passes provider usage through without estimating", async () => {
+    const { router, providers } = setup();
+    providers.a.behaviours = ["with-usage"];
+    const routed = await router.open("planner", request);
+    const usage: ModelStreamEvent[] = [];
+    for await (const event of routed.events) if (event.type === "usage") usage.push(event);
+    expect(usage).toEqual([
+      {
+        type: "usage",
+        usage: { inputTokens: 7, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+    ]);
+  });
+
+  it("reports a provider blocked by retry-after as not healthy", async () => {
+    const { router, providers, advance } = setup();
+    providers.a.behaviours = [new RateLimitedError("a", 5000)];
+    await router.open("planner", request);
+    expect(router.health("a")).toMatchObject({ healthy: false, blocked: true });
+    advance(5000);
+    expect(router.health("a")).toMatchObject({ healthy: true, blocked: false });
+  });
+
+  it("filters the chain by the classification of each call", async () => {
+    const { router, providers } = setup();
+    const routed = await router.open("planner", request, { classification: "internal" });
+    expect(routed.provider).toBe("b");
+    expect(providers.a.calls).toHaveLength(0);
   });
 
   it("skips entries whose context window is too small for prompt plus output", async () => {
@@ -246,7 +383,7 @@ describe("ModelRouter", () => {
       role: "planner",
       from: { provider: "b", model: "b-1" },
       to: { provider: "c", model: "c-1" },
-      reason: "rate_limited",
+      reason: "exceeds_provider_capacity",
     });
   });
 

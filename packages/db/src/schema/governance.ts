@@ -14,7 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { auditActorType, auditDecision } from "./enums";
-import { admins, readers, tenantPolicies } from "./rls";
+import { admins, definerPolicies, readers, tenantPolicies } from "./rls";
 import { approvals } from "./runs";
 import { workspaces } from "./tenancy";
 
@@ -40,6 +40,7 @@ export const policies = pgTable(
       update: admins,
       delete: admins,
     }),
+    ...definerPolicies("policies", ["select"]),
   ],
 ).enableRLS();
 
@@ -63,9 +64,7 @@ export const auditLog = pgTable(
   (t) => [
     index("audit_log_workspace_created_idx").on(t.workspaceId, t.createdAt),
     check("audit_log_actor_identified", sql`${t.actorType} = 'system' or ${t.actorId} is not null`),
-    ...tenantPolicies("audit_log", t.workspaceId, {
-      select: readers,
-      insert: readers,
-    }),
+    ...tenantPolicies("audit_log", t.workspaceId, { select: readers }),
+    ...definerPolicies("audit_log", ["select", "insert", "delete"]),
   ],
 ).enableRLS();

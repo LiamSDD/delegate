@@ -1,5 +1,8 @@
+import { EGRESS_CAPABILITIES, SIDE_EFFECT_CAPABILITIES } from "./defaults";
 import {
   PolicyContextSchema,
+  PolicySchema,
+  type DataClassification,
   type Decision,
   type DecisionKind,
   type Policy,
@@ -8,6 +11,11 @@ import {
 } from "./types";
 
 export const BUILTIN_POLICY_ID = "builtin";
+export const UNCLASSIFIED_TREATED_AS: DataClassification = "restricted";
+
+const BLOCKED_HOSTNAMES = new Set(["localhost"]);
+const BLOCKED_SUFFIXES = [".localhost", ".local", ".internal", ".home.arpa", ".lan"];
+const NUMERIC_LABEL = /^(0x[0-9a-f]*|[0-9]+)$/i;
 
 const SEVERITY: Record<DecisionKind, number> = { allow: 0, require_approval: 1, deny: 2 };
 
@@ -22,6 +30,20 @@ export function matchesDomain(domain: string, pattern: string): boolean {
   if (rule === "*") return true;
   if (rule.startsWith("*.")) return host.endsWith(rule.slice(1));
   return host === rule;
+}
+
+export function isBlockedEgressHost(domain: string): boolean {
+  const host = normaliseDomain(domain).replace(/^\[|\]$/g, "");
+  if (host === "" || host.includes(":")) return true;
+  if (BLOCKED_HOSTNAMES.has(host) || BLOCKED_SUFFIXES.some((suffix) => host.endsWith(suffix)))
+    return true;
+  const labels = host.split(".");
+  if (labels.length < 2) return true;
+  return NUMERIC_LABEL.test(labels.at(-1) ?? "");
+}
+
+export function loadPolicies(input: unknown): Policy[] {
+  return PolicySchema.array().parse(input);
 }
 
 function matchesTool(tool: string, tools: readonly string[]): boolean {
@@ -94,52 +116,149 @@ function checkRule(
       return undefined;
     }
     case "classification": {
-      const classification = ctx.dataClassification;
-      if (classification === undefined || !rule.classifications.includes(classification))
-        return undefined;
+      const classification = ctx.dataClassification ?? UNCLASSIFIED_TREATED_AS;
+      if (!rule.classifications.includes(classification)) return undefined;
+      const label =
+        ctx.dataClassification === undefined
+          ? `Unclassified data (treated as ${UNCLASSIFIED_TREATED_AS})`
+          : `${classification} data`;
       if (matchesTool(ctx.tool, rule.forbiddenTools)) {
+        return { decision: "deny", reason: `${label} may not be sent to tool ${ctx.tool}` };
+      }
+      const restrictsProviders =
+        rule.forbiddenProviders.length > 0 || rule.forbiddenProviderTerms.length > 0;
+      if (ctx.provider === undefined && restrictsProviders) {
         return {
           decision: "deny",
-          reason: `${classification} data may not be sent to tool ${ctx.tool}`,
+          reason: `${label} needs a declared model provider to check provider restrictions`,
         };
       }
       if (ctx.provider !== undefined) {
         if (rule.forbiddenProviders.includes(ctx.provider.id)) {
           return {
             decision: "deny",
-            reason: `${classification} data may not be sent to provider ${ctx.provider.id}`,
+            reason: `${label} may not be sent to provider ${ctx.provider.id}`,
           };
         }
         if (rule.forbiddenProviderTerms.includes(ctx.provider.terms)) {
           return {
             decision: "deny",
-            reason: `${classification} data may not be sent to ${ctx.provider.terms} provider ${ctx.provider.id}`,
+            reason: `${label} may not be sent to ${ctx.provider.terms} provider ${ctx.provider.id}`,
           };
         }
       }
       return undefined;
     }
     case "provider_terms":
-      if (ctx.provider === undefined || rule.allowed.includes(ctx.provider.terms)) return undefined;
+      if (ctx.provider === undefined) {
+        return {
+          decision: "deny",
+          reason: "No model provider declared; provider terms cannot be checked",
+        };
+      }
+      if (rule.allowed.includes(ctx.provider.terms)) return undefined;
       return {
         decision: "deny",
         reason: `Provider ${ctx.provider.id} has ${ctx.provider.terms} terms, not allowed here`,
       };
+    default:
+      return { decision: "deny", reason: "Unknown rule kind" };
   }
+}
+
+function builtin(decision: DecisionKind, ruleId: string, reason: string): Decision {
+  return { decision, policyId: BUILTIN_POLICY_ID, ruleId, reason };
+}
+
+function baselineDecisions(policies: readonly Policy[], ctx: PolicyContext): Decision[] {
+  const decisions: Decision[] = [];
+  if ((SIDE_EFFECT_CAPABILITIES as readonly string[]).includes(ctx.capability)) {
+    decisions.push(
+      builtin(
+        "require_approval",
+        "side-effect-approval",
+        `Capability ${ctx.capability} has side effects and always requires human approval`,
+      ),
+    );
+  }
+  const egressCapable = (EGRESS_CAPABILITIES as readonly string[]).includes(ctx.capability);
+  if (!egressCapable && ctx.targetDomain === undefined) return decisions;
+  const target = ctx.targetDomain;
+  if (target === undefined) {
+    decisions.push(
+      builtin(
+        "deny",
+        "egress-target-required",
+        `Capability ${ctx.capability} can make outbound requests and must declare its target domain`,
+      ),
+    );
+    return decisions;
+  }
+  if (isBlockedEgressHost(target)) {
+    decisions.push(
+      builtin(
+        "deny",
+        "blocked-host",
+        `Host ${normaliseDomain(target)} is an IP literal, local, link-local, metadata or private name and is never an allowed egress target`,
+      ),
+    );
+    return decisions;
+  }
+  const allowlisted = policies.some((policy) =>
+    policy.rules.some(
+      (rule) =>
+        rule.kind === "egress_allowlist" &&
+        rule.capabilities.includes(ctx.capability) &&
+        rule.domains.some((pattern) => matchesDomain(target, pattern)),
+    ),
+  );
+  if (!allowlisted) {
+    decisions.push(
+      builtin(
+        "deny",
+        "egress-not-allowlisted",
+        `No egress allowlist permits ${ctx.capability} to reach ${normaliseDomain(target)}`,
+      ),
+    );
+  }
+  return decisions;
+}
+
+function invalidPolicyId(input: unknown): string {
+  if (typeof input === "object" && input !== null && "id" in input) {
+    const { id } = input;
+    if (typeof id === "string" && id !== "") return id;
+  }
+  return "invalid";
 }
 
 export function evaluateAll(policies: readonly Policy[], context: PolicyContext): Decision[] {
   const ctx = PolicyContextSchema.parse(context);
   const decisions: Decision[] = [];
   if (!ctx.grantedCapabilities.includes(ctx.capability)) {
+    decisions.push(
+      builtin(
+        "deny",
+        "capability-not-granted",
+        `Step was not granted capability ${ctx.capability}`,
+      ),
+    );
+  }
+  const parsed: Policy[] = [];
+  for (const input of policies as readonly unknown[]) {
+    const result = PolicySchema.safeParse(input);
+    if (result.success) {
+      parsed.push(result.data);
+      continue;
+    }
     decisions.push({
       decision: "deny",
-      policyId: BUILTIN_POLICY_ID,
-      ruleId: "capability-not-granted",
-      reason: `Step was not granted capability ${ctx.capability}`,
+      policyId: invalidPolicyId(input),
+      ruleId: "invalid-policy",
+      reason: "Policy failed validation and was treated as deny",
     });
   }
-  for (const policy of policies) {
+  for (const policy of parsed) {
     policy.rules.forEach((rule, index) => {
       const outcome = checkRule(rule, ctx);
       if (outcome !== undefined) {
@@ -151,6 +270,7 @@ export function evaluateAll(policies: readonly Policy[], context: PolicyContext)
       }
     });
   }
+  decisions.push(...baselineDecisions(parsed, ctx));
   return decisions;
 }
 

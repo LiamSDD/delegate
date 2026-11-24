@@ -4,6 +4,7 @@ import "@fontsource/instrument-serif";
 import "./globals.css";
 
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 import type { ReactNode } from "react";
 
 import { CommandPaletteProvider } from "@/components/command-palette";
@@ -24,7 +25,8 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  await connection();
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

@@ -25,8 +25,8 @@
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {
-    "pre-commit": "node scripts/scan-secrets.mjs --staged && node scripts/format-staged.mjs",
-    "pre-push": "pnpm check"
+    "pre-commit": ". scripts/git-hooks.rc.sh && node scripts/scan-secrets.mjs --staged && node scripts/format-staged.mjs",
+    "pre-push": ". scripts/git-hooks.rc.sh && pnpm check"
   },
   "devDependencies": {
     "@eslint/js": "catalog:",

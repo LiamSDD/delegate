@@ -3,7 +3,7 @@ import {
   type MessageCreateParamsStreaming,
   type RawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/messages";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { createAnthropicProvider } from "./anthropic";
@@ -106,6 +106,48 @@ const request: ModelRequest = {
   ],
 };
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("Anthropic BYOK client", () => {
+  it("requires a non-empty visitor key", () => {
+    expect(() => createAnthropicProvider({})).toThrow(/key/);
+    expect(() => createAnthropicProvider({ apiKey: "   " })).toThrow(/key/);
+    expect(() =>
+      createAnthropicProvider({ createStream: () => Promise.resolve(replay(toolUseStream)) }),
+    ).not.toThrow();
+  });
+
+  it("never falls back to server credentials or base URL from the environment", async () => {
+    vi.stubEnv("ANTHROPIC_BASE_URL", "https://env-proxy.invalid");
+    vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "server-token");
+    vi.stubEnv("ANTHROPIC_API_KEY", "server-key");
+    const seen: { url: string; headers: Headers; redirect: RequestInit["redirect"] }[] = [];
+    const provider = createAnthropicProvider({
+      apiKey: "sk-visitor",
+      fetch: (input, init) => {
+        seen.push({
+          url: input instanceof Request ? input.url : String(input),
+          headers: new Headers(init?.headers),
+          redirect: init?.redirect,
+        });
+        return Promise.resolve(
+          new Response('{"type":"error","error":{"type":"api_error","message":"x"}}', {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      },
+    });
+    await expect(collect(provider.stream(request))).rejects.toBeInstanceOf(ProviderHttpError);
+    expect(seen[0]?.url.startsWith("https://api.anthropic.com/")).toBe(true);
+    expect(seen[0]?.headers.get("authorization")).toBe("Bearer sk-visitor");
+    expect(JSON.stringify([...(seen[0]?.headers.entries() ?? [])])).not.toMatch(/server-/);
+    expect(seen[0]?.redirect).toBe("error");
+  });
+});
+
 describe("Anthropic adapter", () => {
   it("normalises thinking, text, tool use, usage and stop reason", async () => {
     const provider = createAnthropicProvider({
@@ -136,7 +178,8 @@ describe("Anthropic adapter", () => {
       ["refusal", "refusal"],
       ["max_tokens", "max_tokens"],
       ["end_turn", "end"],
-      ["pause_turn", "error"],
+      ["pause_turn", "pause_turn"],
+      ["some_future_reason", "error"],
     ] as const) {
       const provider = createAnthropicProvider({
         createStream: () =>

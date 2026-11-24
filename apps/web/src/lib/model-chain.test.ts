@@ -12,6 +12,7 @@ const config = {
       keyless: true,
       terms: "public-demo-ok",
       dataPolicy: "x",
+      maxClassification: "public",
     },
     {
       id: "llm7",
@@ -20,8 +21,16 @@ const config = {
       keyless: true,
       terms: "public-demo-ok",
       dataPolicy: "x",
+      maxClassification: "public",
     },
-    { id: "webllm", kind: "webllm", keyless: true, terms: "public-demo-ok", dataPolicy: "x" },
+    {
+      id: "webllm",
+      kind: "webllm",
+      keyless: true,
+      terms: "local-only",
+      dataPolicy: "x",
+      maxClassification: "public",
+    },
     {
       id: "ollama",
       kind: "ollama",
@@ -29,6 +38,7 @@ const config = {
       keyless: true,
       terms: "local-only",
       dataPolicy: "x",
+      maxClassification: "public",
     },
     {
       id: "nvidia",
@@ -38,6 +48,7 @@ const config = {
       keyless: false,
       terms: "evaluation-only",
       dataPolicy: "x",
+      maxClassification: "public",
     },
     {
       id: "anthropic",
@@ -46,6 +57,15 @@ const config = {
       keyless: false,
       terms: "byok",
       dataPolicy: "x",
+      maxClassification: "public",
+      pricing: {
+        claude: {
+          inputUsdPerMTok: 1,
+          outputUsdPerMTok: 1,
+          cacheReadUsdPerMTok: 1,
+          cacheWriteUsdPerMTok: 1,
+        },
+      },
     },
   ],
   roles: {
@@ -101,6 +121,15 @@ describe("summariseKeylessChain", () => {
           roles: ["fast"],
         },
       ],
+    });
+  });
+
+  it("rejects config the runtime schema rejects, such as unknown fields", () => {
+    expect(
+      summariseKeylessChain({ ...config, providers: [{ ...config.providers[0], extra: true }] }),
+    ).toEqual({
+      status: "unavailable",
+      reason: "config/models.json did not match the expected schema",
     });
   });
 

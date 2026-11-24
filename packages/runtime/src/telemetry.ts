@@ -17,9 +17,13 @@ import {
   type SpanExporter,
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace";
-import { ATTR_ERROR_TYPE, ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
+import {
+  ATTR_ERROR_TYPE,
+  ATTR_HTTP_RESPONSE_STATUS_CODE,
+  ATTR_SERVICE_NAME,
+} from "@opentelemetry/semantic-conventions";
 
-import { type TokenUsage } from "./providers/types";
+import { ProviderHttpError, type TokenUsage } from "./providers/types";
 
 export const GEN_AI_ATTRIBUTES = {
   operationName: "gen_ai.operation.name",
@@ -186,6 +190,8 @@ export async function withGenAiSpan<T>(
         const exception = error instanceof Error ? error : new Error(String(error));
         span.recordException(exception);
         span.setAttribute(ATTR_ERROR_TYPE, exception.name);
+        if (error instanceof ProviderHttpError)
+          span.setAttribute(ATTR_HTTP_RESPONSE_STATUS_CODE, error.status);
         span.setStatus({ code: SpanStatusCode.ERROR, message: exception.message });
         throw error;
       } finally {

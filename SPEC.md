@@ -255,11 +255,11 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 ### M0 · Foundation
 - [x] Monorepo (pnpm + Turborepo) with `apps/web` and the six packages
 - [x] Local quality gate (no hosted CI): `pnpm check` runs typecheck, lint, test and build; a git pre-push hook runs it
-- [ ] Drizzle schema: orgs, workspaces, members, runs, run_events, artifacts, approvals, audit_log, policies, memories, documents, chunks (pgvector); RLS policies and migration
-- [ ] Typed `RunEvent` union, `models.ts`, budget module, policy-engine skeleton, OpenTelemetry setup
-- [ ] Design tokens and the home page shell
-- [ ] `docs/`: ARCHITECTURE, SECURITY, adr/, PROGRESS, DEMO_SCRIPT
-- [ ] Claude Code workflow: CLAUDE.md, commands, agents, hooks (secret scan, pre-push `pnpm check`)
+- [x] Drizzle schema: orgs, workspaces, members, runs, run_events, artifacts, approvals, audit_log, policies, memories, documents, chunks (pgvector); RLS policies and migration
+- [x] Typed `RunEvent` union, `models.ts`, budget module, policy-engine skeleton, OpenTelemetry setup
+- [x] Design tokens and the home page shell
+- [x] `docs/`: ARCHITECTURE, SECURITY, adr/, PROGRESS, DEMO_SCRIPT
+- [x] Claude Code workflow: CLAUDE.md, commands, agents, hooks (secret scan, pre-push `pnpm check`)
 - [ ] *Done when:* `pnpm check` is green, the app is deployed, and the home page already looks premium
 
 ### M1 · Agent runtime + Company X-ray

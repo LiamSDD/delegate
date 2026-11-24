@@ -103,6 +103,10 @@ function median(values: readonly number[]): number {
   return sorted.length % 2 === 1 ? upper : ((sorted[middle - 1] ?? upper) + upper) / 2;
 }
 
+function clampScore(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
 function sameVersions(a: PromptVersions, b: PromptVersions): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   return [...keys].every((key) => a[key] === b[key]);
@@ -150,7 +154,13 @@ export function summariseTrials(input: readonly Trial[], confidence = 0.95): Res
     mission: first.mission,
     promptVersions: first.promptVersions,
     trials,
-    score: { mean: ci.mean, lower: ci.lower, upper: ci.upper, n: ci.n, confidence: ci.confidence },
+    score: {
+      mean: ci.mean,
+      lower: clampScore(ci.lower),
+      upper: clampScore(ci.upper),
+      n: ci.n,
+      confidence: ci.confidence,
+    },
     passRate: wilsonInterval(passes, trials.length, confidence),
     meanCostMicroUsd: trials.reduce((sum, trial) => sum + trial.costMicroUsd, 0) / trials.length,
     p50LatencyMs: median(trials.map((trial) => trial.latencyMs)),

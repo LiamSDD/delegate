@@ -3,6 +3,7 @@ import { InMemorySpanExporter } from "@opentelemetry/sdk-trace";
 import * as incubating from "@opentelemetry/semantic-conventions/incubating";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ProviderHttpError } from "./providers/types";
 import {
   GEN_AI_ATTRIBUTES,
   GEN_AI_INCUBATING_CONSTANTS,
@@ -129,6 +130,26 @@ describe("withGenAiSpan", () => {
     expect(span?.status).toEqual({ code: SpanStatusCode.ERROR, message: "boom" });
     expect(span?.events.map((event) => event.name)).toEqual(["exception"]);
     expect(span?.attributes["error.type"]).toBe("Error");
+  });
+
+  it("records provider HTTP errors by status only, never the response body", async () => {
+    const exporter = new InMemorySpanExporter();
+    const telemetry = start({ register: false, exporter });
+    await expect(
+      withGenAiSpan(
+        "chat m",
+        { operation: "chat", model: "m", provider: "p" },
+        () => Promise.reject(new ProviderHttpError("p", 503, "secret-body user prompt echo")),
+        telemetry.tracer,
+      ),
+    ).rejects.toBeInstanceOf(ProviderHttpError);
+    const [span] = exporter.getFinishedSpans();
+    expect(span?.attributes["http.response.status_code"]).toBe(503);
+    expect(span?.attributes["error.type"]).toBe("ProviderHttpError");
+    expect(span?.status.message).toBe("p: HTTP 503");
+    expect(JSON.stringify([span?.events, span?.attributes, span?.status])).not.toContain(
+      "secret-body",
+    );
   });
 
   it("nests spans through the async context manager when registered globally", async () => {

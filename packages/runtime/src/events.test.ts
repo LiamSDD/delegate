@@ -395,3 +395,130 @@ describe("foldRun", () => {
     expect(() => foldRun([])).toThrow(EventOrderError);
   });
 });
+
+describe("plan schema invariants", () => {
+  const proposed = (steps: unknown[]) =>
+    envelope(2, { type: "plan.proposed", payload: { version: 1, steps } });
+
+  it("rejects duplicate step ids", () => {
+    expect(() => parseRunEvent(proposed([researchStep, { ...analysisStep, id: "s1" }]))).toThrow(
+      /Duplicate step id s1/,
+    );
+  });
+
+  it("rejects inputs that reference unknown steps", () => {
+    expect(() => parseRunEvent(proposed([{ ...analysisStep, inputs: ["s9"] }]))).toThrow(
+      /unknown step s9/,
+    );
+  });
+
+  it("rejects budget shares that sum above 1", () => {
+    expect(() =>
+      parseRunEvent(proposed([researchStep, { ...analysisStep, budgetShare: 0.6 }])),
+    ).toThrow(/budgetShare/);
+    expect(() =>
+      parseRunEvent(
+        proposed([
+          { ...researchStep, budgetShare: 0.1 },
+          { ...analysisStep, budgetShare: 0.2 },
+          { ...analysisStep, id: "s3", budgetShare: 0.7 },
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("applies the same invariants to plan.revised", () => {
+    expect(() =>
+      parseRunEvent(
+        envelope(3, {
+          type: "plan.revised",
+          payload: { version: 2, steps: [researchStep, researchStep], reason: "dup" },
+        }),
+      ),
+    ).toThrow(/Duplicate step id/);
+  });
+});
+
+describe("usage events", () => {
+  it("accepts an estimated flag for providers that omit usage", () => {
+    const parsed = parseRunEvent(
+      envelope(1, { type: "usage.updated", stepId: "s1", payload: { ...usage, estimated: true } }),
+    );
+    expect(parsed.type === "usage.updated" && parsed.payload.estimated).toBe(true);
+  });
+});
+
+describe("foldRun ordering rules", () => {
+  it("requires run.created first", () => {
+    expect(() => foldRun(build([samples["plan.proposed"]]))).toThrow(/run.created/);
+    expect(() => foldRun(build([samples["run.created"], samples["run.created"]]))).toThrow(
+      EventOrderError,
+    );
+  });
+
+  it("rejects events after a terminal state", () => {
+    expect(() =>
+      foldRun(build([samples["run.created"], samples["run.completed"], samples["plan.proposed"]])),
+    ).toThrow(/terminal/);
+    expect(() =>
+      foldRun(build([samples["run.created"], samples["run.failed"], samples["run.completed"]])),
+    ).toThrow(EventOrderError);
+  });
+
+  it("rejects plan approval for a version that is not the current plan", () => {
+    expect(() =>
+      foldRun(
+        build([
+          samples["run.created"],
+          samples["plan.proposed"],
+          {
+            type: "plan.approved",
+            payload: { version: 2, approvedBy: { type: "member", id: "m_1" } },
+          },
+        ]),
+      ),
+    ).toThrow(/version 2/);
+    expect(() => foldRun(build([samples["run.created"], samples["plan.approved"]]))).toThrow(
+      EventOrderError,
+    );
+  });
+
+  it("rejects step events for steps that are not in the plan", () => {
+    expect(() => foldRun(build([samples["run.created"], samples["step.started"]]))).toThrow(
+      /unknown step s1/,
+    );
+    expect(() =>
+      foldRun(
+        build([
+          samples["run.created"],
+          samples["plan.proposed"],
+          samples["plan.approved"],
+          {
+            type: "step.completed",
+            stepId: "s9",
+            payload: { outcome: "succeeded", summary: "x", artifactIds: [] },
+          },
+        ]),
+      ),
+    ).toThrow(/unknown step s9/);
+  });
+
+  it("stores artifacts without prototype pollution", () => {
+    const state = foldRun(
+      build([
+        samples["run.created"],
+        samples["plan.proposed"],
+        samples["plan.approved"],
+        {
+          type: "artifact.created",
+          payload: { artifactId: "__proto__", kind: "report", title: "Proto", version: 1 },
+        },
+        { type: "artifact.updated", payload: { artifactId: "constructor", version: 2 } },
+      ]),
+    );
+    expect(Object.keys(state.artifacts)).toEqual(["__proto__"]);
+    expect(state.artifacts.__proto__).toMatchObject({ title: "Proto" });
+    expect(Object.prototype.hasOwnProperty.call(state.artifacts, "constructor")).toBe(false);
+    expect(({} as Record<string, unknown>).title).toBeUndefined();
+  });
+});

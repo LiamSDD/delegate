@@ -104,13 +104,37 @@ describe("Budget", () => {
     expect(budget.remaining("s2")).toEqual({ tokens: 8500, microUsd: 48_800 });
   });
 
-  it("reports unlimited dimensions as Infinity", () => {
-    const budget = new Budget({ run: { maxTokens: 100 } });
-    expect(budget.remaining()).toEqual({ tokens: 100, microUsd: Number.POSITIVE_INFINITY });
+  it("refuses to run without explicit, finite run limits", () => {
+    const unlimited = { run: {} } as unknown as ConstructorParameters<typeof Budget>[0];
+    expect(() => new Budget(unlimited)).toThrow();
+    expect(() => new Budget({ run: { maxTokens: 100, maxMicroUsd: Infinity } })).toThrow();
+    expect(() => new Budget({ run: { maxTokens: -1, maxMicroUsd: 0 } })).toThrow();
+    expect(() =>
+      Budget.forPlan(
+        { maxTokens: 100 } as unknown as { maxTokens: number; maxMicroUsd: number },
+        [],
+      ),
+    ).toThrow();
+    expect(new Budget({ run: { maxTokens: 100, maxMicroUsd: 0 } }).remaining()).toEqual({
+      tokens: 100,
+      microUsd: 0,
+    });
+  });
+
+  it("charges estimated usage like reported usage", () => {
+    const budget = new Budget({ run: { maxTokens: 100, maxMicroUsd: 0 } });
+    budget.charge(usage({ inputTokens: 60, outputTokens: 20, estimated: true }), "s1");
+    expect(budget.spent("s1")).toEqual({ tokens: 80, microUsd: 0 });
+    expect(() => {
+      budget.charge(usage({ inputTokens: 30, estimated: true }));
+    }).toThrow(BudgetExceededError);
   });
 
   it("throws BudgetExceededError when a step exceeds its token limit and still records the spend", () => {
-    const budget = new Budget({ run: { maxTokens: 10_000 }, steps: { s1: { maxTokens: 1000 } } });
+    const budget = new Budget({
+      run: { maxTokens: 10_000, maxMicroUsd: 0 },
+      steps: { s1: { maxTokens: 1000 } },
+    });
     const error = (() => {
       try {
         budget.charge(usage({ inputTokens: 900, outputTokens: 200 }), "s1");
@@ -132,7 +156,7 @@ describe("Budget", () => {
   });
 
   it("throws when the run exceeds its micro-USD cap, including a $0 cap", () => {
-    const zero = new Budget({ run: { maxMicroUsd: 0 } });
+    const zero = new Budget({ run: { maxTokens: 1_000_000, maxMicroUsd: 0 } });
     expect(() => {
       zero.charge(usage({ inputTokens: 10, costMicroUsd: 0 }));
     }).not.toThrow();
@@ -151,7 +175,7 @@ describe("Budget", () => {
   });
 
   it("rejects fractional or negative charges", () => {
-    const budget = new Budget({ run: {} });
+    const budget = new Budget({ run: { maxTokens: 1000, maxMicroUsd: 1000 } });
     expect(() => {
       budget.charge(usage({ costMicroUsd: 0.5 }));
     }).toThrow();

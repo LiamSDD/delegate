@@ -180,6 +180,39 @@ describe("isRegression", () => {
     expect(comparison.regression).toBe(true);
   });
 
+  it("tests the worsening against the threshold one-sided: t = (worsening - threshold) / SE", () => {
+    const comparison = compareScores([1, 3], [0, 2], 0.5);
+    expect(comparison.worsening).toBe(1);
+    expect(comparison.standardError).toBeCloseTo(Math.SQRT2, 12);
+    expect(comparison.df).toBeCloseTo(2, 12);
+    const t = 0.5 / Math.SQRT2;
+    expect(comparison.t).toBeCloseTo(t, 12);
+    expect(comparison.pValue).toBeCloseTo(0.5 - t / (2 * Math.sqrt(2 + t * t)), 10);
+    expect(comparison.pValue).toBeCloseTo(0.378732, 6);
+    expect(comparison.regression).toBe(false);
+  });
+
+  it("gives half the two-sided Welch p-value at threshold 0 when the candidate is worse", () => {
+    const candidate = [0.85, 0.83, 0.9, 0.84, 0.86];
+    const twoSided = welchTTest(baseline, candidate).pValue;
+    expect(compareScores(baseline, candidate, 0).pValue).toBeCloseTo(twoSided / 2, 12);
+  });
+
+  it("does not flag a drop that is only significant against zero, not against the threshold", () => {
+    const steady = [0.9, 0.91, 0.89, 0.9, 0.9];
+    const candidate = [0.845, 0.855, 0.835, 0.845, 0.845];
+    expect(welchTTest(steady, candidate).pValue).toBeLessThan(0.001);
+    const comparison = compareScores(steady, candidate, 0.05);
+    expect(comparison.worsening).toBeCloseTo(0.055, 12);
+    expect(comparison.pValue).toBeGreaterThan(0.05);
+    expect(comparison.regression).toBe(false);
+  });
+
+  it("handles zero variance on both sides", () => {
+    expect(compareScores([1, 1, 1], [0, 0, 0], 0.5)).toMatchObject({ pValue: 0, regression: true });
+    expect(compareScores([1, 1, 1], [0, 0, 0], 1)).toMatchObject({ pValue: 1, regression: false });
+  });
+
   it("requires at least two trials per side", () => {
     expect(() => isRegression([0.9], [0.1, 0.2], 0.05)).toThrow(InsufficientDataError);
   });

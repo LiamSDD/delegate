@@ -19,13 +19,14 @@ export const emptyRunTotals: RunTotals = {
 };
 
 export const runBudgetSchema = z.strictObject({
-  maxTokens: z.int().positive().optional(),
-  maxCostMicroUsd: z.int().nonnegative().optional(),
-  maxSteps: z.int().positive().optional(),
+  maxTokens: z.int().nonnegative().optional(),
+  maxMicroUsd: z.int().nonnegative().optional(),
 });
 
 export type RunBudget = z.infer<typeof runBudgetSchema>;
 
-export const promptVersionsSchema = z.record(z.string(), z.string());
+const promptSlug = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
+
+export const promptVersionsSchema = z.record(promptSlug, z.int().positive());
 
 export type PromptVersions = z.infer<typeof promptVersionsSchema>;

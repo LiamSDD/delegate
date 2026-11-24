@@ -84,6 +84,17 @@ describe("summariseTrials", () => {
     ]);
   });
 
+  it("clamps the score interval to the [0, 1] score range", () => {
+    const result = summariseTrials([trial(0, 0, false), trial(1, 1, true)]);
+    expect(result.score.mean).toBe(0.5);
+    expect(result.score.lower).toBe(0);
+    expect(result.score.upper).toBe(1);
+    const high = summariseTrials([trial(0, 1, true), trial(1, 0.98, true), trial(2, 1, true)]);
+    expect(high.score.upper).toBe(1);
+    expect(high.score.lower).toBeGreaterThan(0.9);
+    expect(high.score.lower).toBeLessThan(high.score.mean);
+  });
+
   it("refuses to mix cases or prompt versions", () => {
     expect(() =>
       summariseTrials([trial(0, 1, true), { ...trial(1, 1, true), caseId: "xray-002" }]),

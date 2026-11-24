@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ModelsConfigSchema,
+  ProviderConfigSchema,
   parseModelsConfig,
   resolveBaseUrl,
   resolveChain,
@@ -24,15 +25,24 @@ const fixture: ModelsConfig = parseModelsConfig({
       baseUrl: "https://keyless.test/v1",
       keyless: true,
       terms: "public-demo-ok",
+      maxClassification: "public",
       dataPolicy: "community",
     },
-    { id: "browser", kind: "webllm", keyless: true, terms: "local-only", dataPolicy: "on device" },
+    {
+      id: "browser",
+      kind: "webllm",
+      keyless: true,
+      terms: "local-only",
+      maxClassification: "confidential",
+      dataPolicy: "on device",
+    },
     {
       id: "local",
       kind: "ollama",
       baseUrl: "http://localhost:11434/v1",
       keyless: true,
       terms: "local-only",
+      maxClassification: "restricted",
       dataPolicy: "on device",
     },
     {
@@ -42,6 +52,7 @@ const fixture: ModelsConfig = parseModelsConfig({
       apiKeyEnv: "TRIAL_KEY",
       keyless: false,
       terms: "evaluation-only",
+      maxClassification: "public",
       dataPolicy: "trial",
     },
     {
@@ -52,6 +63,7 @@ const fixture: ModelsConfig = parseModelsConfig({
       requiredEnv: ["FREE_ACCOUNT"],
       keyless: false,
       terms: "public-demo-ok",
+      maxClassification: "internal",
       dataPolicy: "no training",
     },
     {
@@ -60,6 +72,7 @@ const fixture: ModelsConfig = parseModelsConfig({
       apiKeyEnv: "CLAUDE_KEY",
       keyless: false,
       terms: "byok",
+      maxClassification: "confidential",
       dataPolicy: "byok",
       pricing: {
         big: {
@@ -91,7 +104,11 @@ const fixture: ModelsConfig = parseModelsConfig({
   },
 });
 
-const server: Omit<ChainContext, "config"> = { audience: "owner", environment: "server" };
+const server: Omit<ChainContext, "config"> = {
+  audience: "owner",
+  environment: "server",
+  classification: "public",
+};
 
 function chainIds(env: Record<string, string | undefined>, context: Omit<ChainContext, "config">) {
   return resolveChain("planner", env, { config: fixture, ...context }).map(
@@ -127,10 +144,19 @@ describe("config/models.json", () => {
       const chain = resolveChain(
         role,
         {},
-        { config, audience: "public-demo", environment: "server" },
+        { config, audience: "public-demo", environment: "server", classification: "public" },
       );
       expect(chain.length).toBeGreaterThan(0);
       expect(chain.every((entry) => entry.provider.keyless)).toBe(true);
+    }
+  });
+
+  it("caps keyless community providers at public data", () => {
+    const config = parseModelsConfig(rootConfig);
+    for (const provider of config.providers) {
+      if (provider.keyless && provider.terms === "public-demo-ok") {
+        expect(provider.maxClassification).toBe("public");
+      }
     }
   });
 
@@ -163,6 +189,7 @@ describe("ModelsConfigSchema", () => {
       kind: "openai-compatible",
       baseUrl: "https://p.test/v1",
       terms: "public-demo-ok",
+      maxClassification: "public",
       dataPolicy: "x",
     };
     const roles = {
@@ -193,10 +220,9 @@ describe("resolveChain", () => {
   });
 
   it("includes the browser model only in the browser", () => {
-    expect(chainIds({}, { audience: "public-demo", environment: "browser" })).toEqual([
-      "keyless",
-      "browser",
-    ]);
+    expect(
+      chainIds({}, { audience: "public-demo", environment: "browser", classification: "public" }),
+    ).toEqual(["keyless", "browser"]);
   });
 
   it("includes local models only on explicit opt-in", () => {
@@ -217,15 +243,65 @@ describe("resolveChain", () => {
     expect(
       chainIds(
         { TRIAL_KEY: "t", FREE_KEY: "f", FREE_ACCOUNT: "acc" },
-        { audience: "public-demo", environment: "server" },
+        { audience: "public-demo", environment: "server", classification: "public" },
       ),
     ).toEqual(["keyless", "free"]);
   });
 
   it("never spends the owner's BYOK key in the public demo but accepts a visitor key", () => {
-    const demo = { audience: "public-demo", environment: "server" } as const;
+    const demo = {
+      audience: "public-demo",
+      environment: "server",
+      classification: "public",
+    } as const;
     expect(chainIds({ CLAUDE_KEY: "owner" }, demo)).toEqual(["keyless"]);
-    expect(chainIds({}, { ...demo, byokProviders: ["claude"] })).toEqual(["keyless", "claude"]);
+    expect(chainIds({}, { ...demo, byokKeys: { claude: "sk-visitor" } })).toEqual([
+      "keyless",
+      "claude",
+    ]);
+  });
+
+  it("includes a BYOK provider only when a non-empty key is actually supplied", () => {
+    const demo = {
+      audience: "public-demo",
+      environment: "server",
+      classification: "public",
+    } as const;
+    expect(chainIds({}, { ...demo, byokKeys: { claude: "" } })).toEqual(["keyless"]);
+    expect(chainIds({}, { ...demo, byokKeys: { claude: "   " } })).toEqual(["keyless"]);
+    expect(chainIds({}, { ...demo, byokKeys: { keyless: "sk" } })).toEqual(["keyless"]);
+  });
+
+  it("routes only to providers allowed for the data classification", () => {
+    const everything = { TRIAL_KEY: "t", FREE_KEY: "f", FREE_ACCOUNT: "acc", CLAUDE_KEY: "c" };
+    const owner = { ...server, localOptIn: true };
+    expect(chainIds(everything, { ...owner, classification: "public" })).toEqual([
+      "keyless",
+      "local",
+      "trial",
+      "free",
+      "claude",
+    ]);
+    expect(chainIds(everything, { ...owner, classification: "internal" })).toEqual([
+      "local",
+      "free",
+      "claude",
+    ]);
+    expect(chainIds(everything, { ...owner, classification: "confidential" })).toEqual([
+      "local",
+      "claude",
+    ]);
+    expect(chainIds(everything, { ...owner, classification: "restricted" })).toEqual(["local"]);
+  });
+
+  it("treats a missing classification as internal", () => {
+    const { classification: _omitted, ...unclassified } = server;
+    expect(
+      chainIds(
+        { FREE_KEY: "f", FREE_ACCOUNT: "acc" },
+        unclassified as Omit<ChainContext, "config">,
+      ),
+    ).toEqual(["free"]);
   });
 
   it("returns entry details with quirks defaulted", () => {
@@ -244,6 +320,60 @@ describe("resolveChain", () => {
 });
 
 describe("resolveBaseUrl", () => {
+  const provider = (overrides: Record<string, unknown>) =>
+    ProviderConfigSchema.parse({
+      id: "p",
+      kind: "openai-compatible",
+      keyless: true,
+      terms: "public-demo-ok",
+      maxClassification: "public",
+      dataPolicy: "x",
+      baseUrl: "https://p.test/v1",
+      ...overrides,
+    });
+
+  it("requires https for hosted providers", () => {
+    expect(resolveBaseUrl(provider({}), {})).toBe("https://p.test/v1");
+    expect(() => resolveBaseUrl(provider({ baseUrl: "http://p.test/v1" }), {})).toThrow(/https/);
+    expect(() => resolveBaseUrl(provider({ baseUrl: "ftp://p.test/v1" }), {})).toThrow(/https/);
+    expect(() => resolveBaseUrl(provider({ baseUrl: "not a url" }), {})).toThrow();
+  });
+
+  it("allows http only for Ollama and local-only providers on loopback", () => {
+    expect(
+      resolveBaseUrl(
+        provider({ kind: "ollama", terms: "local-only", baseUrl: "http://localhost:11434/v1" }),
+        {},
+      ),
+    ).toBe("http://localhost:11434/v1");
+    expect(
+      resolveBaseUrl(provider({ terms: "local-only", baseUrl: "http://127.0.0.1:8080/v1" }), {}),
+    ).toBe("http://127.0.0.1:8080/v1");
+    expect(() =>
+      resolveBaseUrl(provider({ terms: "local-only", baseUrl: "http://10.0.0.5/v1" }), {}),
+    ).toThrow(/https/);
+  });
+
+  it("rejects an insecure base URL when the config is parsed", () => {
+    expect(() =>
+      parseModelsConfig({
+        version: 1,
+        providers: [
+          {
+            id: "p",
+            kind: "openai-compatible",
+            baseUrl: "http://p.test/v1",
+            keyless: true,
+            terms: "public-demo-ok",
+            maxClassification: "public",
+            dataPolicy: "x",
+          },
+        ],
+        roles: { planner: [], worker: [], fast: [] },
+      }),
+    ).toThrow(/https/);
+  });
+
   it("substitutes env placeholders", () => {
     const free = fixture.providers.find((provider) => provider.id === "free");
     if (free === undefined) throw new Error("fixture");

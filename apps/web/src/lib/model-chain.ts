@@ -1,29 +1,13 @@
-import { z } from "zod";
+import {
+  type ChainEntry,
+  type ModelRole,
+  type ModelsConfig,
+  parseModelsConfig,
+  type ProviderConfig,
+  resolveChain,
+} from "@delegate/runtime";
 
-const ROLES = ["planner", "worker", "fast"] as const;
-export type ModelRole = (typeof ROLES)[number];
-
-const ProviderSchema = z.object({
-  id: z.string().min(1),
-  kind: z.enum(["openai-compatible", "anthropic", "webllm", "ollama"]),
-  keyless: z.boolean(),
-  terms: z.enum(["public-demo-ok", "evaluation-only", "local-only", "byok"]),
-});
-
-const EntrySchema = z.object({
-  provider: z.string().min(1),
-  model: z.string().min(1),
-});
-
-const ConfigSchema = z.object({
-  version: z.literal(1),
-  providers: z.array(ProviderSchema),
-  roles: z.object({
-    planner: z.array(EntrySchema),
-    worker: z.array(EntrySchema),
-    fast: z.array(EntrySchema),
-  }),
-});
+const ROLES: readonly ModelRole[] = ["planner", "worker", "fast"];
 
 export type ProviderPlacement = "hosted" | "in-browser";
 
@@ -44,32 +28,49 @@ const DISPLAY_NAMES: Readonly<Record<string, string>> = {
   webllm: "WebLLM",
 };
 
+const NO_ENV = {} as const;
+
 function displayName(id: string): string {
   return DISPLAY_NAMES[id] ?? id.charAt(0).toUpperCase() + id.slice(1);
 }
 
-function placementOf(kind: z.infer<typeof ProviderSchema>["kind"]): ProviderPlacement | null {
+function placementOf(kind: ProviderConfig["kind"]): ProviderPlacement | null {
   if (kind === "openai-compatible") return "hosted";
   if (kind === "webllm") return "in-browser";
   return null;
 }
 
+function parse(input: unknown): ModelsConfig | null {
+  try {
+    return parseModelsConfig(input);
+  } catch {
+    return null;
+  }
+}
+
+function publicVisitorChain(config: ModelsConfig, role: ModelRole): ChainEntry[] {
+  return resolveChain(role, NO_ENV, {
+    config,
+    audience: "public-demo",
+    environment: "browser",
+    classification: "public",
+  });
+}
+
 export function summariseKeylessChain(input: unknown): ChainSummary {
-  const parsed = ConfigSchema.safeParse(input);
-  if (!parsed.success) {
+  const config = parse(input);
+  if (config === null) {
     return {
       status: "unavailable",
       reason: "config/models.json did not match the expected schema",
     };
   }
-  const providers = new Map(parsed.data.providers.map((provider) => [provider.id, provider]));
   const summary = new Map<string, KeylessProvider>();
 
   for (const role of ROLES) {
-    for (const entry of parsed.data.roles[role]) {
-      const provider = providers.get(entry.provider);
-      if (provider === undefined || !provider.keyless || provider.terms !== "public-demo-ok")
-        continue;
+    for (const entry of publicVisitorChain(config, role)) {
+      const { provider } = entry;
+      if (!provider.keyless) continue;
       const placement = placementOf(provider.kind);
       if (placement === null) continue;
       const existing = summary.get(provider.id) ?? {

@@ -44,7 +44,14 @@ export interface TokenUsage {
   cacheWriteTokens: number;
 }
 
-export const STOP_REASONS = ["end", "tool_use", "max_tokens", "refusal", "error"] as const;
+export const STOP_REASONS = [
+  "end",
+  "tool_use",
+  "max_tokens",
+  "refusal",
+  "pause_turn",
+  "error",
+] as const;
 export type StopReason = (typeof STOP_REASONS)[number];
 
 export type ModelStreamEvent =
@@ -53,7 +60,7 @@ export type ModelStreamEvent =
   | { type: "reasoning_signature"; signature: string }
   | { type: "tool_call_delta"; index: number; id?: string; name?: string; argumentsDelta: string }
   | { type: "tool_call_complete"; call: ToolCall }
-  | { type: "usage"; usage: TokenUsage }
+  | { type: "usage"; usage: TokenUsage; estimated?: boolean }
   | { type: "stop"; reason: StopReason; raw?: string };
 
 export interface StreamOptions {
@@ -94,7 +101,7 @@ export class ProviderHttpError extends ProviderError {
     readonly status: number,
     readonly bodySnippet: string,
   ) {
-    super(providerId, `HTTP ${status}${bodySnippet === "" ? "" : `: ${bodySnippet}`}`);
+    super(providerId, `HTTP ${status}`);
   }
 }
 

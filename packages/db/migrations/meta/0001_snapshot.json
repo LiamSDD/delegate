@@ -1,6 +1,6 @@
 {
-  "id": "83a4b1f5-85c5-4641-8e4e-9a7e2c9ef618",
-  "prevId": "686a602b-b0a5-423b-abd2-c3800359de6e",
+  "id": "294d405a-0fd2-4447-9eb4-54269062c9f2",
+  "prevId": "47e881bf-4780-4586-b3dc-928d8255c831",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -155,14 +155,32 @@
           ],
           "using": "app_workspace_role(\"audit_log\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
         },
-        "audit_log_insert": {
-          "name": "audit_log_insert",
+        "audit_log_definer_select": {
+          "name": "audit_log_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "audit_log_definer_insert": {
+          "name": "audit_log_definer_insert",
           "as": "PERMISSIVE",
           "for": "INSERT",
           "to": [
-            "delegate_app"
+            "delegate_definer"
           ],
-          "withCheck": "app_workspace_role(\"audit_log\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+          "withCheck": "true"
+        },
+        "audit_log_definer_delete": {
+          "name": "audit_log_definer_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
         }
       },
       "checkConstraints": {
@@ -289,6 +307,15 @@
             "delegate_app"
           ],
           "using": "app_workspace_role(\"policies\".\"workspace_id\") in ('owner', 'admin')"
+        },
+        "policies_definer_select": {
+          "name": "policies_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
         }
       },
       "checkConstraints": {
@@ -685,7 +712,7 @@
             "id",
             "workspace_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -870,7 +897,7 @@
             "id",
             "workspace_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -893,17 +920,26 @@
           "to": [
             "delegate_app"
           ],
-          "withCheck": "app_workspace_role(\"approvals\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+          "withCheck": "app_workspace_role(\"approvals\".\"workspace_id\") in ('owner', 'admin', 'operator') and \"approvals\".\"status\" = 'pending' and \"approvals\".\"resolved_at\" is null and \"approvals\".\"resolved_by\" is null"
         },
-        "approvals_update": {
-          "name": "approvals_update",
+        "approvals_definer_select": {
+          "name": "approvals_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "approvals_definer_update": {
+          "name": "approvals_definer_update",
           "as": "PERMISSIVE",
           "for": "UPDATE",
           "to": [
-            "delegate_app"
+            "delegate_definer"
           ],
-          "using": "app_workspace_role(\"approvals\".\"workspace_id\") in ('owner', 'admin', 'operator')",
-          "withCheck": "app_workspace_role(\"approvals\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+          "using": "true",
+          "withCheck": "true"
         }
       },
       "checkConstraints": {
@@ -1000,7 +1036,7 @@
             "id",
             "workspace_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1085,6 +1121,18 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "step_id": {
+          "name": "step_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1129,7 +1177,7 @@
             "id",
             "workspace_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1171,7 +1219,7 @@
         },
         "run_events_type_known": {
           "name": "run_events_type_known",
-          "value": "\"run_events\".\"type\" in ('run.created', 'plan.proposed', 'plan.approved', 'plan.revised', 'step.started', 'agent.spawned', 'agent.message', 'tool.called', 'tool.result', 'policy.decided', 'artifact.created', 'artifact.updated', 'critic.flagged', 'approval.requested', 'approval.resolved', 'usage.updated', 'step.completed', 'run.completed', 'run.failed')"
+          "value": "\"run_events\".\"type\" in ('run.created', 'plan.proposed', 'plan.approved', 'plan.revised', 'step.started', 'agent.spawned', 'agent.message', 'tool.called', 'tool.result', 'policy.decided', 'artifact.created', 'artifact.updated', 'critic.flagged', 'approval.requested', 'approval.resolved', 'usage.updated', 'step.completed', 'run.completed', 'run.failed', 'model.fallback')"
         }
       },
       "isRLSEnabled": true
@@ -1211,13 +1259,14 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'pending'"
+          "default": "'planning'"
         },
         "created_by": {
           "name": "created_by",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "default": "nullif(current_setting('app.user_id', true), '')::uuid"
         },
         "parent_run_id": {
           "name": "parent_run_id",
@@ -1334,7 +1383,7 @@
             "id",
             "workspace_id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1366,7 +1415,7 @@
           "to": [
             "delegate_app"
           ],
-          "withCheck": "app_workspace_role(\"runs\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+          "withCheck": "app_workspace_role(\"runs\".\"workspace_id\") in ('owner', 'admin', 'operator') and \"runs\".\"created_by\" = nullif(current_setting('app.user_id', true), '')::uuid and \"runs\".\"totals\" = '{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"costMicroUsd\":0}'::jsonb"
         },
         "runs_update": {
           "name": "runs_update",
@@ -1377,6 +1426,34 @@
           ],
           "using": "app_workspace_role(\"runs\".\"workspace_id\") in ('owner', 'admin', 'operator')",
           "withCheck": "app_workspace_role(\"runs\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "runs_definer_select": {
+          "name": "runs_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "runs_definer_update": {
+          "name": "runs_definer_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true",
+          "withCheck": "true"
+        },
+        "runs_definer_delete": {
+          "name": "runs_definer_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
         }
       },
       "checkConstraints": {
@@ -1518,6 +1595,15 @@
             "delegate_app"
           ],
           "using": "app_workspace_role(\"members\".\"workspace_id\") in ('owner', 'admin') and (\"members\".\"role\" <> 'owner' or app_workspace_role(\"members\".\"workspace_id\") = 'owner')"
+        },
+        "members_definer_select": {
+          "name": "members_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
         }
       },
       "checkConstraints": {},
@@ -1650,6 +1736,15 @@
           ],
           "using": "\"users\".\"id\" = nullif(current_setting('app.user_id', true), '')::uuid",
           "withCheck": "\"users\".\"id\" = nullif(current_setting('app.user_id', true), '')::uuid"
+        },
+        "users_definer_select": {
+          "name": "users_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
         }
       },
       "checkConstraints": {},
@@ -1751,12 +1846,25 @@
           ],
           "using": "app_workspace_role(\"workspaces\".\"id\") in ('owner', 'admin')",
           "withCheck": "app_workspace_role(\"workspaces\".\"id\") in ('owner', 'admin')"
+        },
+        "workspaces_definer_select": {
+          "name": "workspaces_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
         }
       },
       "checkConstraints": {
         "workspaces_retention_days_positive": {
           "name": "workspaces_retention_days_positive",
           "value": "\"workspaces\".\"retention_days\" is null or \"workspaces\".\"retention_days\" > 0"
+        },
+        "workspaces_demo_retention_max_7_days": {
+          "name": "workspaces_demo_retention_max_7_days",
+          "value": "not \"workspaces\".\"is_demo\" or (\"workspaces\".\"retention_days\" is not null and \"workspaces\".\"retention_days\" <= 7)"
         }
       },
       "isRLSEnabled": true
@@ -1769,7 +1877,7 @@
       "values": [
         "pending",
         "approved",
-        "denied",
+        "rejected",
         "expired"
       ]
     },
@@ -1798,7 +1906,8 @@
       "values": [
         "public",
         "internal",
-        "confidential"
+        "confidential",
+        "restricted"
       ]
     },
     "public.member_role": {
@@ -1815,13 +1924,12 @@
       "name": "run_status",
       "schema": "public",
       "values": [
-        "pending",
         "planning",
-        "awaiting_approval",
+        "awaiting_plan_approval",
         "running",
+        "awaiting_approval",
         "completed",
-        "failed",
-        "cancelled"
+        "failed"
       ]
     },
     "public.user_kind": {

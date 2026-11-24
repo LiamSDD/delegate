@@ -36,19 +36,23 @@ export type AnthropicStreamFactory = (
 export interface AnthropicProviderOptions {
   id?: string;
   apiKey?: string;
+  baseURL?: string;
+  fetch?: typeof fetch;
   createStream?: AnthropicStreamFactory;
   timeoutMs?: number;
 }
 
-const STOP_REASONS: Record<AnthropicStopReason, StopReason> = {
+export const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+
+const STOP_REASONS: Partial<Record<string, StopReason>> = {
   end_turn: "end",
   stop_sequence: "end",
   tool_use: "tool_use",
   max_tokens: "max_tokens",
   model_context_window_exceeded: "max_tokens",
   refusal: "refusal",
-  pause_turn: "error",
-};
+  pause_turn: "pause_turn",
+} satisfies Record<AnthropicStopReason, StopReason>;
 
 function parseToolInput(argumentsJson: string): unknown {
   try {
@@ -155,12 +159,20 @@ function mapError(providerId: string, timeoutMs: number, error: unknown): unknow
 export function createAnthropicProvider(options: AnthropicProviderOptions): ModelProvider {
   const id = options.id ?? "anthropic";
   const timeoutMs = options.timeoutMs ?? 120_000;
+  const apiKey = options.apiKey?.trim() ?? "";
+  if (options.createStream === undefined && apiKey === "") {
+    throw new Error(`Provider ${id} needs a non-empty bring-your-own API key`);
+  }
+  const fetchImpl = options.fetch ?? globalThis.fetch;
   let client: Anthropic | undefined;
   const createStream: AnthropicStreamFactory =
     options.createStream ??
     (async (params, signal) => {
       client ??= new Anthropic({
-        apiKey: options.apiKey ?? null,
+        apiKey,
+        authToken: null,
+        baseURL: options.baseURL ?? ANTHROPIC_BASE_URL,
+        fetch: (input, init) => fetchImpl(input, { ...init, redirect: "error" }),
         maxRetries: 0,
         timeout: timeoutMs,
       });
@@ -272,7 +284,7 @@ export function createAnthropicProvider(options: AnthropicProviderOptions): Mode
       yield { type: "stop", reason: "error", raw: "stream ended without stop_reason" };
       return;
     }
-    yield { type: "stop", reason: STOP_REASONS[stopRaw], raw: stopRaw };
+    yield { type: "stop", reason: STOP_REASONS[stopRaw] ?? "error", raw: stopRaw };
   }
 
   return { id, stream };

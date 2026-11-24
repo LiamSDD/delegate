@@ -3,8 +3,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { parseModelsConfig, type ChainEntry } from "../models";
+import { ModelRouter } from "../router";
 import { createOpenAICompatibleProvider } from "./openai-compatible";
-import { parseSse } from "./sse";
+import { SseLimitError, SseLineSplitter, SseTimeoutError, parseSse } from "./sse";
 import {
   ProviderHttpError,
   ProviderNetworkError,
@@ -49,6 +51,41 @@ function fakeFetch(response: () => Response, captured: Captured[] = []): typeof 
   };
 }
 
+function never(onCancel?: () => void): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    pull: () => new Promise<void>(() => undefined),
+    cancel: () => {
+      onCancel?.();
+    },
+  });
+}
+
+function trickle(chunk: string, everyMs: number, count = Number.POSITIVE_INFINITY) {
+  const bytes = new TextEncoder().encode(chunk);
+  let sent = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return new ReadableStream<Uint8Array>({
+    pull: (controller) =>
+      new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          if (sent >= count) controller.close();
+          else controller.enqueue(bytes);
+          sent += 1;
+          resolve();
+        }, everyMs);
+      }),
+    cancel: () => {
+      clearTimeout(timer);
+    },
+  });
+}
+
+async function messagesOf(body: ReadableStream<Uint8Array>, options = {}) {
+  const out = [];
+  for await (const message of parseSse(body, options)) out.push(message);
+  return out;
+}
+
 function sseResponse(text: string, size = 7): Response {
   return new Response(chunked(text, size), {
     status: 200,
@@ -81,7 +118,216 @@ describe("parseSse", () => {
   });
 });
 
+describe("parseSse limits and timeouts", () => {
+  it("splits CR, LF and CRLF across chunk boundaries", async () => {
+    expect(await messagesOf(chunked("data: a\r\r\ndata: b\r\n\r\ndata: c\n\n", 1))).toEqual([
+      { event: undefined, data: "a" },
+      { event: undefined, data: "b" },
+      { event: undefined, data: "c" },
+    ]);
+  });
+
+  it("scans each appended character once, however the line is chunked", () => {
+    const splitter = new SseLineSplitter();
+    const piece = "x".repeat(256);
+    for (let index = 0; index < 3600; index += 1) expect(splitter.push(piece)).toEqual([]);
+    const [line] = splitter.push("\n");
+    expect(line).toHaveLength(256 * 3600);
+    expect(splitter.scannedChars).toBe(256 * 3600 + 1);
+  });
+
+  it("caps line, event and body size", async () => {
+    await expect(
+      messagesOf(chunked(`data: ${"x".repeat(2000)}\n\n`, 64), { maxLineChars: 1000 }),
+    ).rejects.toMatchObject({ limit: "line" });
+    await expect(
+      messagesOf(chunked(`data: ${"x".repeat(600)}\ndata: ${"y".repeat(600)}\n\n`, 64), {
+        maxEventChars: 1000,
+      }),
+    ).rejects.toMatchObject({ limit: "event" });
+    await expect(
+      messagesOf(chunked("data: 1\n\n".repeat(500), 64), { maxBodyBytes: 1000 }),
+    ).rejects.toBeInstanceOf(SseLimitError);
+  });
+
+  it("times out when no chunk arrives within the idle timeout and cancels the body", async () => {
+    let cancelled = false;
+    const error = await messagesOf(
+      never(() => {
+        cancelled = true;
+      }),
+      { idleTimeoutMs: 20 },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SseTimeoutError);
+    expect(error).toMatchObject({ kind: "idle", timeoutMs: 20 });
+    expect(cancelled).toBe(true);
+  });
+
+  it("resets the idle timeout on every chunk but enforces a total duration", async () => {
+    expect(await messagesOf(trickle("data: x\n\n", 15, 6), { idleTimeoutMs: 60 })).toHaveLength(6);
+    await expect(
+      messagesOf(trickle("data: x\n\n", 10), { idleTimeoutMs: 60, totalTimeoutMs: 80 }),
+    ).rejects.toMatchObject({ kind: "total" });
+  });
+});
+
 describe("OpenAI-compatible adapter", () => {
+  it("throws ProviderTimeoutError when the body stalls before any event", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "p",
+      baseUrl: "https://p.test/v1",
+      idleTimeoutMs: 20,
+      fetch: fakeFetch(() => new Response(never(), { status: 200 })),
+    });
+    const error = await collect(provider.stream(request)).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProviderTimeoutError);
+    expect(error).toMatchObject({ providerId: "p", timeoutMs: 20 });
+  });
+
+  it("enforces a total duration on slow but steady bodies", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "p",
+      baseUrl: "https://p.test/v1",
+      idleTimeoutMs: 60,
+      totalTimeoutMs: 80,
+      fetch: fakeFetch(
+        () =>
+          new Response(trickle('data: {"choices":[{"index":0,"delta":{"content":"x"}}]}\n\n', 10), {
+            status: 200,
+          }),
+      ),
+    });
+    await expect(collect(provider.stream(request))).rejects.toMatchObject({
+      name: "ProviderTimeoutError",
+      timeoutMs: 80,
+    });
+  });
+
+  it("lets the router fall back when a provider stalls before the first event", async () => {
+    const config = parseModelsConfig({
+      version: 1,
+      providers: ["slow", "fast"].map((id) => ({
+        id,
+        kind: "openai-compatible",
+        baseUrl: `https://${id}.test/v1`,
+        keyless: true,
+        terms: "public-demo-ok",
+        maxClassification: "public",
+        dataPolicy: "x",
+      })),
+      roles: {
+        planner: [
+          { provider: "slow", model: "m", contextWindow: 32000, supportsTools: true },
+          { provider: "fast", model: "m", contextWindow: 32000, supportsTools: true },
+        ],
+        worker: [],
+        fast: [],
+      },
+    });
+    const reasons: string[] = [];
+    const router = new ModelRouter({
+      env: {},
+      context: { config, audience: "public-demo", environment: "server", classification: "public" },
+      createProvider: (entry: ChainEntry) =>
+        createOpenAICompatibleProvider({
+          id: entry.provider.id,
+          baseUrl: entry.provider.baseUrl ?? "",
+          idleTimeoutMs: 20,
+          fetch: fakeFetch(() =>
+            entry.provider.id === "slow"
+              ? new Response(never(), { status: 200 })
+              : sseResponse(fixture("text.sse")),
+          ),
+        }),
+      emitFallback: (payload) => reasons.push(payload.reason),
+    });
+    const routed = await router.open("planner", request);
+    expect(routed.provider).toBe("fast");
+    expect(reasons).toEqual(["timeout"]);
+  });
+
+  it("stops with error instead of buffering an oversized response", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "p",
+      baseUrl: "https://p.test/v1",
+      maxBodyBytes: 512,
+      fetch: fakeFetch(() => sseResponse(fixture("text.sse"), 64)),
+    });
+    expect((await collect(provider.stream(request))).at(-1)).toEqual({
+      type: "stop",
+      reason: "error",
+      raw: "response exceeded size limit",
+    });
+  });
+
+  it("reads only a bounded prefix of error bodies and keeps them out of the message", async () => {
+    let pulled = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1024;
+        controller.enqueue(new TextEncoder().encode("secret-body ".repeat(85)));
+      },
+    });
+    const provider = createOpenAICompatibleProvider({
+      id: "p",
+      baseUrl: "https://p.test/v1",
+      fetch: fakeFetch(() => new Response(endless, { status: 503 })),
+    });
+    const error = await collect(provider.stream(request)).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProviderHttpError);
+    expect(pulled).toBeLessThanOrEqual(8 * 1024);
+    expect((error as ProviderHttpError).bodySnippet.length).toBeLessThanOrEqual(300);
+    expect((error as Error).message).toBe("p: HTTP 503");
+  });
+
+  it("does not hang on an error body that never arrives", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "p",
+      baseUrl: "https://p.test/v1",
+      idleTimeoutMs: 20,
+      fetch: fakeFetch(() => new Response(never(), { status: 502 })),
+    });
+    await expect(collect(provider.stream(request))).rejects.toMatchObject({ status: 502 });
+  });
+
+  it("refuses redirects", async () => {
+    const inits: RequestInit[] = [];
+    const provider = createOpenAICompatibleProvider({
+      id: "p",
+      baseUrl: "https://p.test/v1",
+      fetch: (_input, init) => {
+        if (init !== undefined) inits.push(init);
+        return Promise.resolve(sseResponse(fixture("text.sse")));
+      },
+    });
+    await collect(provider.stream(request));
+    expect(inits[0]?.redirect).toBe("error");
+  });
+
+  it("does not double-append tool names that the provider resends in full", async () => {
+    const provider = createOpenAICompatibleProvider({
+      id: "p",
+      baseUrl: "https://p.test/v1",
+      fetch: fakeFetch(() => sseResponse(fixture("tool-calls-repeated-name.sse"), 13)),
+    });
+    const events = await collect(provider.stream(request));
+    expect(events.filter((event) => event.type === "tool_call_complete")).toEqual([
+      {
+        type: "tool_call_complete",
+        call: { id: "call_a", name: "web_fetch", argumentsJson: '{"url":"https://example.com"}' },
+      },
+      {
+        type: "tool_call_complete",
+        call: { id: "call_b", name: "web_fetch", argumentsJson: "{}" },
+      },
+    ]);
+    const names = events
+      .filter((event) => event.type === "tool_call_delta" && event.index === 0)
+      .map((event) => (event.type === "tool_call_delta" ? (event.name ?? "") : ""))
+      .join("");
+    expect(names).toBe("web_fetch");
+  });
+
   it("streams text and normalises usage with cached tokens", async () => {
     const captured: Captured[] = [];
     const provider = createOpenAICompatibleProvider({
@@ -191,7 +437,7 @@ describe("OpenAI-compatible adapter", () => {
     expect((await collect(provider.stream(request))).at(-1)).toEqual({
       type: "stop",
       reason: "error",
-      raw: "upstream overloaded",
+      raw: "provider_error",
     });
   });
 

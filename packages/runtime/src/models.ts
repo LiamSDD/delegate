@@ -4,6 +4,16 @@ import { type ModelRole } from "./events";
 
 export const PROVIDER_KINDS = ["openai-compatible", "anthropic", "webllm", "ollama"] as const;
 export const PROVIDER_TERMS = ["public-demo-ok", "evaluation-only", "local-only", "byok"] as const;
+export const DATA_CLASSIFICATIONS = ["public", "internal", "confidential", "restricted"] as const;
+export const DataClassificationSchema = z.enum(DATA_CLASSIFICATIONS);
+export type DataClassification = z.infer<typeof DataClassificationSchema>;
+export const DEFAULT_CLASSIFICATION: DataClassification = "internal";
+export const PUBLIC_DEMO_TERMS: readonly (typeof PROVIDER_TERMS)[number][] = [
+  "public-demo-ok",
+  "local-only",
+];
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 const envName = z.string().regex(/^[A-Z][A-Z0-9_]*$/);
 
@@ -24,6 +34,7 @@ export const ProviderConfigSchema = z.strictObject({
   requiredEnv: z.array(envName).optional(),
   keyless: z.boolean(),
   terms: z.enum(PROVIDER_TERMS),
+  maxClassification: DataClassificationSchema,
   dataPolicy: z.string().min(1),
   limits: z
     .strictObject({
@@ -77,6 +88,13 @@ export const ModelsConfigSchema = z
       ) {
         ctx.addIssue({ code: "custom", message: `Provider ${provider.id} needs a baseUrl` });
       }
+      if (provider.baseUrl !== undefined) {
+        const problem = baseUrlProblem(
+          provider,
+          provider.baseUrl.replace(/\$\{[A-Z][A-Z0-9_]*\}/g, "placeholder"),
+        );
+        if (problem !== undefined) ctx.addIssue({ code: "custom", message: problem });
+      }
     }
     for (const role of ["planner", "worker", "fast"] as const) {
       for (const entry of config.roles[role]) {
@@ -109,7 +127,8 @@ export interface ChainContext {
   config: ModelsConfig;
   audience: "public-demo" | "owner";
   environment: "server" | "browser";
-  byokProviders?: readonly string[];
+  classification: DataClassification;
+  byokKeys?: Readonly<Record<string, string | undefined>>;
   localOptIn?: boolean;
 }
 
@@ -133,17 +152,39 @@ function companionsPresent(provider: ProviderConfig, env: Env): boolean {
   return (provider.requiredEnv ?? []).every((name) => hasEnv(env, name));
 }
 
+function classificationRank(classification: DataClassification | undefined): number {
+  return DATA_CLASSIFICATIONS.indexOf(classification ?? DEFAULT_CLASSIFICATION);
+}
+
+export function allowsClassification(
+  provider: ProviderConfig,
+  classification: DataClassification | undefined,
+): boolean {
+  return classificationRank(classification) <= classificationRank(provider.maxClassification);
+}
+
+function visitorKeySupplied(provider: ProviderConfig, context: Omit<ChainContext, "config">) {
+  const key = context.byokKeys?.[provider.id];
+  return key !== undefined && key.trim() !== "";
+}
+
 export function isProviderAvailable(
   provider: ProviderConfig,
   env: Env,
   context: Omit<ChainContext, "config">,
 ): boolean {
-  if (context.audience === "public-demo" && provider.terms === "evaluation-only") return false;
+  if (!allowsClassification(provider, context.classification)) return false;
+  if (context.audience === "public-demo") {
+    const allowed =
+      PUBLIC_DEMO_TERMS.includes(provider.terms) ||
+      (provider.terms === "byok" && visitorKeySupplied(provider, context));
+    if (!allowed) return false;
+  }
   if (provider.kind === "webllm") return context.environment === "browser";
   if (provider.kind === "ollama")
     return context.environment === "server" && context.localOptIn === true;
   if (provider.terms === "byok") {
-    if (context.byokProviders?.includes(provider.id) === true) return true;
+    if (visitorKeySupplied(provider, context)) return true;
     return (
       context.audience !== "public-demo" &&
       hasEnv(env, provider.apiKeyEnv) &&
@@ -173,13 +214,32 @@ export function resolveChain(role: ModelRole, env: Env, context: ChainContext): 
   return chain;
 }
 
+function baseUrlProblem(provider: ProviderConfig, url: string): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return `Provider ${provider.id} baseUrl is not a valid URL`;
+  }
+  if (parsed.protocol === "https:") return undefined;
+  const localHttp =
+    parsed.protocol === "http:" &&
+    (provider.kind === "ollama" ||
+      (provider.terms === "local-only" && LOOPBACK_HOSTS.has(parsed.hostname)));
+  if (localHttp) return undefined;
+  return `Provider ${provider.id} baseUrl must use https (http is allowed only for local providers on loopback)`;
+}
+
 export function resolveBaseUrl(provider: ProviderConfig, env: Env): string | undefined {
   if (provider.baseUrl === undefined) return undefined;
-  return provider.baseUrl.replace(/\$\{([A-Z][A-Z0-9_]*)\}/g, (_match, name: string) => {
+  const resolved = provider.baseUrl.replace(/\$\{([A-Z][A-Z0-9_]*)\}/g, (_match, name: string) => {
     const value = env[name];
     if (value === undefined || value.trim() === "") {
       throw new Error(`Provider ${provider.id} baseUrl needs env ${name}`);
     }
     return encodeURIComponent(value);
   });
+  const problem = baseUrlProblem(provider, resolved);
+  if (problem !== undefined) throw new Error(problem);
+  return resolved;
 }

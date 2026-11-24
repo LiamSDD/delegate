@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { parseSse } from "./sse";
+import { SseLimitError, SseTimeoutError, parseSse, readBoundedText } from "./sse";
 import {
   ProviderHttpError,
   ProviderNetworkError,
@@ -26,7 +26,18 @@ export interface OpenAICompatibleOptions {
   apiKey?: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  idleTimeoutMs?: number;
+  totalTimeoutMs?: number;
+  maxBodyBytes?: number;
   now?: () => number;
+}
+
+const ERROR_BODY_MAX_BYTES = 4096;
+const ERROR_SNIPPET_CHARS = 300;
+
+function mergeToolName(existing: string, incoming: string): string {
+  if (existing === "" || incoming.startsWith(existing)) return incoming;
+  return existing + incoming;
 }
 
 const ChunkSchema = z.object({
@@ -141,14 +152,16 @@ function toWireBody(request: ModelRequest): Record<string, unknown> {
   return body;
 }
 
-async function snippet(response: Response): Promise<string> {
-  const text = await response.text().catch(() => "");
-  return text.slice(0, 300);
+async function snippet(response: Response, idleTimeoutMs: number): Promise<string> {
+  const text = await readBoundedText(response.body, ERROR_BODY_MAX_BYTES, idleTimeoutMs);
+  return text.slice(0, ERROR_SNIPPET_CHARS);
 }
 
 export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions): ModelProvider {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? 60_000;
+  const idleTimeoutMs = options.idleTimeoutMs ?? 30_000;
+  const totalTimeoutMs = options.totalTimeoutMs ?? 300_000;
   const now = options.now ?? Date.now;
   const url = `${options.baseUrl.replace(/\/+$/, "")}${options.chatPath ?? "/chat/completions"}`;
 
@@ -175,6 +188,7 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
         method: "POST",
         headers,
         body: JSON.stringify(toWireBody(request)),
+        redirect: "error",
         signal,
       });
     } catch (error) {
@@ -193,14 +207,20 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
     request: ModelRequest,
     streamOptions?: StreamOptions,
   ): AsyncGenerator<ModelStreamEvent> {
+    const startedAt = Date.now();
     const response = await open(request, streamOptions);
     if (response.status === 429) {
       const retryAfterMs = parseRetryAfter(response.headers, now());
       await response.body?.cancel().catch(() => undefined);
       throw new RateLimitedError(options.id, retryAfterMs);
     }
-    if (!response.ok)
-      throw new ProviderHttpError(options.id, response.status, await snippet(response));
+    if (!response.ok) {
+      throw new ProviderHttpError(
+        options.id,
+        response.status,
+        await snippet(response, idleTimeoutMs),
+      );
+    }
     if (response.body === null)
       throw new ProviderHttpError(options.id, response.status, "empty body");
 
@@ -224,61 +244,97 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
       }
     };
 
-    for await (const message of parseSse(response.body)) {
-      if (message.data === "[DONE]") break;
-      let json: unknown;
+    const messages = parseSse(response.body, {
+      idleTimeoutMs,
+      totalTimeoutMs: Math.max(1, totalTimeoutMs - (Date.now() - startedAt)),
+      ...(options.maxBodyBytes === undefined ? {} : { maxBodyBytes: options.maxBodyBytes }),
+    });
+    const nextMessage = async () => {
       try {
-        json = JSON.parse(message.data);
-      } catch {
-        yield { type: "stop", reason: "error", raw: "invalid JSON chunk" };
-        return;
+        return await messages.next();
+      } catch (error) {
+        if (error instanceof SseTimeoutError) {
+          throw new ProviderTimeoutError(
+            options.id,
+            error.kind === "idle" ? idleTimeoutMs : totalTimeoutMs,
+          );
+        }
+        if (error instanceof SseLimitError) return "too_large" as const;
+        throw error;
       }
-      const chunk = ChunkSchema.safeParse(json);
-      if (!chunk.success) {
-        yield { type: "stop", reason: "error", raw: "unexpected chunk shape" };
-        return;
-      }
-      if (chunk.data.error) {
-        yield { type: "stop", reason: "error", raw: chunk.data.error.message };
-        return;
-      }
-      if (chunk.data.usage) {
-        const cached = chunk.data.usage.prompt_tokens_details?.cached_tokens ?? 0;
-        usage = {
-          inputTokens: Math.max(0, chunk.data.usage.prompt_tokens - cached),
-          outputTokens: chunk.data.usage.completion_tokens,
-          cacheReadTokens: cached,
-          cacheWriteTokens: 0,
-        };
-      }
-      for (const choice of chunk.data.choices ?? []) {
-        const delta = choice.delta;
-        const reasoning = delta?.reasoning_content ?? delta?.reasoning;
-        if (reasoning) yield { type: "reasoning_delta", text: reasoning };
-        if (delta?.content) yield { type: "text_delta", text: delta.content };
-        for (const toolDelta of delta?.tool_calls ?? []) {
-          const existing = calls.get(toolDelta.index) ?? { id: "", name: "", args: "" };
-          const id = toolDelta.id ?? undefined;
-          const name = toolDelta.function?.name ?? undefined;
-          const argumentsDelta = toolDelta.function?.arguments ?? "";
-          calls.set(toolDelta.index, {
-            id: id ?? existing.id,
-            name: existing.name + (name ?? ""),
-            args: existing.args + argumentsDelta,
-          });
-          yield {
-            type: "tool_call_delta",
-            index: toolDelta.index,
-            ...(id === undefined ? {} : { id }),
-            ...(name === undefined ? {} : { name }),
-            argumentsDelta,
+    };
+
+    try {
+      for (let next = await nextMessage(); ; next = await nextMessage()) {
+        if (next === "too_large") {
+          yield { type: "stop", reason: "error", raw: "response exceeded size limit" };
+          return;
+        }
+        if (next.done === true) break;
+        const message = next.value;
+        if (message.data === "[DONE]") break;
+        let json: unknown;
+        try {
+          json = JSON.parse(message.data);
+        } catch {
+          yield { type: "stop", reason: "error", raw: "invalid JSON chunk" };
+          return;
+        }
+        const chunk = ChunkSchema.safeParse(json);
+        if (!chunk.success) {
+          yield { type: "stop", reason: "error", raw: "unexpected chunk shape" };
+          return;
+        }
+        if (chunk.data.error) {
+          yield { type: "stop", reason: "error", raw: "provider_error" };
+          return;
+        }
+        if (chunk.data.usage) {
+          const cached = chunk.data.usage.prompt_tokens_details?.cached_tokens ?? 0;
+          usage = {
+            inputTokens: Math.max(0, chunk.data.usage.prompt_tokens - cached),
+            outputTokens: chunk.data.usage.completion_tokens,
+            cacheReadTokens: cached,
+            cacheWriteTokens: 0,
           };
         }
-        if (choice.finish_reason) {
-          finish = choice.finish_reason;
-          yield* flushCalls();
+        for (const choice of chunk.data.choices ?? []) {
+          const delta = choice.delta;
+          const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+          if (reasoning) yield { type: "reasoning_delta", text: reasoning };
+          if (delta?.content) yield { type: "text_delta", text: delta.content };
+          for (const toolDelta of delta?.tool_calls ?? []) {
+            const existing = calls.get(toolDelta.index) ?? { id: "", name: "", args: "" };
+            const id = toolDelta.id ?? undefined;
+            const incomingName = toolDelta.function?.name ?? undefined;
+            const mergedName =
+              incomingName === undefined
+                ? existing.name
+                : mergeToolName(existing.name, incomingName);
+            const nameFragment = mergedName.slice(existing.name.length);
+            const name = nameFragment === "" ? undefined : nameFragment;
+            const argumentsDelta = toolDelta.function?.arguments ?? "";
+            calls.set(toolDelta.index, {
+              id: id ?? existing.id,
+              name: mergedName,
+              args: existing.args + argumentsDelta,
+            });
+            yield {
+              type: "tool_call_delta",
+              index: toolDelta.index,
+              ...(id === undefined ? {} : { id }),
+              ...(name === undefined ? {} : { name }),
+              argumentsDelta,
+            };
+          }
+          if (choice.finish_reason) {
+            finish = choice.finish_reason;
+            yield* flushCalls();
+          }
         }
       }
+    } finally {
+      await messages.return(undefined);
     }
 
     yield* flushCalls();

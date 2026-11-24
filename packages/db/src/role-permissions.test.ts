@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { withTenant } from "./client";
-import { approvals, members, policies, runs } from "./schema";
+import { resolveApproval, withTenant } from "./client";
+import { members, policies, runs } from "./schema";
 import { seedMember, seedUser, seedWorkspaceContent } from "./testing/fixtures";
 import { createTestDb, expectDatabaseError, type TestDb } from "./testing/pglite";
 
@@ -57,29 +57,22 @@ describe("role permissions inside a workspace", () => {
         .returning(),
     );
     expect(created?.workspaceId).toBe(seeded.workspace.id);
-    expect(created?.status).toBe("pending");
+    expect(created?.status).toBe("planning");
+    expect(created?.createdBy).toBe(ids.operator);
   });
 
   it("does not let a viewer resolve an approval", async () => {
-    const updated = await withTenant(db, ids.viewer, (tx) =>
-      tx
-        .update(approvals)
-        .set({ status: "approved", resolvedAt: new Date(), resolvedBy: ids.viewer })
-        .where(eq(approvals.id, seeded.approval.id))
-        .returning({ id: approvals.id }),
+    await expectDatabaseError(
+      withTenant(db, ids.viewer, (tx) => resolveApproval(tx, seeded.approval.id, "approved")),
+      /requires operator/,
     );
-    expect(updated).toHaveLength(0);
   });
 
-  it("lets an operator resolve an approval", async () => {
-    const updated = await withTenant(db, ids.operator, (tx) =>
-      tx
-        .update(approvals)
-        .set({ status: "approved", resolvedAt: new Date(), resolvedBy: ids.operator })
-        .where(eq(approvals.id, seeded.approval.id))
-        .returning({ id: approvals.id }),
+  it("lets an operator resolve an approval on a run someone else created", async () => {
+    const resolved = await withTenant(db, ids.operator, (tx) =>
+      resolveApproval(tx, seeded.approval.id, "approved"),
     );
-    expect(updated).toHaveLength(1);
+    expect(resolved).toMatchObject({ status: "approved", resolvedBy: ids.operator });
   });
 
   it("does not let an operator manage policies", async () => {

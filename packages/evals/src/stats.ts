@@ -238,6 +238,9 @@ export interface ScoreComparison {
   candidateMean: number;
   worsening: number;
   threshold: number;
+  standardError: number;
+  t: number;
+  df: number;
   pValue: number;
   alpha: number;
   regression: boolean;
@@ -252,16 +255,38 @@ export function compareScores(
   if (!(threshold >= 0)) throw new RangeError("Threshold must be non-negative");
   const alpha = options.alpha ?? 0.05;
   const higherIsBetter = options.higherIsBetter ?? true;
-  const test = welchTTest(baseline, candidate);
-  const worsening = higherIsBetter ? test.meanA - test.meanB : test.meanB - test.meanA;
+  const baselineMean = mean(baseline);
+  const candidateMean = mean(candidate);
+  const termA = sampleVariance(baseline) / baseline.length;
+  const termB = sampleVariance(candidate) / candidate.length;
+  const standardError = Math.sqrt(termA + termB);
+  const worsening = higherIsBetter ? baselineMean - candidateMean : candidateMean - baselineMean;
+  const excess = worsening - threshold;
+  let t: number;
+  let df: number;
+  let pValue: number;
+  if (standardError === 0) {
+    t = excess > 0 ? Number.POSITIVE_INFINITY : excess < 0 ? Number.NEGATIVE_INFINITY : 0;
+    df = baseline.length + candidate.length - 2;
+    pValue = excess > 0 ? 0 : 1;
+  } else {
+    t = excess / standardError;
+    df =
+      (termA + termB) ** 2 /
+      (termA ** 2 / (baseline.length - 1) + termB ** 2 / (candidate.length - 1));
+    pValue = studentTCdf(-t, df);
+  }
   return {
-    baselineMean: test.meanA,
-    candidateMean: test.meanB,
+    baselineMean,
+    candidateMean,
     worsening,
     threshold,
-    pValue: test.pValue,
+    standardError,
+    t,
+    df,
+    pValue,
     alpha,
-    regression: worsening > threshold && test.pValue < alpha,
+    regression: worsening > threshold && pValue < alpha,
   };
 }
 

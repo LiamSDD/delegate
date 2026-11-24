@@ -50,8 +50,19 @@ Money is always integer **micro-USD** (1 USD = 1,000,000), the same unit as `run
 ## Trials and results
 
 - Every case runs at least 3 trials. A `Trial` (`TrialSchema`) records the prompt versions used (`{ "planner": 1, "critic": 2 }`), every serving `{ role, provider, model, calls }`, latency, cost, deterministic check results and judge scores.
-- `summariseTrials` turns the trials of one case into a `Result` with mean score ± 95% CI (t-distribution) and a Wilson interval for the pass rate. Trials with different prompt versions are never mixed.
-- `isRegression(baseline, candidate, threshold)` (`src/stats.ts`) flags a regression only when the drop exceeds the threshold **and** a Welch t-test gives p < 0.05, so noise on free providers does not block a merge and a real drop does.
+- `summariseTrials` turns the trials of one case into a `Result` with mean score ± 95% CI (t-distribution) and a Wilson interval for the pass rate. Trials with different prompt versions are never mixed. Scores live in [0, 1], so the score interval is clamped to [0, 1]: `lower = max(0, mean − h)`, `upper = min(1, mean + h)` with `h = t(0.975, n−1) · s / √n`. With few trials near 0 or 1 the clamped side is conservative, not exact; the raw half-width is still `h`.
+- `isRegression(baseline, candidate, threshold)` (`src/stats.ts`) is a one-sided Welch test of "the candidate is worse by more than the threshold", so noise on free providers does not block a merge and a real drop does:
+
+  ```text
+  worsening = mean(baseline) − mean(candidate)        (reversed when lower is better, e.g. cost)
+  SE        = √(s²_baseline / n_baseline + s²_candidate / n_candidate)
+  df        = Welch–Satterthwaite
+  t         = (worsening − threshold) / SE
+  p         = P(T_df ≥ t)
+  regression ⇔ worsening > threshold and p < α        (α = 0.05 by default)
+  ```
+
+  `compareScores` returns `worsening`, `SE`, `t`, `df` and `p` so a verdict can be checked by hand. When both samples have zero variance, `p` is 0 if the worsening exceeds the threshold and 1 otherwise.
 
 ## Rules
 

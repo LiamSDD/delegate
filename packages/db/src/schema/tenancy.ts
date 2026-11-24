@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { memberRole, userKind } from "./enums";
-import { admins, appRole, currentUserId, hasWorkspaceRole, readers } from "./rls";
+import { admins, appRole, currentUserId, definerPolicies, hasWorkspaceRole, readers } from "./rls";
 
 export const users = pgTable(
   "users",
@@ -36,6 +36,7 @@ export const users = pgTable(
       using: sql`${t.id} = ${currentUserId}`,
       withCheck: sql`${t.id} = ${currentUserId}`,
     }),
+    ...definerPolicies("users", ["select"]),
   ],
 ).enableRLS();
 
@@ -75,6 +76,10 @@ export const workspaces = pgTable(
       "workspaces_retention_days_positive",
       sql`${t.retentionDays} is null or ${t.retentionDays} > 0`,
     ),
+    check(
+      "workspaces_demo_retention_max_7_days",
+      sql`not ${t.isDemo} or (${t.retentionDays} is not null and ${t.retentionDays} <= 7)`,
+    ),
     pgPolicy("workspaces_select", {
       for: "select",
       to: appRole,
@@ -86,6 +91,7 @@ export const workspaces = pgTable(
       using: hasWorkspaceRole(t.id, admins),
       withCheck: hasWorkspaceRole(t.id, admins),
     }),
+    ...definerPolicies("workspaces", ["select"]),
   ],
 ).enableRLS();
 
@@ -129,6 +135,7 @@ export const members = pgTable(
         to: appRole,
         using: manages,
       }),
+      ...definerPolicies("members", ["select"]),
     ];
   },
 ).enableRLS();

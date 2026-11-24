@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { UsageSchema, type Usage } from "./events";
 import { type ModelPrice, type ModelsConfig } from "./models";
 import { type TokenUsage } from "./providers/types";
@@ -7,8 +9,18 @@ export interface BudgetLimits {
   maxMicroUsd?: number;
 }
 
+export interface RunBudgetLimits {
+  maxTokens: number;
+  maxMicroUsd: number;
+}
+
+export const RunBudgetLimitsSchema = z.object({
+  maxTokens: z.number().int().nonnegative(),
+  maxMicroUsd: z.number().int().nonnegative(),
+});
+
 export interface BudgetOptions {
-  run: BudgetLimits;
+  run: RunBudgetLimits;
   steps?: Record<string, BudgetLimits>;
 }
 
@@ -73,23 +85,26 @@ export class Budget {
   private readonly stepSpent = new Map<string, BudgetAmount>();
   private readonly stepLimits: Map<string, BudgetLimits>;
 
-  constructor(private readonly options: BudgetOptions) {
+  private readonly run: RunBudgetLimits;
+
+  constructor(options: BudgetOptions) {
+    this.run = RunBudgetLimitsSchema.parse(options.run);
     this.stepLimits = new Map(Object.entries(options.steps ?? {}));
   }
 
-  static forPlan(run: BudgetLimits, steps: readonly { id: string; budgetShare: number }[]): Budget {
-    const share = (limit: number | undefined, fraction: number): number | undefined =>
-      limit === undefined ? undefined : Math.floor(limit * fraction);
-    const limits: Record<string, BudgetLimits> = {};
+  static forPlan(
+    run: RunBudgetLimits,
+    steps: readonly { id: string; budgetShare: number }[],
+  ): Budget {
+    const limits = RunBudgetLimitsSchema.parse(run);
+    const stepLimits: Record<string, BudgetLimits> = {};
     for (const step of steps) {
-      const maxTokens = share(run.maxTokens, step.budgetShare);
-      const maxMicroUsd = share(run.maxMicroUsd, step.budgetShare);
-      limits[step.id] = {
-        ...(maxTokens === undefined ? {} : { maxTokens }),
-        ...(maxMicroUsd === undefined ? {} : { maxMicroUsd }),
+      stepLimits[step.id] = {
+        maxTokens: Math.floor(limits.maxTokens * step.budgetShare),
+        maxMicroUsd: Math.floor(limits.maxMicroUsd * step.budgetShare),
       };
     }
-    return new Budget({ run, steps: limits });
+    return new Budget({ run: limits, steps: stepLimits });
   }
 
   spent(stepId?: string): BudgetAmount {
@@ -99,8 +114,8 @@ export class Budget {
 
   remaining(stepId?: string): BudgetAmount {
     const run = {
-      tokens: remainingOf(this.options.run.maxTokens, this.runSpent.tokens),
-      microUsd: remainingOf(this.options.run.maxMicroUsd, this.runSpent.microUsd),
+      tokens: remainingOf(this.run.maxTokens, this.runSpent.tokens),
+      microUsd: remainingOf(this.run.maxMicroUsd, this.runSpent.microUsd),
     };
     if (stepId === undefined) return run;
     const limits = this.stepLimits.get(stepId) ?? {};
@@ -123,11 +138,11 @@ export class Budget {
       this.stepSpent.set(stepId, step);
     }
 
-    const run = this.options.run;
-    if (run.maxTokens !== undefined && this.runSpent.tokens > run.maxTokens) {
+    const run = this.run;
+    if (this.runSpent.tokens > run.maxTokens) {
       throw new BudgetExceededError("run", "tokens", run.maxTokens, this.runSpent.tokens);
     }
-    if (run.maxMicroUsd !== undefined && this.runSpent.microUsd > run.maxMicroUsd) {
+    if (this.runSpent.microUsd > run.maxMicroUsd) {
       throw new BudgetExceededError("run", "micro_usd", run.maxMicroUsd, this.runSpent.microUsd);
     }
     if (stepId === undefined) return;

@@ -456,6 +456,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@delegate/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       '@neondatabase/serverless':
         specifier: 'catalog:'
         version: 1.2.1
@@ -466,9 +469,12 @@ importers:
         specifier: 'catalog:'
         version: 4.6.7
     devDependencies:
-      '@delegate/runtime':
+      '@delegate/evals':
         specifier: workspace:*
-        version: link:../runtime
+        version: link:../evals
+      '@delegate/policy':
+        specifier: workspace:*
+        version: link:../policy
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.6.0

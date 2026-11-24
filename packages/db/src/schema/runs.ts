@@ -17,10 +17,12 @@ import {
 import { RUN_EVENT_TYPES } from "../event-types";
 import { type PromptVersions, type RunBudget, type RunTotals, emptyRunTotals } from "../run-json";
 import { approvalStatus, runStatus } from "./enums";
-import { operators, readers, tenantPolicies } from "./rls";
+import { currentUserId, definerPolicies, operators, readers, tenantPolicies } from "./rls";
 import { users, workspaces } from "./tenancy";
 
 const runEventTypeList = sql.raw(RUN_EVENT_TYPES.map((type) => `'${type}'`).join(", "));
+
+const zeroTotals = sql.raw(`'${JSON.stringify(emptyRunTotals)}'::jsonb`);
 
 export const runs = pgTable(
   "runs",
@@ -31,8 +33,10 @@ export const runs = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     mission: text("mission").notNull(),
     input: jsonb("input").$type<unknown>().notNull(),
-    status: runStatus("status").notNull().default("pending"),
-    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    status: runStatus("status").notNull().default("planning"),
+    createdBy: uuid("created_by")
+      .default(currentUserId)
+      .references(() => users.id, { onDelete: "set null" }),
     parentRunId: uuid("parent_run_id"),
     forkedFromSeq: integer("forked_from_seq"),
     promptVersions: jsonb("prompt_versions").$type<PromptVersions>().notNull().default({}),
@@ -48,17 +52,19 @@ export const runs = pgTable(
       name: "runs_parent_run_fk",
       columns: [t.parentRunId, t.workspaceId],
       foreignColumns: [t.id, t.workspaceId],
-    }),
+    }).onDelete("cascade"),
     check(
       "runs_forked_from_seq_needs_parent",
       sql`${t.forkedFromSeq} is null or (${t.parentRunId} is not null and ${t.forkedFromSeq} >= 0)`,
     ),
     index("runs_workspace_created_idx").on(t.workspaceId, t.createdAt),
-    ...tenantPolicies("runs", t.workspaceId, {
-      select: readers,
-      insert: operators,
-      update: operators,
-    }),
+    ...tenantPolicies(
+      "runs",
+      t.workspaceId,
+      { select: readers, insert: operators, update: operators },
+      sql`${t.createdBy} = ${currentUserId} and ${t.totals} = ${zeroTotals}`,
+    ),
+    ...definerPolicies("runs", ["select", "update", "delete"]),
   ],
 ).enableRLS();
 
@@ -67,7 +73,7 @@ const runOf = (runId: AnyPgColumn, workspaceId: AnyPgColumn, name: string) =>
     name,
     columns: [runId, workspaceId],
     foreignColumns: [runs.id, runs.workspaceId],
-  });
+  }).onDelete("cascade");
 
 export const runEvents = pgTable(
   "run_events",
@@ -78,6 +84,8 @@ export const runEvents = pgTable(
     seq: integer("seq").notNull(),
     type: text("type").notNull(),
     payload: jsonb("payload").$type<unknown>().notNull().default({}),
+    stepId: text("step_id"),
+    agentId: text("agent_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -138,10 +146,12 @@ export const approvals = pgTable(
       "approvals_resolution_consistent",
       sql`(${t.status} = 'pending') = (${t.resolvedAt} is null)`,
     ),
-    ...tenantPolicies("approvals", t.workspaceId, {
-      select: readers,
-      insert: operators,
-      update: operators,
-    }),
+    ...tenantPolicies(
+      "approvals",
+      t.workspaceId,
+      { select: readers, insert: operators },
+      sql`${t.status} = 'pending' and ${t.resolvedAt} is null and ${t.resolvedBy} is null`,
+    ),
+    ...definerPolicies("approvals", ["select", "update"]),
   ],
 ).enableRLS();

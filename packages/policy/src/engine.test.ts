@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CAPABILITIES, defaultPolicy } from "./defaults";
-import { evaluate, evaluateAll, matchesDomain } from "./engine";
+import { evaluate, evaluateAll, isBlockedEgressHost, loadPolicies, matchesDomain } from "./engine";
 import { PolicySchema, type Decision, type Policy, type PolicyContext } from "./types";
 
 const base: PolicyContext = {
@@ -14,6 +14,8 @@ const base: PolicyContext = {
   grantedCapabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
   argsSummary: "GET https://example.com/",
   targetDomain: "example.com",
+  dataClassification: "public",
+  provider: { id: "pollinations", terms: "public-demo-ok" },
   estimatedCostMicroUsd: 0,
   spentRunMicroUsd: 0,
   spentDayMicroUsd: 0,
@@ -272,9 +274,9 @@ describe("evaluate", () => {
   });
 
   it.each(cases)("%s", (_name, policies, overrides, expected) => {
-    const context = { ...base, ...overrides };
-    if ("targetDomain" in overrides && overrides.targetDomain === undefined)
-      delete context.targetDomain;
+    const context = Object.fromEntries(
+      Object.entries({ ...base, ...overrides }).filter(([, value]) => value !== undefined),
+    ) as PolicyContext;
     const decision = evaluate(policies, context);
     expect(decision).toMatchObject(expected);
     expect(decision.reason.length).toBeGreaterThan(0);
@@ -297,7 +299,161 @@ describe("evaluate", () => {
       ["require_approval", "pr-approval"],
       ["deny", "egress"],
       ["deny", "confidential"],
+      ["require_approval", "side-effect-approval"],
+      ["deny", "egress-not-allowlisted"],
     ]);
+  });
+
+  it("denies a policy that does not parse instead of skipping it", () => {
+    const vibes = { id: "p", name: "P", rules: [{ kind: "vibes" }] } as unknown as Policy;
+    expect(evaluate([vibes], base)).toMatchObject({
+      decision: "deny",
+      policyId: "p",
+      ruleId: "invalid-policy",
+    });
+    const nameless = { rules: [] } as unknown as Policy;
+    expect(evaluate([workspace, nameless], base)).toMatchObject({
+      decision: "deny",
+      ruleId: "invalid-policy",
+    });
+  });
+
+  it("applies schema defaults when evaluating unparsed policy input", () => {
+    const raw = {
+      id: "raw",
+      name: "Raw",
+      rules: [{ id: "cap", kind: "spend_cap", perRunMicroUsd: 10 }],
+    } as unknown as Policy;
+    expect(evaluate([workspace, raw], { ...base, estimatedCostMicroUsd: 11 })).toMatchObject({
+      decision: "deny",
+      policyId: "raw",
+    });
+  });
+});
+
+describe("loadPolicies", () => {
+  it("parses a list of policies and rejects unknown rule kinds", () => {
+    expect(loadPolicies([defaultPolicy])).toEqual([defaultPolicy]);
+    expect(() => loadPolicies([{ id: "p", name: "P", rules: [{ kind: "vibes" }] }])).toThrow();
+  });
+});
+
+describe("built-in baseline", () => {
+  it("denies egress when no allowlist covers the capability", () => {
+    expect(evaluate([], base)).toMatchObject({
+      decision: "deny",
+      policyId: "builtin",
+      ruleId: "egress-not-allowlisted",
+    });
+  });
+
+  it("requires egress-capable capabilities to declare a target domain", () => {
+    const { targetDomain: _omitted, ...withoutTarget } = base;
+    expect(evaluate([defaultPolicy], withoutTarget)).toMatchObject({ decision: "deny" });
+    expect(evaluateAll([], withoutTarget).map((decision) => decision.ruleId)).toContain(
+      "egress-target-required",
+    );
+  });
+
+  it.each(["repo.write", "message.send", "webhook.send", "code.execute"])(
+    "requires approval for side-effect capability %s even when no policy says so",
+    (capability) => {
+      const open: Policy = PolicySchema.parse({
+        id: "open",
+        name: "Open",
+        rules: [
+          {
+            kind: "egress_allowlist",
+            capabilities: ["repo.write", "message.send", "webhook.send", "code.execute"],
+            domains: ["api.github.com"],
+          },
+        ],
+      });
+      expect(
+        evaluate([open], {
+          ...base,
+          tool: "act",
+          capability,
+          grantedCapabilities: [capability],
+          targetDomain: "api.github.com",
+        }),
+      ).toMatchObject({
+        decision: "require_approval",
+        policyId: "builtin",
+        ruleId: "side-effect-approval",
+      });
+    },
+  );
+
+  it.each([
+    "127.0.0.1",
+    "10.0.0.8",
+    "192.168.1.1",
+    "169.254.169.254",
+    "0x7f.1",
+    "2130706433",
+    "[::1]",
+    "::ffff:127.0.0.1",
+    "fd00::1",
+    "localhost",
+    "api.localhost",
+    "metadata.google.internal",
+    "printer.local",
+    "metadata",
+    "router.home.arpa",
+  ])("denies the blocked host %s even under a wildcard allowlist", (host) => {
+    const decision = evaluate([defaultPolicy], { ...base, targetDomain: host });
+    expect(decision).toMatchObject({
+      decision: "deny",
+      policyId: "builtin",
+      ruleId: "blocked-host",
+    });
+  });
+
+  it("still allows ordinary public hosts under the guest policy", () => {
+    expect(
+      evaluate([defaultPolicy], { ...base, targetDomain: "news.ycombinator.com" }),
+    ).toMatchObject({ decision: "allow" });
+    expect(isBlockedEgressHost("example.com")).toBe(false);
+    expect(isBlockedEgressHost("1password.com")).toBe(false);
+  });
+});
+
+describe("fail-closed defaults", () => {
+  it("treats a missing data classification as restricted", () => {
+    expect(evaluate([workspace], { ...base, dataClassification: undefined })).toMatchObject({
+      decision: "deny",
+      ruleId: "confidential",
+    });
+    const context = { ...base };
+    delete context.dataClassification;
+    const decision = evaluate([defaultPolicy], context);
+    expect(decision).toMatchObject({ decision: "deny", ruleId: "no-confidential-data" });
+    expect(decision.reason).toMatch(/unclassified/i);
+  });
+
+  it("denies under provider_terms when no provider is declared", () => {
+    const context = { ...base };
+    delete context.provider;
+    expect(evaluate([defaultPolicy], context)).toMatchObject({
+      decision: "deny",
+      ruleId: "public-demo-providers",
+    });
+  });
+
+  it("denies under a classification rule with provider restrictions when no provider is declared", () => {
+    const context: PolicyContext = {
+      ...base,
+      tool: "summarise",
+      capability: "artifact.write",
+      dataClassification: "confidential",
+    };
+    delete context.provider;
+    delete context.targetDomain;
+    expect(evaluate([workspace], context)).toMatchObject({
+      decision: "deny",
+      ruleId: "confidential",
+    });
   });
 });
 
