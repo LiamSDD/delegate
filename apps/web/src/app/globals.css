@@ -139,3 +139,106 @@
     scroll-behavior: auto !important;
   }
 }
+
+@layer components {
+  .roi-slider {
+    appearance: none;
+    height: 1rem;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .roi-slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      to right,
+      var(--accent) 0 var(--fill, 0%),
+      var(--border-strong) var(--fill, 0%) 100%
+    );
+  }
+
+  .roi-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--border-strong);
+  }
+
+  .roi-slider::-moz-range-progress {
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--accent);
+  }
+
+  .roi-slider::-webkit-slider-thumb {
+    appearance: none;
+    margin-top: -6px;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    border: 2px solid var(--accent);
+    background: var(--surface);
+    box-shadow: var(--elevation-sm);
+  }
+
+  .roi-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    border: 2px solid var(--accent);
+    background: var(--surface);
+  }
+
+  .roi-slider:focus-visible {
+    outline: none;
+  }
+
+  .roi-slider:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    outline: 2px solid var(--focus);
+  }
+}
+
+@media print {
+  :root,
+  [data-theme="dark"],
+  :root:not([data-theme="light"]) {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f3f3f1;
+    --border: #d9d9d5;
+    --border-strong: #b9b9b4;
+    --text: #111213;
+    --text-muted: #3f4247;
+    --text-subtle: #5d6066;
+    --accent: #1f4fc4;
+    --accent-soft: #e8eefb;
+    --warning: #7a4700;
+    --warning-soft: #f8eedd;
+    --success: #12643d;
+    --success-soft: #e5f2eb;
+  }
+
+  [data-print="hide"] {
+    display: none !important;
+  }
+
+  [data-print="full"] {
+    display: block !important;
+    grid-column: 1 / -1 !important;
+  }
+
+  body {
+    font-size: 11pt;
+  }
+
+  .audit-card {
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 16mm 14mm;
+  }
+}

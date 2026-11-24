@@ -1,9 +1,12 @@
+import { cookies } from "next/headers";
+
 import { MissionCatalogue } from "@/components/mission-catalogue";
 import { type ExampleTarget, MissionInput } from "@/components/mission-input";
 import { SectionHeading } from "@/components/section-heading";
 import { SystemStatus } from "@/components/system-status";
 import { TrustStrip } from "@/components/trust-strip";
 import { loadKeylessChain } from "@/lib/model-chain-file";
+import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 
 const EXAMPLES: readonly ExampleTarget[] = [
   { label: "stripe.com", value: "https://stripe.com" },
@@ -16,8 +19,9 @@ const EXAMPLES: readonly ExampleTarget[] = [
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
   const chain = loadKeylessChain();
+  const autoApprove = (await cookies()).get(AUTO_APPROVE_COOKIE)?.value === "1";
   return (
     <div className="mx-auto flex max-w-content flex-col px-6">
       <section
@@ -26,7 +30,7 @@ export default function HomePage() {
       >
         <div className="flex max-w-3xl flex-col gap-5">
           <p className="font-mono text-2xs tracking-label text-text-subtle uppercase">
-            Preview <span aria-hidden="true">·</span> runtime arrives in M1
+            Preview <span aria-hidden="true">·</span> multi-agent runs, M2
           </p>
           <h1
             id="hero-title"
@@ -42,7 +46,7 @@ export default function HomePage() {
           </p>
         </div>
         <div className="flex max-w-3xl flex-col gap-6">
-          <MissionInput examples={EXAMPLES} />
+          <MissionInput examples={EXAMPLES} initialAutoApprove={autoApprove} />
           <SystemStatus summary={chain} />
         </div>
       </section>

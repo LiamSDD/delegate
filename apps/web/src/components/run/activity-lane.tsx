@@ -179,14 +179,16 @@ function FlagCard({
       }
       fresh={fresh}
     >
-      <p className="text-sm font-medium text-warning">
+      <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-warning">
         {item.injection ? "Prompt injection suspected" : "Critic flag"}
+        <Chip tone="warning">{item.severity}</Chip>
       </p>
       <blockquote className="rounded-md border border-warning/30 bg-surface px-2 py-1.5 font-mono text-xs break-words whitespace-pre-wrap text-text">
         {item.claim}
       </blockquote>
-      <p className="text-xs text-text-muted">
-        {item.reason}
+      <p className="text-xs text-text">
+        <span className="font-medium">Verdict: </span>
+        {item.reason.replace(/^Verdict:\s*/i, "")}
         {item.sourceId === null ? null : (
           <span className="font-mono text-text-subtle"> · source {item.sourceId}</span>
         )}
@@ -259,7 +261,7 @@ function ApprovalCard({
   );
 }
 
-function Item({ item, fresh }: { item: ActivityItem; fresh: boolean }) {
+export function ActivityItemCard({ item, fresh }: { item: ActivityItem; fresh: boolean }) {
   switch (item.kind) {
     case "tool":
       return <ToolCard item={item} fresh={fresh} />;
@@ -302,7 +304,7 @@ export function ActivityLane({
       ) : (
         <ol role="log" aria-live="off" className="flex flex-col gap-2">
           {items.map((item) => (
-            <Item
+            <ActivityItemCard
               key={item.key}
               item={item}
               fresh={liveFromSeq !== null && item.seq > liveFromSeq}

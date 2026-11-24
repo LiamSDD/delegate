@@ -63,14 +63,21 @@ export default async function NewRunPage({ searchParams }: PageProps<"/runs/new"
           {live ? (
             <>
               <h1 className="font-serif text-display-md tracking-display text-balance">
-                Start a Company X-ray of {detected.target}
+                Analyse {detected.target}
               </h1>
               <p className="max-w-xl text-md text-text-muted text-pretty">
-                Nothing has started yet. Company X-ray runs live now; the AI Automation Audit that
-                follows it arrives in {draft.fullArrival}.
+                Nothing has started yet. Pick a mission: the AI Automation Audit ranks workflows to
+                automate with an adjustable ROI model; the Company X-ray writes a cited brief.
               </p>
-              <div>
-                <RunAgainButton input={{ url: detected.url }} label="Start Company X-ray" />
+              <div className="flex flex-wrap gap-3">
+                <RunAgainButton
+                  input={{ missionId: "automation-audit", input: { url: detected.url } }}
+                  label="Start Automation Audit"
+                />
+                <RunAgainButton
+                  input={{ missionId: "company-xray", input: { url: detected.url } }}
+                  label="Start Company X-ray"
+                />
               </div>
             </>
           ) : (

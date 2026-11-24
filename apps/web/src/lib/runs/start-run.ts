@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { RunnableMissionId } from "@/lib/m2-contract";
+
 const createdSchema = z.object({ runId: z.uuid() });
 const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
 
@@ -9,8 +11,21 @@ export type StartRunResult =
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
 
-export async function startCompanyXray(
+export interface StartRunRequest {
+  missionId: RunnableMissionId;
+  input: { url: string; focus?: string; department?: string };
+  parentRunId?: string;
+}
+
+export function startCompanyXray(
   input: { url: string; focus?: string },
+  fetcher: Fetcher = (path, init) => fetch(path, init),
+): Promise<StartRunResult> {
+  return startRun({ missionId: "company-xray", input }, fetcher);
+}
+
+export async function startRun(
+  request: StartRunRequest,
   fetcher: Fetcher = (path, init) => fetch(path, init),
 ): Promise<StartRunResult> {
   let response: Response;
@@ -18,7 +33,7 @@ export async function startCompanyXray(
     response = await fetcher("/api/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ missionId: "company-xray", input }),
+      body: JSON.stringify(request),
     });
   } catch {
     return {

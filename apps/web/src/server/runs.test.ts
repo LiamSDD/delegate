@@ -10,6 +10,7 @@ import {
   MAX_RUN_DURATION_MS,
   readEvents,
   RunAlreadyTerminalError,
+  isStale,
   sweepIfStale,
 } from "./runs";
 import { createGuest, type GuestSession } from "./session";
@@ -153,5 +154,19 @@ describe("run store", () => {
     const swept = await getRunRecord(app, guest.userId, runId);
     if (swept === null) throw new Error("run not found");
     expect(await sweepIfStale(app, guest.userId, swept, later)).toBe(false);
+  });
+
+  it("does not sweep a run that is waiting for plan approval within the approval timeout", () => {
+    const base = new Date("2026-11-24T10:00:00.000Z");
+    const record = {
+      createdAt: base,
+      lastEventAt: new Date(base.getTime() + 1000),
+      lastEventType: "plan.proposed",
+    } as Parameters<typeof isStale>[0];
+    expect(isStale(record, new Date(base.getTime() + 8 * 60_000))).toBe(false);
+    expect(isStale(record, new Date(base.getTime() + 13 * 60_000))).toBe(true);
+    expect(
+      isStale({ ...record, lastEventType: "tool.called" }, new Date(base.getTime() + 8 * 60_000)),
+    ).toBe(true);
   });
 });

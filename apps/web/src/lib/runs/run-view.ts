@@ -1,5 +1,18 @@
 import {
+  AUTOMATION_AUDIT_KIND,
+  NEXT_ACTIONS_KIND,
+  type NextAction,
+  NextActionsSchema,
+} from "@/lib/m2-contract";
+
+import { auditCitationCheck, parseAudit } from "./audit";
+import { briefStats, parseBrief } from "./brief";
+import { buildLanes, type Lane } from "./lanes";
+import { type PlanVersion, planVersions } from "./plan";
+
+import {
   type AgentRole,
+  type PlanStep,
   type FallbackReason,
   foldRun,
   type ModelRole,
@@ -94,6 +107,8 @@ export type OutcomeKind =
   | "site_unreachable"
   | "invalid_input"
   | "synthesis_invalid"
+  | "plan_rejected"
+  | "unsupported"
   | "worker_lost"
   | "runtime_unavailable";
 
@@ -128,6 +143,17 @@ export interface UsageView {
   cacheHitRate: number | null;
 }
 
+export type CitationMetric =
+  | { kind: "reported"; value: number; checked: number | null }
+  | { kind: "resolved"; resolved: number; total: number };
+
+export interface PlanApprovalView {
+  version: number;
+  auto: boolean;
+  reason: string | null;
+  at: string;
+}
+
 export type RunView =
   | {
       ok: true;
@@ -146,6 +172,13 @@ export type RunView =
       modelMix: ModelMixEntry[];
       outcome: Outcome | null;
       brief: BriefArtifact | null;
+      audit: BriefArtifact | null;
+      nextActions: NextAction[];
+      planVersions: PlanVersion[];
+      pendingPlan: { version: number; steps: PlanStep[] } | null;
+      planApproval: PlanApprovalView | null;
+      lanes: Lane[];
+      citation: CitationMetric | null;
     }
   | { ok: false; error: string };
 
@@ -227,6 +260,9 @@ const OUTCOME_BY_CODE: ReadonlyMap<string, OutcomeKind> = new Map([
   ["site_unreachable", "site_unreachable"],
   ["invalid_input", "invalid_input"],
   ["synthesis_invalid", "synthesis_invalid"],
+  ["plan_rejected", "plan_rejected"],
+  ["invalid_plan", "plan_rejected"],
+  ["no_supported_opportunities", "unsupported"],
   ["internal_error", "failed"],
   ["policy_denied", "policy"],
   ["worker_lost", "worker_lost"],
@@ -261,7 +297,7 @@ export function formatTokens(count: number): string {
   return `${(count / 1_000_000).toFixed(1)}M`;
 }
 
-function buildActivity(events: readonly RunEvent[]): ActivityItem[] {
+export function buildActivity(events: readonly RunEvent[]): ActivityItem[] {
   const items: ActivityItem[] = [];
   const tools = new Map<string, number>();
   for (const event of events) {
@@ -365,10 +401,76 @@ function buildActivity(events: readonly RunEvent[]): ActivityItem[] {
 }
 
 function latestBrief(events: readonly RunEvent[], state: RunState): BriefArtifact | null {
-  const all = Object.values(state.artifacts);
-  const chosen = all.find(
-    (artifact) => /brief|xray/i.test(artifact.kind) && artifact.kind !== "source-snapshot",
+  return latestArtifact(
+    events,
+    state,
+    (kind) => /brief|xray/i.test(kind) && kind !== "source-snapshot",
   );
+}
+
+export function reportedCitationAccuracy(events: readonly RunEvent[]): CitationMetric | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type !== "step.completed") continue;
+    const report = event.payload.critic;
+    if (report?.citationAccuracy === null || report?.citationAccuracy === undefined) continue;
+    return { kind: "reported", value: report.citationAccuracy, checked: report.claimsChecked };
+  }
+  return null;
+}
+
+export function citationMetric(
+  brief: BriefArtifact | null,
+  audit: BriefArtifact | null,
+  events: readonly RunEvent[] = [],
+): CitationMetric | null {
+  const reported = reportedCitationAccuracy(events);
+  if (reported !== null) return reported;
+  const artifact = audit ?? brief;
+  if (artifact === null || artifact.content === null) return null;
+  if (audit !== null) {
+    const parsed = parseAudit(audit.content);
+    if (!parsed.ok) return null;
+    const check = auditCitationCheck(parsed.audit);
+    return check.total === 0 ? null : { kind: "resolved", ...check };
+  }
+  const parsed = parseBrief(artifact.content);
+  if (!parsed.ok) return null;
+  const stats = briefStats(parsed.brief);
+  return stats.citations === 0
+    ? null
+    : { kind: "resolved", resolved: stats.verifiedCitations, total: stats.citations };
+}
+
+function nextActionsOf(events: readonly RunEvent[], state: RunState): NextAction[] {
+  const artifact = latestArtifact(events, state, (kind) => kind === NEXT_ACTIONS_KIND);
+  if (artifact === null) return [];
+  const parsed = NextActionsSchema.safeParse(artifact.content);
+  return parsed.success ? parsed.data.actions : [];
+}
+
+function planApprovalOf(events: readonly RunEvent[]): PlanApprovalView | null {
+  let approval: PlanApprovalView | null = null;
+  for (const event of events) {
+    if (event.type === "plan.approved") {
+      approval = {
+        version: event.payload.version,
+        auto: event.payload.approvedBy.id === "auto-approve",
+        reason: event.payload.reason ?? null,
+        at: event.at,
+      };
+    }
+  }
+  return approval;
+}
+
+function latestArtifact(
+  events: readonly RunEvent[],
+  state: RunState,
+  match: (kind: string) => boolean,
+): BriefArtifact | null {
+  const all = Object.values(state.artifacts);
+  const chosen = all.find((artifact) => match(artifact.kind));
   if (chosen === undefined) return null;
   let content: unknown = null;
   let contentVersion: number | null = null;
@@ -446,6 +548,8 @@ export function buildRunView(events: readonly RunEvent[]): RunView {
       at: terminal.at,
     };
   }
+  const audit = latestArtifact(events, state, (kind) => kind === AUTOMATION_AUDIT_KIND);
+  const brief = audit === null ? latestBrief(events, state) : null;
   const providers = events.flatMap((event) =>
     event.type === "usage.updated" ? [{ provider: event.payload.provider }] : [],
   );
@@ -472,6 +576,16 @@ export function buildRunView(events: readonly RunEvent[]): RunView {
     providers,
     modelMix: modelMix(events),
     outcome,
-    brief: latestBrief(events, state),
+    brief,
+    audit,
+    nextActions: nextActionsOf(events, state),
+    planVersions: planVersions(events),
+    pendingPlan:
+      state.status === "awaiting_plan_approval" && outcome === null && state.plan !== null
+        ? { version: state.plan.version, steps: state.plan.steps }
+        : null,
+    planApproval: planApprovalOf(events),
+    lanes: buildLanes(events),
+    citation: citationMetric(brief, audit, events),
   };
 }

@@ -12,7 +12,7 @@ const LINKS = [
 export function SiteFooter() {
   const milestone = milestoneById(CURRENT_MILESTONE);
   return (
-    <footer className="border-t border-border">
+    <footer data-print="hide" className="border-t border-border">
       <div className="mx-auto grid max-w-content gap-6 px-6 py-8 text-sm text-text-muted md:grid-cols-[1fr_auto_1fr] md:items-center">
         <div className="flex items-center gap-2">
           <Monogram className="size-4" />

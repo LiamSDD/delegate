@@ -7,7 +7,10 @@ import { ThemeToggle } from "@/components/theme-toggle";
 
 export function SiteHeader() {
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-bg/85 backdrop-blur-md supports-[backdrop-filter]:bg-bg/70">
+    <header
+      data-print="hide"
+      className="sticky top-0 z-40 border-b border-border bg-bg/85 backdrop-blur-md supports-[backdrop-filter]:bg-bg/70"
+    >
       <div className="mx-auto flex h-14 max-w-content items-center gap-6 px-6">
         <Link href="/" className="flex items-center gap-2 rounded-sm" aria-label="Delegate, home">
           <Monogram />

@@ -1,10 +1,14 @@
 import { z } from "zod";
 
+import { RUNNABLE_MISSION_IDS } from "@/lib/m2-contract";
 import { COMPANY_URL_REJECTION_MESSAGES, normaliseCompanyUrl } from "@/lib/runs/company-url";
+import { validatePlanEdit } from "@/lib/runs/plan";
+import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 
 import type { AppDatabase } from "./db";
 import { executeRun } from "./execute-run";
 import type { MissionRunner } from "./mission-runner";
+import { pendingPlanApproval, PlanDecisionError, recordPlanDecision } from "./plan-approval";
 import type { RunRegistry } from "./run-registry";
 import {
   appendEvent,
@@ -53,10 +57,14 @@ export type ApiErrorCode =
   | "rate_limited"
   | "not_found"
   | "run_finished"
+  | "no_pending_plan"
+  | "invalid_plan"
+  | "forbidden"
   | "unavailable"
   | "internal";
 
 const MAX_BODY_BYTES = 8 * 1024;
+const MAX_PLAN_BODY_BYTES = 64 * 1024;
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -77,12 +85,25 @@ function notFound(): Response {
 }
 
 export const CreateRunRequestSchema = z.strictObject({
-  missionId: z.literal("company-xray"),
+  missionId: z.enum(RUNNABLE_MISSION_IDS),
   input: z.strictObject({
     url: z.string().min(1).max(2048),
     focus: z.string().trim().min(1).max(500).optional(),
+    department: z.string().trim().min(1).max(120).optional(),
   }),
+  parentRunId: z.uuid().optional(),
 });
+
+export const PlanDecisionRequestSchema = z.discriminatedUnion("decision", [
+  z.strictObject({
+    decision: z.literal("approved"),
+    steps: z.array(z.unknown()).max(50).optional(),
+  }),
+  z.strictObject({
+    decision: z.literal("rejected"),
+    reason: z.string().trim().min(1).max(500).optional(),
+  }),
+]);
 
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>;
 
@@ -137,13 +158,16 @@ function retryAfterSeconds(ms: number): string {
   return String(Math.max(1, Math.ceil(ms / 1000)));
 }
 
-async function readJson(request: Request): Promise<{ ok: true; value: unknown } | Response> {
+async function readJson(
+  request: Request,
+  maxBytes = MAX_BODY_BYTES,
+): Promise<{ ok: true; value: unknown } | Response> {
   const type = request.headers.get("content-type") ?? "";
   if (!type.toLowerCase().startsWith("application/json")) {
     return apiError(415, "unsupported_media_type", "Send the request body as application/json.");
   }
   const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
+  if (new TextEncoder().encode(text).byteLength > maxBytes) {
     return apiError(413, "payload_too_large", "The request body is too large.");
   }
   try {
@@ -198,13 +222,27 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
     const input = {
       url: url.url,
       ...(parsed.data.input.focus === undefined ? {} : { focus: parsed.data.input.focus }),
+      ...(parsed.data.input.department === undefined || parsed.data.missionId !== "automation-audit"
+        ? {}
+        : { department: parsed.data.input.department }),
     };
+    const parentRunId =
+      parsed.data.parentRunId === undefined
+        ? undefined
+        : (await getRunRecord(app, session.userId, parsed.data.parentRunId))?.id;
+    if (parsed.data.parentRunId !== undefined && parentRunId === undefined) {
+      return apiError(400, "invalid_request", "The parent run is not visible to this session.", {
+        headers: cookieHeaders,
+      });
+    }
     const runner = deps.runner();
     const { runId } = await createRunRecord(app, session, {
       missionId: parsed.data.missionId,
       input,
       execution: runner.execution,
+      ...(parentRunId === undefined ? {} : { parentRunId }),
     });
+    const autoApprovePlan = readCookie(request, AUTO_APPROVE_COOKIE) === "1";
     deps.schedule(() =>
       executeRun({
         app,
@@ -213,6 +251,7 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
         input,
         runner: runner.run,
         registry: deps.registry,
+        autoApprovePlan,
       }),
     );
     return Response.json({ runId }, { status: 201, headers: { ...NO_STORE, ...cookieHeaders } });
@@ -356,4 +395,73 @@ export async function handleGetArtifact(
   const artifact = await artifactContent(guest.app, guest.session.userId, runId, artifactId);
   if (artifact === null) return apiError(404, "not_found", "No artifact with that id.");
   return Response.json({ artifact }, { headers: NO_STORE });
+}
+
+export async function handlePlanDecision(
+  request: Request,
+  runId: string,
+  deps: ApiDeps,
+): Promise<Response> {
+  if (!isSameOrigin(request)) {
+    return apiError(403, "forbidden_origin", "Cross-origin requests cannot decide plans.");
+  }
+  const guest = await guestFor(request, deps);
+  if (guest === null) return notFound();
+  const record = await getRunRecord(guest.app, guest.session.userId, runId);
+  if (record === null) return notFound();
+  const body = await readJson(request, MAX_PLAN_BODY_BYTES);
+  if (body instanceof Response) return body;
+  const parsed = PlanDecisionRequestSchema.safeParse(body.value);
+  if (!parsed.success) {
+    return apiError(400, "invalid_request", "The plan decision is not valid.", {
+      issues: parsed.error.issues.map(
+        (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
+      ),
+    });
+  }
+  if (record.lastEventType !== null && isTerminalEventType(record.lastEventType)) {
+    return apiError(409, "run_finished", "This run has already finished.");
+  }
+  const pending = await pendingPlanApproval(guest.app, guest.session.userId, runId);
+  if (pending === null) {
+    return apiError(409, "no_pending_plan", "This run has no plan waiting for approval.");
+  }
+  const ctx = { runId, workspaceId: record.workspaceId, userId: guest.session.userId };
+  let details: Parameters<typeof recordPlanDecision>[3];
+  if (parsed.data.decision === "approved") {
+    if (parsed.data.steps === undefined) {
+      details = { decision: "approved" };
+    } else {
+      const edit = validatePlanEdit(pending.steps, parsed.data.steps);
+      if (!edit.ok) {
+        return apiError(400, "invalid_plan", "The edited plan is not valid.", {
+          issues: edit.issues,
+        });
+      }
+      details =
+        JSON.stringify(edit.steps) === JSON.stringify(pending.steps)
+          ? { decision: "approved" }
+          : { decision: "approved", steps: edit.steps };
+    }
+  } else {
+    details =
+      parsed.data.reason === undefined
+        ? { decision: "rejected" }
+        : { decision: "rejected", reason: parsed.data.reason };
+  }
+  try {
+    await recordPlanDecision(guest.app, ctx, pending.approvalId, details);
+  } catch (error: unknown) {
+    if (error instanceof PlanDecisionError) {
+      return error.code === "forbidden"
+        ? apiError(403, "forbidden", "Your role cannot decide this plan.")
+        : apiError(409, "no_pending_plan", "This plan was already decided.");
+    }
+    console.error("plan decision failed", error);
+    return apiError(500, "internal", "The decision could not be recorded.");
+  }
+  return Response.json(
+    { decision: details.decision, edited: "steps" in details && details.steps !== undefined },
+    { headers: NO_STORE },
+  );
 }

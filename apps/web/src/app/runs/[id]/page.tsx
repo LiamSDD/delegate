@@ -21,6 +21,7 @@ export default async function RunPage({ params }: PageProps<"/runs/[id]">) {
       runId={record.id}
       target={url === null ? null : new URL(url).hostname.replace(/^www\./, "")}
       simulated={record.execution === "simulated"}
+      missionId={record.mission}
     />
   );
 }

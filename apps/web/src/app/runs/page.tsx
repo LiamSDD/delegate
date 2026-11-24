@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { missionLabel } from "@/lib/m2-contract";
 import { formatDuration } from "@/lib/runs/run-view";
 import { currentGuest } from "@/server/page-session";
 import { listRuns, type RunListItem } from "@/server/runs";
@@ -16,7 +17,10 @@ const STATUS: Record<RunListItem["status"], { label: string; className: string }
   failed: { label: "Failed", className: "bg-danger-soft text-danger" },
 };
 
-const MISSION_NAMES: Record<string, string> = { "company-xray": "Company X-ray" };
+const MISSION_TONE: Record<string, string> = {
+  "company-xray": "border-border bg-surface-2 text-text-muted",
+  "automation-audit": "border-transparent bg-accent-soft text-accent",
+};
 
 function duration(run: RunListItem): string {
   if (run.finishedAt === null) return "in progress";
@@ -50,8 +54,8 @@ export default async function RunsPage() {
         <div className="flex flex-col items-start gap-4 rounded-xl border border-dashed border-border-strong px-6 py-10">
           <h2 className="text-lg font-medium">No runs yet</h2>
           <p className="max-w-lg text-sm text-text-muted">
-            Paste a company URL on the home page to start a Company X-ray. Repo X-ray and custom
-            goals arrive in later milestones.
+            Paste a company URL on the home page to start an AI Automation Audit or a Company X-ray.
+            Repo X-ray and custom goals arrive in later milestones.
           </p>
           <Link
             href="/?focus=mission"
@@ -104,8 +108,12 @@ export default async function RunsPage() {
                         </span>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 text-text-muted">
-                      {MISSION_NAMES[run.mission] ?? run.mission}
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex h-5 items-center rounded-sm border px-1.5 font-mono text-2xs ${MISSION_TONE[run.mission] ?? "border-border text-text-muted"}`}
+                      >
+                        {missionLabel(run.mission)}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       <span

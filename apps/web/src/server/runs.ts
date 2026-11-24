@@ -22,6 +22,7 @@ import type { GuestSession } from "./session";
 export const GUEST_RUN_BUDGET = { maxTokens: 400_000, maxMicroUsd: 0 } as const;
 export const MAX_RUN_DURATION_MS = 5 * 60_000;
 export const STALE_AFTER_MS = 2 * 60_000;
+export const PLAN_APPROVAL_GRACE_MS = 10 * 60_000 + STALE_AFTER_MS;
 export const REPLAY_PAGE_SIZE = 500;
 
 export type Execution = "live" | "simulated";
@@ -73,13 +74,20 @@ function executionOf(input: Record<string, unknown>): Execution {
 }
 
 export function missionInputOf(input: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(input).filter(([key]) => key !== "execution"));
+  return Object.fromEntries(
+    Object.entries(input).filter(([key]) => key !== "execution" && key !== "parentRunId"),
+  );
 }
 
 export async function createRunRecord(
   app: AppDatabase,
   session: GuestSession,
-  request: { missionId: string; input: Record<string, unknown>; execution: Execution },
+  request: {
+    missionId: string;
+    input: Record<string, unknown>;
+    execution: Execution;
+    parentRunId?: string;
+  },
 ): Promise<{ runId: string; event: RunEvent }> {
   const storedInput =
     request.execution === "simulated"
@@ -93,6 +101,7 @@ export async function createRunRecord(
         mission: request.missionId,
         input: storedInput,
         budget: { ...GUEST_RUN_BUDGET },
+        ...(request.parentRunId === undefined ? {} : { parentRunId: request.parentRunId }),
       })
       .returning({ id: runs.id });
     if (run === undefined) throw new Error("run insert returned no row");
@@ -103,7 +112,10 @@ export async function createRunRecord(
       payload: {
         workspaceId: session.workspaceId,
         missionId: request.missionId,
-        input: storedInput,
+        input:
+          request.parentRunId === undefined
+            ? storedInput
+            : { ...storedInput, parentRunId: request.parentRunId },
         actor: { type: "guest", id: session.userId },
         budget: { ...GUEST_RUN_BUDGET },
       },
@@ -343,7 +355,9 @@ export function isStale(record: RunRecord, now: Date): boolean {
   if (record.lastEventType !== null && isTerminalEventType(record.lastEventType)) return false;
   const age = now.getTime() - record.createdAt.getTime();
   const silence = now.getTime() - (record.lastEventAt ?? record.createdAt).getTime();
-  return age > MAX_RUN_DURATION_MS && silence > STALE_AFTER_MS;
+  const quietLimit =
+    record.lastEventType === "plan.proposed" ? PLAN_APPROVAL_GRACE_MS : STALE_AFTER_MS;
+  return age > MAX_RUN_DURATION_MS && silence > quietLimit;
 }
 
 export async function sweepIfStale(

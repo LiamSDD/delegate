@@ -14,19 +14,26 @@ function capture() {
   return { calls, runMission };
 }
 
-async function run(env: Record<string, string | undefined>) {
+const awaitPlanApproval = () => Promise.resolve({ decision: "approved" as const });
+
+async function run(
+  env: Record<string, string | undefined>,
+  missionId: "company-xray" | "automation-audit" = "company-xray",
+) {
   const { calls, runMission } = capture();
   const emitted: EventDraft[] = [];
   const runner = createRuntimeRunner({ env, runMission, loadPrompts: loadRepoPrompts });
   const result = await runner({
     runId: "run-1",
-    missionId: "company-xray",
+    missionId,
     input: { url: "https://example.com/" },
     emit: (draft) => {
       emitted.push(draft);
       return Promise.resolve();
     },
     signal: new AbortController().signal,
+    awaitPlanApproval,
+    planApprover: { type: "guest", id: "g-1" },
   });
   return { result, call: calls[0], emitted };
 }
@@ -39,8 +46,16 @@ describe("createRuntimeRunner", () => {
     expect(call?.latency).toBe("interactive");
     expect(call?.modelsConfig).toMatchObject({ version: 1 });
     expect(call?.input).toEqual({ url: "https://example.com/" });
-    expect(call?.prompts?.synthesis.name).toBe("company-xray.synthesis");
+    expect(call?.prompts?.synthesis?.name).toBe("company-xray.synthesis");
     expect(emitted).toEqual([{ type: "run.completed", payload: { summary: "ok" } }]);
+  });
+
+  it("passes the mission id and the plan approval hook through", async () => {
+    const { call } = await run({ NODE_ENV: "production" }, "automation-audit");
+    expect(call?.missionId).toBe("automation-audit");
+    expect(call?.awaitPlanApproval).toBe(awaitPlanApproval);
+    expect(call?.planApprover).toEqual({ type: "guest", id: "g-1" });
+    expect(call?.prompts?.analyst?.name).toBe("automation-audit.analyst");
   });
 
   it("uses the owner audience only with DELEGATE_OWNER_MODE=1 outside production", async () => {

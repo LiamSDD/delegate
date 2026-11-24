@@ -17,7 +17,8 @@ import { type ReactNode, useState } from "react";
 
 import { type Brief, briefStats } from "@/lib/runs/brief";
 import { formatDuration, type Outcome } from "@/lib/runs/run-view";
-import { startCompanyXray } from "@/lib/runs/start-run";
+import type { RunnableMissionId } from "@/lib/m2-contract";
+import { startRun } from "@/lib/runs/start-run";
 import type { StreamState } from "@/lib/runs/stream-state";
 import { MAX_AUTO_RETRIES } from "@/lib/runs/stream-state";
 import { cn } from "@/lib/utils";
@@ -74,11 +75,16 @@ function Banner({
   );
 }
 
+export type RunAgainInput = {
+  missionId: RunnableMissionId;
+  input: { url: string; focus?: string; department?: string };
+} | null;
+
 export function RunAgainButton({
   input,
   label = "Run again",
 }: {
-  input: { url: string; focus?: string } | null;
+  input: RunAgainInput;
   label?: string;
 }) {
   const router = useRouter();
@@ -94,7 +100,7 @@ export function RunAgainButton({
         onClick={() => {
           setPending(true);
           setError(null);
-          void startCompanyXray(input).then((result) => {
+          void startRun(input).then((result) => {
             if (result.ok) {
               router.push(`/runs/${result.runId}`);
               return;
@@ -204,8 +210,18 @@ const OUTCOME_COPY: Record<
     tone: "neutral",
     icon: <CircleSlash className="size-4" />,
   },
+  unsupported: {
+    title: "Nothing survived verification",
+    tone: "warning",
+    icon: <FileWarning className="size-4" />,
+  },
+  plan_rejected: {
+    title: "Plan rejected",
+    tone: "neutral",
+    icon: <CircleSlash className="size-4" />,
+  },
   synthesis_invalid: {
-    title: "The brief did not pass validation",
+    title: "The deliverable did not pass validation",
     tone: "danger",
     icon: <FileWarning className="size-4" />,
   },
@@ -230,7 +246,7 @@ export function OutcomeBanner({
   outcome: Outcome;
   durationMs: number;
   brief: Brief | null;
-  input: { url: string; focus?: string } | null;
+  input: RunAgainInput;
 }) {
   if (outcome.kind === "completed") {
     const stats = brief === null ? null : briefStats(brief);
@@ -246,12 +262,7 @@ export function OutcomeBanner({
             <dt>duration</dt>
             <dd className="text-text">{formatDuration(durationMs)}</dd>
           </div>
-          {stats === null ? (
-            <div className="flex gap-1.5">
-              <dt>brief</dt>
-              <dd className="text-text">none</dd>
-            </div>
-          ) : (
+          {stats === null ? null : (
             <>
               <div className="flex gap-1.5">
                 <dt>sources</dt>

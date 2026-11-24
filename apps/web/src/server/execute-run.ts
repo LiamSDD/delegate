@@ -1,5 +1,8 @@
 import type { AppDatabase } from "./db";
+import type { RunnableMissionId } from "@/lib/m2-contract";
+
 import type { MissionRunner } from "./mission-runner";
+import { type AwaitPlanApproval, createPlanApprovalWaiter } from "./plan-approval";
 import type { RunRegistry } from "./run-registry";
 import {
   appendEvent,
@@ -19,10 +22,12 @@ function publicMessage(error: unknown): string {
 export interface ExecuteRunOptions {
   app: AppDatabase;
   ctx: RunContext;
-  missionId: "company-xray";
+  missionId: RunnableMissionId;
   input: Record<string, unknown>;
   runner: MissionRunner;
   registry: RunRegistry;
+  autoApprovePlan?: boolean;
+  awaitPlanApproval?: AwaitPlanApproval;
 }
 
 export async function executeRun(options: ExecuteRunOptions): Promise<void> {
@@ -49,6 +54,13 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
       input: options.input,
       emit,
       signal: controller.signal,
+      planApprover:
+        options.autoApprovePlan === true
+          ? { type: "system", id: "auto-approve" }
+          : { type: "guest", id: ctx.userId },
+      awaitPlanApproval:
+        options.awaitPlanApproval ??
+        createPlanApprovalWaiter({ app, ctx, autoApprove: options.autoApprovePlan ?? false }),
     });
     if (!progress.terminal && !controller.signal.aborted) {
       await finish(

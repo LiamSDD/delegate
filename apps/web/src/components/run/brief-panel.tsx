@@ -30,7 +30,7 @@ function Citations({
   });
 }
 
-function CitationMarker({ target }: { target: CitationTarget }) {
+export function CitationMarker({ target }: { target: CitationTarget }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const quote = target.source?.quotes[0];
@@ -99,7 +99,7 @@ function CitationMarker({ target }: { target: CitationTarget }) {
   );
 }
 
-function download(name: string, text: string, type: string) {
+export function download(name: string, text: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const anchor = document.createElement("a");
   anchor.href = url;

@@ -3,13 +3,18 @@ import { z } from "zod";
 
 import type { Brief } from "@/lib/runs/brief";
 
-import { abortableSleep } from "./sse";
+import { AUDIT_SIMULATED_PLAN, auditScript } from "./fake-audit";
 import type { MissionRunner } from "./mission-runner";
+import { abortableSleep } from "./sse";
 import type { EventDraft } from "./runs";
 
 export const SIMULATED_PROVIDER = "simulated";
 
-const inputSchema = z.object({ url: z.url(), focus: z.string().optional() });
+const inputSchema = z.object({
+  url: z.url(),
+  focus: z.string().optional(),
+  department: z.string().optional(),
+});
 
 const plan: PlanStep[] = [
   {
@@ -264,6 +269,30 @@ export function simulatedScript(runId: string, homepage: string): EventDraft[] {
       },
     },
     {
+      type: "artifact.created",
+      stepId: "write-brief",
+      payload: {
+        artifactId: `next-${runId.slice(0, 8)}`,
+        kind: "next-actions",
+        title: "Next actions",
+        version: 1,
+        content: {
+          missionId: "company-xray",
+          actions: [
+            {
+              id: "run-automation-audit",
+              missionId: "automation-audit",
+              input: { url: homepage },
+              label: "Run AI Automation Audit",
+              description:
+                "Rank workflows this company could automate, with an adjustable ROI model",
+              available: true,
+            },
+          ],
+        },
+      },
+    },
+    {
       type: "run.completed",
       payload: { summary: "Simulated run finished. Nothing was researched." },
     },
@@ -272,13 +301,43 @@ export function simulatedScript(runId: string, homepage: string): EventDraft[] {
 
 export function createFakeRunner(options: { delayMs?: number } = {}): MissionRunner {
   const delayMs = options.delayMs ?? 450;
-  return async ({ runId, input, emit, signal }) => {
+  return async ({ runId, missionId, input, emit, signal, awaitPlanApproval }) => {
     const { url } = inputSchema.parse(input);
-    for (const draft of simulatedScript(runId, url)) {
-      if (delayMs > 0) await abortableSleep(delayMs, signal);
-      if (signal.aborted) return { status: "failed" };
-      await emit(draft);
+    const play = async (drafts: readonly EventDraft[]) => {
+      for (const draft of drafts) {
+        if (delayMs > 0) await abortableSleep(delayMs, signal);
+        if (signal.aborted) return false;
+        await emit(draft);
+      }
+      return true;
+    };
+    if (missionId === "company-xray") {
+      return (await play(simulatedScript(runId, url)))
+        ? { status: "completed" }
+        : { status: "failed" };
     }
-    return { status: "completed" };
+    if (
+      !(await play([
+        { type: "plan.proposed", payload: { version: 1, steps: AUDIT_SIMULATED_PLAN } },
+      ]))
+    ) {
+      return { status: "failed" };
+    }
+    const decision = await awaitPlanApproval({ version: 1, steps: AUDIT_SIMULATED_PLAN }, signal);
+    if (decision.decision === "rejected") {
+      await emit({
+        type: "run.failed",
+        payload: {
+          error: {
+            code: "plan_rejected",
+            message: decision.reason ?? "The operator rejected the plan.",
+          },
+        },
+      });
+      return { status: "failed" };
+    }
+    return (await play(auditScript(runId, url, decision, decision.auto === true)))
+      ? { status: "completed" }
+      : { status: "failed" };
   };
 }

@@ -7,26 +7,26 @@ import { parseBrief } from "@/lib/runs/brief";
 import { buildRunView, elapsedMs } from "@/lib/runs/run-view";
 import { cn } from "@/lib/utils";
 
-import { ActivityLane } from "./activity-lane";
+import { missionLabel, type RunnableMissionId } from "@/lib/m2-contract";
+
+import { AgentLanes } from "./agent-lanes";
+import { AuditPanel } from "./audit-panel";
 import { BriefPanel } from "./brief-panel";
+import { NextActions, nextActionsFor } from "./next-actions";
+import { PlanApprovalCard } from "./plan-approval-card";
 import { PlanPanel } from "./plan-panel";
 import { Eyebrow, useNow } from "./primitives";
 import { OutcomeBanner, StreamBanner } from "./run-status";
 import { RunTopBar } from "./run-top-bar";
 import { useRunStream } from "./use-run-stream";
 
-const TABS = [
-  { id: "plan", label: "Plan" },
-  { id: "activity", label: "Activity" },
-  { id: "brief", label: "Brief" },
-] as const;
-
-type TabId = (typeof TABS)[number]["id"];
+type TabId = "plan" | "activity" | "brief";
 
 export interface RunViewProps {
   runId: string;
   target: string | null;
   simulated: boolean;
+  missionId: string;
 }
 
 function UnknownRun() {
@@ -56,11 +56,19 @@ function UnknownRun() {
   );
 }
 
-function Skeleton({ target, simulated }: { target: string | null; simulated: boolean }) {
+function Skeleton({
+  target,
+  simulated,
+  missionId,
+}: {
+  target: string | null;
+  simulated: boolean;
+  missionId: string;
+}) {
   return (
     <div className="border-b border-border">
       <div className="mx-auto flex max-w-[96rem] flex-wrap items-center gap-3 px-4 py-4 md:px-6">
-        <Eyebrow>Company X-ray</Eyebrow>
+        <Eyebrow>{missionLabel(missionId)}</Eyebrow>
         <span aria-hidden="true" className="text-text-subtle">
           /
         </span>
@@ -75,7 +83,11 @@ function Skeleton({ target, simulated }: { target: string | null; simulated: boo
   );
 }
 
-export function RunView({ runId, target, simulated }: RunViewProps) {
+function isRunnable(id: string): id is RunnableMissionId {
+  return id === "company-xray" || id === "automation-audit";
+}
+
+export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
   const { events, stream, liveFromSeq, malformed, reconnect } = useRunStream(runId);
   const view = useMemo(() => (events.length === 0 ? null : buildRunView(events)), [events]);
   const ready = view?.ok === true ? view : null;
@@ -97,8 +109,26 @@ export function RunView({ runId, target, simulated }: RunViewProps) {
     ready?.brief?.content === undefined || ready.brief.content === null
       ? null
       : parseBrief(ready.brief.content);
-  const hasBrief = ready?.brief !== null && ready?.brief !== undefined;
-  const tab: TabId = chosenTab ?? (hasBrief ? "brief" : "activity");
+  const isAudit = (ready?.missionId ?? missionId) === "automation-audit";
+  const hasBrief =
+    (ready?.brief !== null && ready?.brief !== undefined) ||
+    (ready?.audit !== null && ready?.audit !== undefined);
+  const pendingPlan = ready?.pendingPlan ?? null;
+  const tab: TabId = chosenTab ?? (pendingPlan !== null ? "plan" : hasBrief ? "brief" : "activity");
+  const TABS: { id: TabId; label: string }[] = [
+    { id: "plan", label: pendingPlan === null ? "Plan" : "Approve plan" },
+    { id: "activity", label: "Agents" },
+    { id: "brief", label: isAudit ? "Audit" : "Brief" },
+  ];
+  const actions =
+    ready === null
+      ? []
+      : nextActionsFor(
+          ready.missionId,
+          ready.url,
+          ready.outcome?.kind === "completed",
+          ready.nextActions,
+        );
 
   const stop = () => {
     setStopping(true);
@@ -126,27 +156,40 @@ export function RunView({ runId, target, simulated }: RunViewProps) {
   };
 
   const input =
-    ready?.url === null || ready?.url === undefined
+    ready?.url === null || ready?.url === undefined || !isRunnable(ready.missionId)
       ? null
       : (() => {
           const created = events[0];
-          const focus =
-            created?.type === "run.created" && typeof created.payload.input.focus === "string"
-              ? created.payload.input.focus
-              : undefined;
-          return focus === undefined ? { url: ready.url } : { url: ready.url, focus };
+          const raw = created?.type === "run.created" ? created.payload.input : {};
+          const focus = typeof raw.focus === "string" ? raw.focus : undefined;
+          const department = typeof raw.department === "string" ? raw.department : undefined;
+          return {
+            missionId: ready.missionId,
+            input: {
+              url: ready.url,
+              ...(focus === undefined ? {} : { focus }),
+              ...(department === undefined ? {} : { department }),
+            },
+          };
         })();
 
   return (
     <div className="flex flex-col">
       {ready === null ? (
-        <Skeleton target={target} simulated={simulated} />
+        <Skeleton target={target} simulated={simulated} missionId={missionId} />
       ) : (
-        <RunTopBar view={ready} now={now} onStop={stop} stopping={stopping} stopError={stopError} />
+        <RunTopBar
+          runId={runId}
+          view={ready}
+          now={now}
+          onStop={stop}
+          stopping={stopping}
+          stopError={stopError}
+        />
       )}
 
       <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-4 py-4 md:px-6 md:py-6">
-        <div aria-live="polite" className="flex flex-col gap-3">
+        <div aria-live="polite" data-print="hide" className="flex flex-col gap-3">
           <StreamBanner stream={stream} onReconnect={reconnect} />
           {ready?.outcome === null || ready?.outcome === undefined ? null : (
             <OutcomeBanner
@@ -175,6 +218,7 @@ export function RunView({ runId, target, simulated }: RunViewProps) {
         <div
           role="tablist"
           aria-label="Run panels"
+          data-print="hide"
           className="flex rounded-lg border border-border bg-surface-2 p-1 md:hidden"
         >
           {TABS.map((item, index) => (
@@ -213,47 +257,90 @@ export function RunView({ runId, target, simulated }: RunViewProps) {
           ))}
         </div>
 
-        <div className="grid gap-6 md:grid-cols-[13rem_minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_minmax(0,1.15fr)] xl:gap-8">
+        <div className="grid gap-6 md:grid-cols-[15rem_minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)_minmax(0,1.15fr)] xl:grid-cols-[18rem_minmax(0,1fr)_minmax(0,1.25fr)] xl:gap-8">
+          {pendingPlan === null ? null : (
+            <div
+              data-print="hide"
+              className={cn(
+                tab === "plan" ? "block" : "hidden",
+                "md:col-span-2 md:block lg:col-span-2",
+              )}
+            >
+              <PlanApprovalCard
+                key={pendingPlan.version}
+                runId={runId}
+                version={pendingPlan.version}
+                steps={pendingPlan.steps}
+              />
+            </div>
+          )}
           <div
             id="panel-plan"
             role="tabpanel"
             aria-labelledby="tab-plan"
-            className={cn(tab === "plan" ? "block" : "hidden", "md:block")}
+            data-print="hide"
+            className={cn(
+              pendingPlan === null && tab === "plan" ? "block" : "hidden",
+              pendingPlan === null && "md:block",
+            )}
           >
             <PlanPanel
+              versions={ready?.planVersions ?? []}
               steps={ready?.steps ?? []}
               now={now}
               waiting={running}
-              planVersion={ready?.state.plan?.version ?? null}
+              approval={ready?.planApproval ?? null}
             />
           </div>
           <div
             id="panel-activity"
             role="tabpanel"
             aria-labelledby="tab-activity"
-            className={cn(tab === "activity" ? "block" : "hidden", "md:block")}
+            data-print="hide"
+            className={cn(
+              tab === "activity" ? "block" : "hidden",
+              pendingPlan === null && "md:block",
+            )}
           >
-            <ActivityLane
-              items={ready?.activity ?? []}
+            <AgentLanes
+              lanes={ready?.lanes ?? []}
               liveFromSeq={liveFromSeq}
               waiting={running}
+              now={now}
             />
           </div>
           <div
             id="panel-brief"
             role="tabpanel"
             aria-labelledby="tab-brief"
-            className={cn(tab === "brief" ? "block" : "hidden", "md:block")}
+            data-print="full"
+            className={cn(
+              tab === "brief" ? "block" : "hidden",
+              "flex-col gap-4 md:col-span-2 md:flex lg:col-span-1",
+              tab === "brief" && "flex",
+            )}
           >
-            <BriefPanel
-              artifact={ready?.brief ?? null}
-              target={ready?.target ?? target}
-              running={running}
-            />
+            <NextActions runId={runId} actions={actions} />
+            {isAudit ? (
+              <AuditPanel
+                artifact={ready?.audit ?? null}
+                target={ready?.target ?? target}
+                running={running}
+                unverified={
+                  ready !== null && ready.outcome !== null && ready.outcome.kind !== "completed"
+                }
+              />
+            ) : (
+              <BriefPanel
+                artifact={ready?.brief ?? null}
+                target={ready?.target ?? target}
+                running={running}
+              />
+            )}
           </div>
         </div>
 
-        <p className="border-t border-border pt-4 text-xs text-text-subtle">
+        <p data-print="hide" className="border-t border-border pt-4 text-xs text-text-subtle">
           Demo runs are deleted after 7 days. Everything on this page is rebuilt from the run’s
           event log
           {ready?.execution === "simulated"

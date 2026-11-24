@@ -9,7 +9,9 @@ import { useEffect, useId, useRef, useState } from "react";
 import { MISSION_INPUT_ID } from "@/components/command-palette";
 import { KindGlyph } from "@/components/kind-glyph";
 import { detectMission, MAX_INPUT_LENGTH } from "@/lib/detect-mission";
-import { startCompanyXray } from "@/lib/runs/start-run";
+import type { RunnableMissionId } from "@/lib/m2-contract";
+import { AUTO_APPROVE_COOKIE, writeClientCookie } from "@/lib/runs/preferences";
+import { startRun } from "@/lib/runs/start-run";
 import { cn } from "@/lib/utils";
 
 export interface ExampleTarget {
@@ -17,7 +19,13 @@ export interface ExampleTarget {
   value: string;
 }
 
-export function MissionInput({ examples }: { examples: readonly ExampleTarget[] }) {
+export function MissionInput({
+  examples,
+  initialAutoApprove = false,
+}: {
+  examples: readonly ExampleTarget[];
+  initialAutoApprove?: boolean;
+}) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const statusId = useId();
@@ -26,6 +34,11 @@ export function MissionInput({ examples }: { examples: readonly ExampleTarget[] 
   const router = useRouter();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [mission, setMission] = useState<RunnableMissionId>("automation-audit");
+  const [department, setDepartment] = useState("");
+  const [autoApprove, setAutoApprove] = useState(initialAutoApprove);
+  const departmentId = useId();
+  const autoId = useId();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -49,7 +62,14 @@ export function MissionInput({ examples }: { examples: readonly ExampleTarget[] 
           if (starting) return;
           setStarting(true);
           setStartError(null);
-          void startCompanyXray({ url: detected.url }).then((result) => {
+          const trimmed = department.trim();
+          void startRun({
+            missionId: mission,
+            input:
+              mission === "automation-audit" && trimmed !== ""
+                ? { url: detected.url, department: trimmed }
+                : { url: detected.url },
+          }).then((result) => {
             if (result.ok) {
               router.push(`/runs/${result.runId}`);
               return;
@@ -147,11 +167,86 @@ export function MissionInput({ examples }: { examples: readonly ExampleTarget[] 
                 : "bg-accent text-accent-fg hover:bg-accent/90",
             )}
           >
-            {starting ? "Starting…" : detected?.kind === "company" ? "Start run" : "Draft run"}
+            {starting
+              ? "Starting…"
+              : detected?.kind === "company"
+                ? mission === "automation-audit"
+                  ? "Run audit"
+                  : "Run X-ray"
+                : "Draft run"}
             <CornerDownLeft className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
       </Form>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div
+          role="radiogroup"
+          aria-label="Mission for a company URL"
+          className="flex rounded-lg border border-border bg-surface-2 p-0.5"
+        >
+          {(
+            [
+              ["automation-audit", "Automation Audit"],
+              ["company-xray", "X-ray"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={mission === id}
+              onClick={() => {
+                setMission(id);
+              }}
+              className={cn(
+                "h-7 rounded-md px-2.5 text-xs font-medium transition-colors",
+                mission === id
+                  ? "bg-surface text-text shadow-sm"
+                  : "text-text-muted hover:text-text",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {mission === "automation-audit" ? (
+          <div className="flex items-center gap-2">
+            <label htmlFor={departmentId} className="text-xs text-text-muted">
+              Department
+            </label>
+            <input
+              id={departmentId}
+              value={department}
+              maxLength={120}
+              onChange={(event) => {
+                setDepartment(event.target.value);
+              }}
+              placeholder="any"
+              className="h-7 w-36 rounded-md border border-border bg-surface px-2 text-xs text-text placeholder:text-text-subtle focus:border-accent focus:outline-none"
+            />
+          </div>
+        ) : null}
+        <label
+          htmlFor={autoId}
+          className="ml-auto flex cursor-pointer items-center gap-2 text-xs text-text-muted"
+        >
+          <input
+            id={autoId}
+            type="checkbox"
+            checked={autoApprove}
+            onChange={(event) => {
+              setAutoApprove(event.target.checked);
+              writeClientCookie(AUTO_APPROVE_COOKIE, event.target.checked ? "1" : "0");
+            }}
+            className="peer sr-only"
+          />
+          <span
+            aria-hidden="true"
+            className="relative h-4 w-7 rounded-full bg-border-strong transition-colors peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-focus after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:shadow-sm after:transition-transform peer-checked:after:translate-x-3"
+          />
+          Auto-approve plans
+        </label>
+      </div>
       <div className="flex flex-wrap items-center gap-x-1 gap-y-2 text-sm">
         <span className="mr-2 font-mono text-2xs tracking-label text-text-subtle uppercase">
           Try
