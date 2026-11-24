@@ -51,3 +51,41 @@ The owner will not create provider accounts or manage keys, so the default path 
 Quality on the keyless path is lower than Kimi K3 or Claude; evals record the serving model so this is visible, never hidden.
 
 There is no hosted CI. `pnpm check` (typecheck, lint, test, build) runs locally and in a pre-push hook; `pnpm gate` adds evals and the red-team suite; the `code-reviewer` and `security-reviewer` agents review changes locally.
+
+## Amendment 2 (2026-11-24): measured NVIDIA chains, latency budget, keyless default
+
+**Measurements.** `pnpm --filter @delegate/runtime live:nvidia` lists the owner's catalog (30 models on 2026-11-24) and sends each candidate one streaming tool-calling request (`get_weather`, `tool_choice: auto`), sequentially, ≥1.6 s apart, 75 s cap. 19 probes in total:
+
+| Model | HTTP | First token | Total | Tool call |
+|---|---|---|---|---|
+| `nvidia/nemotron-3-ultra-550b-a55b` | 200 | 0.4 s / 2.4 s (two probes) | 1.1 s / 3.5 s | correct |
+| `mistralai/mistral-large-4-1t-a52b` | 200 | 0.4 s / 0.6 s | 1.5 s / 2.1 s | correct |
+| `nvidia/nemotron-3.5-lightning-30b-a3b` | 200 | 0.2 s | 0.4 s | correct |
+| `nvidia/nemotron-3.5-bolt-e4b` | 200 | 0.3 s | 0.3 s | correct |
+| `poolside/laguna-xs-2.1` | 200 | 0.9 s | 0.9 s | correct |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | 200 | 0.3 s | 1.4 s | correct |
+| `nvidia/nemotron-3.5-super-vl-120b-a12b` | 200 | 17.9 s | 18.3 s | correct |
+| `minimaxai/minimax-m3.1-flash` | 200 | 18.6 s / 19.7 s | 18.8 s / 20.1 s | correct |
+| `stepfun-ai/step-5-preview` | 200 | 23.0 s | 28.4 s | correct |
+| `moonshotai/kimi-k3.1-pro` | 200 | none within 75 s (3–4 min observed earlier) | timeout | – |
+| `z-ai/glm-5.3-flash` | – | none within 75 s (two probes) | timeout | – |
+| `google/gemma-3-12b-it` | 404 | – | – | – |
+| `moonshotai/kimi-k3`, `deepseek-ai/deepseek-v4-pro`, `z-ai/glm-5.3` | 410 | – | – | – |
+
+One probe per model is a latency sample, not a benchmark; the context windows of the new entries are not yet confirmed and stay `unverified`.
+
+**Chosen chains** (owner runs with `NVIDIA_API_KEY`; NVIDIA entries are dropped entirely for the public demo):
+
+- `planner`: Kimi K3.1 Pro (`interactive: false`) → Nemotron 3 Ultra → Mistral Large 4 → Pollinations `openai` → WebLLM → Ollama → OpenRouter → Groq → Claude (BYOK)
+- `worker`: Nemotron 3 Ultra → Mistral Large 4 → Pollinations `openai` → WebLLM → Ollama → Groq → Cerebras → Cloudflare → Claude (BYOK)
+- `fast` (quarantined reader): Nemotron 3.5 Lightning 30B-A3B → Pollinations `openai` → WebLLM → Ollama → Cerebras → Groq → Cloudflare → Claude (BYOK)
+
+The 410 entries (`kimi-k3`, `deepseek-v4-pro`, `glm-5.3`) are removed.
+
+**Latency budget instead of a separate role.** A chain entry may set `interactive: false`. The router skips those entries unless the run sets `latency: "offline"` (`RunMissionOptions.latency`, `ChainContext.latency`). The default is `interactive`, so web runs never wait minutes for a first token. Evals, judges and recordings that want the strongest model pass `offline` and get Kimi K3.1 Pro first. `pnpm smoke` reports these entries as `skip (offline only)`. A separate `quality` role was rejected because `ModelRole` is part of the event schema and the database parity tests. Adding a role would change the event contract to express what is really a per-run budget.
+
+**Evaluation-only rule.** NVIDIA keeps `terms: "evaluation-only"`. `isProviderAvailable` excludes it for the `public-demo` audience whatever the env holds. Only owner runs (local `DELEGATE_OWNER_MODE=1`, evals, recordings) reach it.
+
+**Ordering rule, corrected.** Decision 4 and Amendment 1 said "keyless first", but `config/models.json` and its test let evaluation-only entries lead. The precise rule, which the test enforces: a role may open with evaluation-only entries (owner-only, never served to the public demo). From the first keyless entry on, the order is keyless hosted → browser → local → optional free-tier keys → BYOK. For the public demo the resolved chain therefore always starts keyless.
+
+**Keyless default and its cost in quality.** With no keys, every role resolves to Pollinations `openai` (gpt-oss-20b). It is community-run and anonymous. It throttles to about one call per 40 s after the first in a run, so the router spaces calls at 1.5/min with one in flight. It also stops completions at about 1500 tokens, reasoning included. As a result, public-demo runs take minutes, not seconds. Synthesis gets a smaller output budget than the owner path, so the reader extracts fewer facts per page and more sections end as "insufficient evidence". Evals record the serving model on every trial, so this gap is measured and shown, never hidden.

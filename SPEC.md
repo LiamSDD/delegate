@@ -263,9 +263,9 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 - [ ] *Done when:* `pnpm check` is green, the app is deployed, and the home page already looks premium
 
 ### M1 · Agent runtime + Company X-ray
-- [ ] Explicit streaming tool-use loop; `web_search` (server tool), `web_fetch`, quarantined reader, `extract`
-- [ ] SSE replay-then-live; run view on real events; live cost; budgets; prompt caching
-- [ ] Eval harness with the first X-ray dataset
+- [x] Explicit streaming tool-use loop; `web_search` (server tool), `web_fetch`, quarantined reader, `extract`
+- [x] SSE replay-then-live; run view on real events; live cost; budgets; prompt caching
+- [x] Eval harness with the first X-ray dataset
 - [ ] *Done when:* a real URL gives a cited brief under the targets, reloading resumes the stream, and the evals run
 
 ### M2 · Multi-agent + Automation Audit
