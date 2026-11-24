@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { KindGlyph } from "@/components/kind-glyph";
 import { MilestoneBadge } from "@/components/milestone-badge";
 import { RoadmapRail } from "@/components/roadmap-rail";
+import { RunAgainButton } from "@/components/run/run-status";
 import { draftFromQuery } from "@/lib/mission-draft";
 
 export const metadata: Metadata = { title: "New run" };
@@ -43,12 +44,13 @@ export default async function NewRunPage({ searchParams }: PageProps<"/runs/new"
   }
 
   const { detected } = draft;
+  const live = detected.kind === "company";
   const spec = {
     kind: detected.kind,
     missions: detected.missionIds,
     target: detected.target,
     ...(detected.kind === "goal" ? {} : { url: detected.url }),
-    status: "not-started",
+    status: live ? "ready" : "not-started",
   };
 
   return (
@@ -56,15 +58,32 @@ export default async function NewRunPage({ searchParams }: PageProps<"/runs/new"
       <div className="flex flex-col gap-12">
         <header className="flex flex-col gap-5">
           <p className="font-mono text-2xs tracking-label text-text-subtle uppercase">
-            New run <span aria-hidden="true">·</span> draft
+            New run <span aria-hidden="true">·</span> {live ? "ready" : "draft"}
           </p>
-          <h1 className="font-serif text-display-md tracking-display text-balance">
-            Runs arrive in {draft.firstArrival}
-          </h1>
-          <p className="max-w-xl text-md text-text-muted text-pretty">
-            Nothing was started and no model was called. This is the mission Delegate read from your
-            input; the runtime that plans and executes it lands in {draft.firstArrival}.
-          </p>
+          {live ? (
+            <>
+              <h1 className="font-serif text-display-md tracking-display text-balance">
+                Start a Company X-ray of {detected.target}
+              </h1>
+              <p className="max-w-xl text-md text-text-muted text-pretty">
+                Nothing has started yet. Company X-ray runs live now; the AI Automation Audit that
+                follows it arrives in {draft.fullArrival}.
+              </p>
+              <div>
+                <RunAgainButton input={{ url: detected.url }} label="Start Company X-ray" />
+              </div>
+            </>
+          ) : (
+            <>
+              <h1 className="font-serif text-display-md tracking-display text-balance">
+                Runs arrive in {draft.firstArrival}
+              </h1>
+              <p className="max-w-xl text-md text-text-muted text-pretty">
+                Nothing was started and no model was called. This is the mission Delegate read from
+                your input; the runtime that plans and executes it lands in {draft.firstArrival}.
+              </p>
+            </>
+          )}
         </header>
 
         <section aria-labelledby="parsed" className="flex flex-col gap-4">
@@ -120,7 +139,7 @@ export default async function NewRunPage({ searchParams }: PageProps<"/runs/new"
             href="/runs"
             className="inline-flex h-9 items-center rounded-md px-3 text-sm text-text-muted hover:bg-surface-2 hover:text-text"
           >
-            What the run view will show
+            {live ? "Your runs" : "What the run view will show"}
           </Link>
         </div>
       </div>

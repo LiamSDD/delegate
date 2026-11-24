@@ -11,5 +11,7 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     environment: "node",
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
   },
 });

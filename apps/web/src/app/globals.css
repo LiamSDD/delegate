@@ -80,6 +80,19 @@
   --ease-exit: var(--easing-exit);
   --default-transition-duration: var(--duration-fast);
   --default-transition-timing-function: var(--easing-standard);
+
+  --animate-card-in: card-in var(--duration-base) var(--easing-enter) both;
+
+  @keyframes card-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
 }
 
 @layer base {

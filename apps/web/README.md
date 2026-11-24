@@ -70,3 +70,23 @@ Skip link to `#main`; `header`, `nav`, `main` and `footer` landmarks; one `h1` p
 ## Model chain status
 
 The home page reads `config/models.json` at build time (`src/lib/model-chain-file.ts`, validated with zod in `src/lib/model-chain.ts`) and lists the keyless providers a public visitor would use. It shows configuration only: no health checks or latency until `pnpm smoke` exists. If the file is missing or invalid, the line says so.
+
+## Runs: storage, sessions and streaming (ADR 0005)
+
+| Route | Purpose |
+|---|---|
+| `POST /api/runs` | `{ missionId: "company-xray", input: { url, focus? } }` → `201 { runId }`. Same-origin `Origin` required (CSRF), JSON only, 8 KB cap. The URL is normalised to its `https://host/` homepage; IP literals, ports, credentials and local suffixes (`localhost`, `.local`, `.internal`, `.arpa`, …) are rejected. Rate limited per guest (5/hour) and per client IP (20/hour), in memory per process; Upstash replaces this later. |
+| `GET /api/runs/:id` | Run summary (status, totals, timestamps) for the session's workspace. |
+| `GET /api/runs/:id/events` | Server-Sent Events. Replays events after `Last-Event-ID` (or `?after=`), then polls every 250 ms until terminal or disconnect. `id` = seq, `event` = type, `data` = the event JSON; control frames `stream.replay {count}`, `stream.live`, `stream.end`; heartbeat comments every 15 s. `204` once a terminal run is fully delivered, so `EventSource` stops reconnecting. |
+| `POST /api/runs/:id/cancel` | Appends `run.failed` (`cancelled`, "cancelled by user") and aborts the in-process runner. `409` when the run already finished. |
+| `GET /api/runs/:id/artifacts/:artifactId` | Latest stored content of an artifact (mirrored from `artifact.*` event payloads into `artifacts`). |
+
+Every unknown run, foreign run or missing session answers `404`, never `403`. A run that is older than 5 minutes and silent for 2 minutes is marked `run.failed` (`worker_lost`, "worker lost") on the next read.
+
+**Database.** With `DATABASE_URL` set, the app uses Neon through `createDb` and refuses to start if that login bypasses RLS. Without it, `src/server/db.ts` opens an embedded PGlite at `<repo>/.data/pglite` (the directory carries its own `.gitignore`), applies the real `packages/db` migrations once per boot as the bootstrap superuser, then runs `SET SESSION AUTHORIZATION delegate_app_login`. From then on every request goes through `withTenant()` (`SET LOCAL ROLE delegate_app` + `app.user_id`), so RLS, column grants and append-only triggers apply exactly as in production. Guest provisioning calls the `SECURITY DEFINER` function `create_guest_workspace()` (migration `0003`) as `delegate_app`. It creates the guest user, org, 7-day demo workspace and owner membership in one statement, so neither PGlite nor Neon needs a provisioning connection or elevated login.
+
+**Sessions.** First run creation creates an anonymous guest who owns a demo workspace (`is_demo`, 7-day retention) and sets `delegate_session`: `base64url(payload).base64url(HMAC-SHA256)`, HTTP-only, `SameSite=Lax`, `Secure` in production, 7 days. `DELEGATE_SESSION_SECRET` (≥ 32 chars) is required in production; in development a random per-process secret is generated with a warning.
+
+**Simulated runner.** `DELEGATE_FAKE_RUNNER=1` (ignored when `NODE_ENV=production`) replaces the runtime with a scripted dev runner so the run view can be exercised without models. Its runs carry `execution: "simulated"` in `run.created`, every text it writes says "Simulated", and the UI labels the run "Simulated · no research, no model calls".
+
+**Run view.** `/runs/[id]` folds the streamed events with `foldRun` on the client (`src/lib/runs/run-view.ts`), so a reload rebuilds the same view. Mobile (< 768 px) collapses into Plan / Activity / Brief tabs; Brief becomes the default once an artifact exists.

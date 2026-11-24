@@ -14,7 +14,9 @@ export const STATIC_SECURITY_HEADERS: readonly { key: string; value: string }[] 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  transpilePackages: ["@delegate/runtime"],
+  agentRules: false,
+  transpilePackages: ["@delegate/runtime", "@delegate/db"],
+  serverExternalPackages: ["@electric-sql/pglite", "@electric-sql/pglite-pgvector"],
   outputFileTracingRoot: monorepoRoot,
   turbopack: {
     root: monorepoRoot,

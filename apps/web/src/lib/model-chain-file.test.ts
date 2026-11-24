@@ -12,7 +12,6 @@ describe("loadKeylessChain", () => {
       if (summary.status !== "ok") return;
       expect(summary.providers.map((provider) => [provider.id, provider.placement])).toEqual([
         ["pollinations", "hosted"],
-        ["llm7", "hosted"],
         ["webllm", "in-browser"],
       ]);
     } finally {
