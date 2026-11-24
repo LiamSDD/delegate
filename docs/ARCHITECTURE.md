@@ -168,7 +168,7 @@ erDiagram
   documents ||--o{ chunks : "split into (pgvector)"
 ```
 
-Every tenant table carries `workspace_id`; row-level security restricts reads and writes to workspaces the current member belongs to (`app.current_member_id` set per transaction). `run_events` and `audit_log` are insert-only.
+Every tenant table carries `workspace_id`; row-level security restricts reads and writes to workspaces the current member belongs to (`app.user_id` set per transaction). `run_events` and `audit_log` are insert-only.
 
 ## Observability
 
