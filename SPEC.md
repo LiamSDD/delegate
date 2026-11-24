@@ -31,7 +31,7 @@ Each audience gets its "aha" without explanation:
 
 | Audience | What they must see | Where |
 |---|---|---|
-| Recruiter / hiring manager | Their own company analysed and improved in about 3 minutes, for well under $1 | Hero flow from a company URL |
+| Recruiter / hiring manager | Their own company analysed and improved in about 3 minutes, at $0 | Hero flow from a company URL |
 | Staff engineer | Hand-written agent runtime, prompt-injection security model, time-travel debugging, evals with statistics, OpenTelemetry traces | Run view, trace page, "fork from step", `/evals`, `docs/` |
 | Enterprise buyer / CTO | Policies, approvals, audit log, RBAC, MCP connectors, API, self-hosting, bring-your-own key, cost and ROI model | Mission Control, policy editor, settings, README |
 
@@ -47,7 +47,7 @@ The project is finished when **two demos** work live, in one take, on targets De
 | 8–25 s | A plan streams in within 2 s and is approved; 4 sub-agent lanes work in parallel. |
 | 25–40 s | The critic catches an unsupported claim and fixes it; an approval card appears inline. |
 | 40–65 s | A cited Company X-ray and an AI Automation Audit appear with an interactive ROI model. One click on "Build it" turns the top opportunity into a working, cited assistant trained on the company's own website, which answers questions live. |
-| 65–80 s | Trace waterfall, "$0.58 · 2m41s · 71% cache hits", evals scoreboard. |
+| 65–80 s | Trace waterfall, "$0.00 · 2m41s · Kimi K3 + gpt-oss-120b", evals scoreboard. |
 | 80–90 s | Architecture diagram and live URL. |
 
 ### Demo B: 4-minute engineering deep-dive (tech leads)
@@ -106,9 +106,15 @@ The agent runtime is written by hand on the Anthropic TypeScript SDK (Messages A
 - **Critic:** extracts atomic claims, checks each against its cited passage (entailment by the fast model), scores against a rubric, makes at most 2 fix loops, then flags what remains. Reports **citation accuracy**.
 - **Deliver:** artifacts, executive summary, one-click next actions.
 
-### 2. Model routing
+### 2. Model routing (zero-cost, see ADR 0003)
 
-All model IDs live in `models.ts` (confirm current IDs in the docs): strongest (`claude-opus-5-5`) for planning and synthesis, mid-tier (`claude-sonnet-5-5`) for sub-agents, fast (`claude-haiku-5-5`) for extraction, entailment and summarising long tool output. Providers sit behind a `ModelProvider` interface so the same models run through the Anthropic API, AWS Bedrock or Google Vertex (bring your own key).
+**Operating constraint: the owner spends $0, forever.** No paid API, no card on file. Default inference runs on free tiers of hosted open-weight models; Claude is an optional bring-your-own-key provider.
+
+- The runtime asks for roles (`planner`, `worker`, `fast`); `config/models.json` maps each role to an ordered fallback chain across free providers (NVIDIA API catalog with Kimi K3 / DeepSeek V4 Pro / GLM-5.3, Groq, Cerebras, OpenRouter free models, Cloudflare Workers AI).
+- A router handles per-provider rate limits, `retry-after`, context-window checks and health, and emits `model.fallback` events so every step shows which model served it.
+- `ModelProvider` has two adapters: OpenAI-compatible (all free providers) and Anthropic (BYOK, used when a visitor or self-hoster supplies a Claude key; Bedrock and Vertex later through the same interface).
+- The public demo uses providers whose terms allow it, with per-visitor quotas and a designed "free capacity used up" state. NVIDIA's trial tier is used for owner-run evals and recordings only.
+- A daily smoke test checks every configured provider and model, because free tiers change often.
 
 ### 3. Context engineering
 
@@ -155,8 +161,10 @@ Versions checked on 2026-11-24 (re-check before upgrading):
 | App | Next.js 16.4 (App Router, RSC, Route Handlers), React 19.3, TypeScript strict, pnpm monorepo + Turborepo 2.11 |
 | Packages | `apps/web`, `packages/runtime`, `packages/policy`, `packages/sdk`, `packages/mcp-server`, `packages/cli`, `packages/evals` |
 | UI | Tailwind CSS 4.3 + shadcn/ui, Motion 14, Recharts 3 |
-| AI | `@anthropic-ai/sdk` 1.13, `@anthropic-ai/claude-agent-sdk` 0.3 (Engineer only), `@modelcontextprotocol/sdk` 1.32 (protocol 2025-11-25) |
-| Data and jobs | Postgres on Neon + Drizzle ORM 0.45 + pgvector, Inngest 4, Upstash Redis (rate limits, quotas), sandbox (E2B 2.x) behind an interface |
+| AI | OpenAI-compatible HTTP adapter for free providers (NVIDIA, Groq, Cerebras, OpenRouter, Cloudflare); `@anthropic-ai/sdk` 1.13 for BYOK Claude; `@modelcontextprotocol/sdk` 1.32 (protocol 2025-11-25) |
+| Research sources | Keyless only: the company's own site, sitemap and RSS, Wikipedia/Wikidata, GitHub public API; Jina Reader (keyless) for clean page text |
+| Data and jobs | Postgres on Neon free tier + Drizzle ORM 0.45 + pgvector, Inngest free tier, Upstash Redis free tier (rate limits, quotas); sandbox behind an interface (free option decided in M5) |
+| Cost | $0: Vercel Hobby, Neon, Inngest, Upstash and every model provider on free tiers, no card on file |
 | Tooling | OpenTelemetry (GenAI conventions, incubating), Vitest 5, Playwright 1.65, exceljs, docx, @react-pdf/renderer, zod 4 |
 | Deploy | Vercel (public demo), Docker Compose (self-host) |
 
@@ -192,13 +200,14 @@ Evals start in M1.
 | Metric | Target |
 |---|---|
 | Time to first event | < 2 s at p95 |
-| Company X-ray | < 90 s and < $0.30 |
+| Company X-ray | < 90 s and $0 on the default free providers |
 | Automation Audit | < 2.5 min |
 | Build-an-Agent | < 3 min |
 | Citation accuracy | ≥ 95% |
 | Eval pass rate | ≥ 85% |
 | Attack success rate | 0% |
-| Cache hit rate on repeated missions | ≥ 60% |
+| Cache hit rate on repeated missions | ≥ 60% where the provider reports caching; "n/a" otherwise |
+| Provider smoke test | Every configured model passes daily, or is removed from its chain |
 
 **Honesty:** never fake live output or hard-code AI responses in product paths. Demo fallbacks are real recorded runs, visibly labelled "Replay". Every estimate shows its assumptions.
 

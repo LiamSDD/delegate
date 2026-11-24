@@ -40,12 +40,13 @@ You are the principal AI engineer, platform architect and product designer on th
 
 ## Model facts that bite
 
-- All model IDs live in `packages/runtime/src/models.ts`. Planner/synthesis `claude-opus-5-5`, sub-agents `claude-sonnet-5-5`, extraction/entailment/summaries `claude-haiku-5-5`.
-- Opus 5.5 and Sonnet 5.5 reject forced `tool_choice` (`any`/`tool`): use `auto` + `strict: true` tools, or structured outputs (`output_config.format`).
-- Opus 5.5 thinking cannot be disabled; control depth with `output_config.effort` (default `medium`, set it explicitly).
-- Check `stop_reason` before reading content: handle `refusal`, `max_tokens`, `pause_turn` (resume server tools by re-sending, no "continue" message).
-- Prompt caching: render order tools → system → messages; max 4 breakpoints; minimum cacheable prefix 512 tokens on current models; no timestamps or unsorted JSON before a breakpoint.
-- Server tools: `web_search_20260209`, `web_fetch_20260209` (dynamic filtering built in; do not also declare code execution).
+- **$0 operating constraint (ADR 0003).** No paid API, ever. Default inference is free open-weight models; Claude is BYOK only. Never add a dependency, service or default that costs money.
+- The runtime asks for roles (`planner`, `worker`, `fast`); `config/models.json` maps roles to fallback chains (NVIDIA Kimi K3 / DeepSeek V4 Pro / GLM-5.3, Groq, Cerebras, OpenRouter `:free`, Cloudflare). Never hard-code a model ID elsewhere.
+- Free tiers are small and change often: respect `retry-after`, check context windows before routing (Groq 8K TPM, Cerebras free 64k context), emit `model.fallback`, keep the daily smoke test green.
+- NVIDIA's free tier is trial/evaluation only: owner evals and recordings may use it; the public guest workspace must not by default.
+- Kimi models expect reasoning content and tool calls echoed back on the next turn; provider quirks live in adapters with tests.
+- Anthropic BYOK path: Opus 5.5 / Sonnet 5.5 reject forced `tool_choice` (use `auto` + `strict`, or structured outputs); Opus 5.5 thinking can't be disabled (use `effort`); check `stop_reason` (`refusal`, `max_tokens`, `pause_turn`).
+- Research is keyless: company site, sitemap, RSS, Wikipedia/Wikidata, GitHub API, Jina Reader. No scraping of search engines.
 
 ## Repo map
 

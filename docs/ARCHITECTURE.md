@@ -77,16 +77,27 @@ flowchart TD
 - `StepResult`: `{ summary, findings[], sources[], confidence, artifacts[] }`. Sub-agent transcripts stay in the trace and never flow into another agent's context.
 - Sub-agents run in isolated contexts. They share state only through step results and the run scratchpad.
 
-**Model routing** (`packages/runtime/src/models.ts`)
+**Model routing** (`config/models.json`, ADR 0003; $0 operating cost)
 
-| Role | Model | Why |
+| Role | Default free chain | Used for |
 |---|---|---|
-| Planner, synthesis, Editor | `claude-opus-5-5` | Plan quality and final writing dominate perceived quality |
-| Researcher, Analyst, Builder, Critic scoring | `claude-sonnet-5-5` | Strong tool use at a fifth of Opus input cost |
-| Quarantined reader, extraction, entailment, tool-output summaries | `claude-haiku-5-5` | High volume, narrow tasks |
-| Engineer | Claude Agent SDK (model set per mission) | See ADR 0003 (M5) |
+| `planner` | NVIDIA `kimi-k3` → NVIDIA `deepseek-v4-pro` → OpenRouter `nemotron-3-ultra:free` → Groq `gpt-oss-120b` | Planner, synthesis, Editor |
+| `worker` | Groq `gpt-oss-120b` → NVIDIA `glm-5.3` → Cerebras `gpt-oss-120b` → Cloudflare `gpt-oss-120b` | Researcher, Analyst, Builder, Critic scoring |
+| `fast` | Cerebras `qwen-3.8-27b` → Groq `qwen3.8-27b` → Cloudflare `glm-4.7-flash` | Quarantined reader, extraction, entailment, tool-output summaries |
+| BYOK | Anthropic `claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5` | Any role, when a visitor or self-hoster supplies a key |
 
-Every call goes through `ModelProvider`, so the same roles run on the Anthropic API, Bedrock or Vertex with the customer's own credentials.
+```mermaid
+flowchart LR
+  RT[Runtime asks for a role] --> RO[Router]
+  RO -->|bucket ok · context fits · healthy| P1[Provider 1]
+  RO -->|429 / timeout / too long| P2[Provider 2]
+  RO --> P3[Provider n]
+  P1 & P2 & P3 --> N[Adapter normalises<br/>messages · tool calls · usage · stop reason]
+  N --> RT
+  RO -. model.fallback event .-> EV[(run_events)]
+```
+
+Every call goes through `ModelProvider` (OpenAI-compatible adapter for the free providers, Anthropic adapter for BYOK), so the runtime never depends on one vendor.
 
 **Context engineering**
 

@@ -34,6 +34,7 @@ Delegate lets models read untrusted content and take actions with tools. The des
 | **Append-only logs.** `run_events` and `audit_log` have no UPDATE/DELETE grants. | `packages/db` migrations | Migration tests |
 | **Secrets.** Env or a secret manager only; never sent to models, never logged; BYOK keys encrypted at rest; `.env.example` lists names only. | Config + logging | Secret-scanning hook and CI |
 | **Privacy.** PII detection and redaction in traces and logs; public demo runs deleted after 7 days, stated in the UI. | `packages/runtime/src/privacy` | Unit tests; retention job tests |
+| **Provider data policies.** Free providers differ: Groq (zero data retention can be enabled), Cerebras and Cloudflare (no training on customer data, per their docs), NVIDIA trial terms, OpenRouter per upstream provider. Workspaces can restrict providers by data classification; `confidential` content only goes to allowlisted providers or BYOK. | `config/models.json` + policy engine | Policy tests per classification |
 | **Spend limits.** Per-step token budgets, per-run and per-day caps, guest quotas in Redis. | Orchestrator + policy | Budget tests |
 
 ## Threats

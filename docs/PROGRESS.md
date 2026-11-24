@@ -9,3 +9,10 @@ Append one entry per completed task: date, shipped, next, known issues, metrics.
 - **Next:** M0 plan review with the owner, then M0 implementation.
 - **Known issues:** none yet; no code exists.
 - **Stubs:** none.
+
+## 2026-11-24 · Zero-cost operating constraint
+
+- **Decided:** the owner spends $0 forever. ADR 0003 replaces Claude-only routing with role-based fallback chains across free open-weight providers; Claude becomes BYOK. Research is keyless.
+- **Research sources (read 2026-11-24):** NVIDIA NIM catalog and Kimi K3 card (docs.api.nvidia.com), OpenRouter limits and privacy docs, Groq rate limits and data docs, Cerebras rate limits and models, Cloudflare Workers AI pricing, Z.ai pricing, Tavily/Jina/Brave search docs. Retired in 2026: GitHub Models (2026-07-30), Hugging Face free credits, Chutes free tier.
+- **Unverified (check in M1 with real keys):** actual NVIDIA limits, Cerebras/Groq card requirements, Kimi tool calling on Cloudflare, Z.ai limits.
+- **Next:** owner approval of the revised M0 plan.
