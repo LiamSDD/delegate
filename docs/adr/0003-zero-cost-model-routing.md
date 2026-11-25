@@ -89,3 +89,76 @@ The 410 entries (`kimi-k3`, `deepseek-v4-pro`, `glm-5.3`) are removed.
 **Ordering rule, corrected.** Decision 4 and Amendment 1 said "keyless first", but `config/models.json` and its test let evaluation-only entries lead. The precise rule, which the test enforces: a role may open with evaluation-only entries (owner-only, never served to the public demo). From the first keyless entry on, the order is keyless hosted → browser → local → optional free-tier keys → BYOK. For the public demo the resolved chain therefore always starts keyless.
 
 **Keyless default and its cost in quality.** With no keys, every role resolves to Pollinations `openai` (gpt-oss-20b). It is community-run and anonymous. It throttles to about one call per 40 s after the first in a run, so the router spaces calls at 1.5/min with one in flight. It also stops completions at about 1500 tokens, reasoning included. As a result, public-demo runs take minutes, not seconds. Synthesis gets a smaller output budget than the owner path, so the reader extracts fewer facts per page and more sections end as "insufficient evidence". Evals record the serving model on every trial, so this gap is measured and shown, never hidden.
+
+## Amendment 3 (2026-11-25): bake-off ranking, priority rotation, NVIDIA on the public demo, max quality mode
+
+**Kimi K3.1 Pro latency, measured.** The 2026-11-24 probe gave no first token within 75 s. In today's bake-off, with a 300 s first-token budget, Kimi answered all 8 calls: first token 100–153 s (median 130 s), total 115–170 s. It is correct but far too slow for any interactive step.
+
+**Bake-off.** `src/live/nvidia-bakeoff.live.test.ts` runs 4 Delegate-shaped tasks twice per model, sequentially per model (Kimi's 4 tasks run in parallel per round to keep the run under 15 minutes). The key is loaded inside the program and never printed. Candidates are every catalog chat model that returned a correct tool call in under 60 s in discovery, plus Kimi with 300 s/600 s timeouts. Fast models get 60 s first token and 120 s total. Grading is in code where possible:
+
+1. Extraction: JSON facts with quotes. Pass = schema valid and every quote is an exact substring of the page (whitespace-normalised).
+2. Multi-tool call: `get_weather(Lisbon)` and `convert_currency(250, EUR, USD)` in one turn, with a distractor tool. Pass = both correct, no distractor.
+3. Automation write-up from evidence: a different model judges it 1–5 for specificity and grounding (Nemotron 3 Ultra as judge; MiniMax for Nemotron Ultra's own write-ups; the next judge takes over if one fails). Score = mean / 5.
+4. Reasoning with a known answer (37). Pass = exact.
+
+Quality = the mean of the four task scores (0–1). Latencies are medians over the calls that responded.
+
+| Rank | Model | Quality | Extraction | Tools | Write-up | Reasoning | First token (median) | Total (median) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `minimaxai/minimax-m3.1-flash` | 1.000 | 2/2 | 2/2 | 1.00 (5/5, 5/5) | 2/2 | 10.9 s | 14.5 s (write-up 81 s) |
+| 2 | `stepfun-ai/step-5-preview` | 0.988 | 2/2 | 2/2 | 0.95 | 2/2 | 1.2 s (0.3–30 s) | 34.6 s (11–116 s) |
+| 3 | `moonshotai/kimi-k3.1-pro` | 0.975 | 2/2 | 2/2 | 0.90 | 2/2 | 130 s | 139 s |
+| 4 | `mistralai/mistral-large-4-1t-a52b` | 0.750 | 2/2 | 2/2 | 0 (both timed out at 120 s) | 2/2 | 2.3 s | 77 s |
+| 5 | `nvidia/nemotron-3.5-super-vl-120b-a12b` | 0.725 | 2/2 | 2/2 | 0.90 | 0/2 (45, 43) | 14.7 s | 16.9 s |
+| 6 | `nvidia/nemotron-3-ultra-550b-a55b` | 0.675 | 2/2 | 2/2 | 0.70 (re-judged) | 0/2 (45, 42) | 0.5 s | 3.3 s |
+
+Caveats: there are 8 calls per model, so the ranks 1–3 gap is within noise. In the first pass, Nemotron Ultra's write-ups lost their judge (Mistral timed out) and were re-run with MiniMax judging. Nemotron models ran with thinking disabled (`disable-thinking`), which is how Delegate calls them, and that probably costs them the reasoning task.
+
+**Owner decision: one ranked list for every role, priority rotation with automatic return.** Every role (`planner`, `worker`, `fast`, so the reader, critic, rerank, chat answers and judge too) uses the ranking above: MiniMax M3.1 Flash → Step 5 Preview → Mistral Large 4 → Nemotron 3.5 Super VL → Nemotron 3 Ultra, then Pollinations `openai` (keyless), then the rest as before. `fast` keeps Nemotron 3.5 Lightning after the ranked models; it was not in the bake-off. Kimi ranked third, not top two. It stays `interactive: false` at the head of `planner` and is reached only by max quality mode (below) or `latency: "offline"`.
+
+Rotation mechanics (`router.ts`, tests in `router-rotation.test.ts`):
+
+- `limits.modelRequestsPerMinute` gives each model its own token bucket (NVIDIA: 35 RPM, configurable).
+- `limits.scope: "process"` shares buckets, cooldowns and `retry-after` blocks across every run and chat in the server process. Concurrent visitors therefore draw from one budget instead of each believing they have 35 RPM.
+- Each call tries the highest-ranked model that is available now. An empty bucket, a 429, a 5xx or a timeout moves the call to the next model at once; there is no queueing. A 429 with `retry-after` blocks that model until the time passes. A 429 without it empties that model's bucket so it refills at the configured rate.
+- Nothing is sticky. The next call re-checks from the top, so a refilled or recovered model is used again immediately. `model.fallback` events record each step down for traces; users see no error.
+
+Trade-off: MiniMax's ~11 s first token now applies to high-volume calls too (reader, critic entailment, rerank, chat answers). The previous `fast` head answered in under 0.5 s. This was kept on purpose and is reported to the owner with measured run times.
+
+**Reasoning switch for the primary.** The first live max-quality run (below) showed MiniMax spending all of Build-an-Agent's 3,000-token `evalset` budget on reasoning. Both calls stopped at `max_tokens` without JSON, so `evalset` failed. `src/live/reasoning-switch.live.test.ts` measured one eval-generation prompt:
+
+- MiniMax: default 25.1 s with 2,608 reasoning chars; `reasoning_effort: low` 9.6 s with 0; `disable-thinking` 5.7 s with 0.
+- Step 5 Preview ignores both switches: 121 s, 135 s and 152 s, with 2,700–7,900 reasoning chars.
+
+MiniMax now carries `disable-thinking`. A re-run of its bake-off with the switch passed all 7 calls that ran (spec 5 / ground 5 on both write-ups, first token 4–9 s, total 4–18 s). The eighth call got a 429 while a concurrent probe was on the key. Step 5, the backup, has no switch and can take minutes when it is reached.
+
+**Owner decision: NVIDIA serves the public demo.** NVIDIA's `terms` changed from `evaluation-only` to `public-demo-ok`, so the public site uses it when the server has `NVIDIA_API_KEY`. Caveats recorded in `dataPolicy`:
+
+- The NVIDIA API catalog trial terms are for development and evaluation, not production.
+- About 40 RPM per key is shared by every visitor; the process-scoped buckets above enforce it.
+- Data stays `maxClassification: "public"`.
+
+With no key in the env, the public chain is still keyless-only, and the test for that still holds. The ordering test now requires the entries before the first keyless entry to be keyed free-tier providers (not BYOK). From the first keyless entry on, the order is unchanged.
+
+**Max quality mode.** `RunMissionOptions.quality: "standard" | "max"` (default `standard`; `resumeMission` inherits it). `qualityTimeouts` defaults to 300 s first token and 600 s total.
+
+- Scope: only quality-critical generation steps opt in, via `callStructured({ quality: { say } })`. Those are Build-an-Agent `design`, Automation Audit `rank` (editor) and Company X-ray `synthesise`. In `max`, those calls route `planner` with `latency: "offline"`, so the `interactive: false` head (Kimi) is tried first.
+- Long timeouts: they apply only to `interactive: false` entries, through the per-call `StreamOptions.timeouts` that the OpenAI-compatible adapter honours. The router also enforces a first-token deadline itself.
+- Fallback: if the head misses the deadline or errors, the router emits `model.fallback` with reason `timeout` (or the error class) and continues down the normal chain, which keeps the provider's normal timeouts.
+- Visibility: the step posts one `agent.message`, "Waiting for Kimi K3.1 Pro (max quality, can take several minutes)". `usage.updated` names the model that actually served, and the step summary ends with "Max quality: Kimi K3.1 Pro" only when Kimi served.
+- Everything else stays on the fast chain: reader, analysts, critic, rerank, eval generation and grading, chat. So does the repair attempt of a quality-critical structured call.
+- Public demo: `public-demo` ignores `max`. The run records why as a planner `agent.message` on the first step. Model IDs live only in config; the label comes from the entry's `displayName`.
+
+**Live check (2026-11-25, owner, `https://umami.is`, robots allows `/` and `ai-input=yes`).** Run 1 completed in 404 s:
+
+- `crawl`: 61 s, 60 pages.
+- `index`: 1.7 s.
+- `design`: 203.8 s on Kimi K3.1 Pro. The step posted one "Waiting for Kimi K3.1 Pro" message; there was no fallback; the summary reads "… designed · Max quality: Kimi K3.1 Pro".
+- `evalset`: failed, because MiniMax used its whole 3,000-token budget on reasoning (two calls). That produced the reasoning switch above.
+- `evaluate`: not run. Eval pass rate: n/a.
+
+Run 2, with `disable-thinking` on MiniMax, did not finish within the harness's 25-minute limit. Its events were only written at the end, so the cause is unknown. The harness now streams events to `build-agent-max.events.jsonl` as they arrive. The 25-minute stall is the open risk of a slow backup (Step 5 can take minutes) on a shared key.
+
+### Amendment 3b (2026-11-25): keep live rotation responsive
+
+Step 5 Preview (121–152 s per call, ignores reasoning switches) and Mistral Large 4 (write-up timed out at 120 s) rank 2nd and 4th on quality but break the "invisible to the user" requirement for live calls. Both are marked `interactive: false`: they serve offline and max-quality work only. The live rotation is MiniMax M3.1 Flash → Nemotron 3.5 Super VL → Nemotron 3 Ultra → Nemotron 3.5 Lightning (fast role) → keyless Pollinations, returning to MiniMax as soon as it has capacity.

@@ -274,8 +274,8 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 - [ ] *Done when:* the X-ray → Audit chain gives company-specific results for 5 very different companies
 
 ### M3 · Build-it + durability + human-in-the-loop
-- [ ] Build-an-Agent: crawler, hybrid RAG, widget, gaps report, auto-generated evals
-- [ ] Inngest durable runs, approvals, workspace memory
+- [x] Build-an-Agent: crawler, hybrid RAG, widget, gaps report, auto-generated evals
+- [x] Inngest durable runs, approvals, workspace memory
 - [ ] *Done when:* **Demo A works end to end** and killing the server mid-run still completes the run
 
 ### M4 · Trust layer
