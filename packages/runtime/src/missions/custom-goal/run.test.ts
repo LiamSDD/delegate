@@ -5,9 +5,15 @@ import { describe, expect, it } from "vitest";
 import { checkPlanSteps } from "../../agent/planner";
 import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
 import { type AwaitPlanApproval } from "../../plan-approval";
-import { loadRuntimePrompts, resumeMission, runMission } from "../../server";
+import {
+  loadRuntimePrompts,
+  resumeMission,
+  runMission,
+  type RunMissionOptions,
+} from "../../server";
 import { createFetcher } from "../../tools/fetch";
 import { fixtureDns, fixtureFetch } from "../../testing/fixture-site";
+import { maxQualityNotes, maxQualityRun, stepsServedOffline } from "../../testing/max-quality";
 import { scriptedProvider, testRun, textTurn } from "../../testing/fakes";
 import { NextActionsSchema } from "../next-actions";
 import { defaultGoalPlan } from "./plan";
@@ -252,6 +258,7 @@ async function runGoal(
     hardDeadlineMs?: number;
     killAt?: string;
     reference?: (url: URL) => Response | undefined;
+    mission?: Partial<RunMissionOptions>;
   } = {},
 ): Promise<{
   status: string;
@@ -297,6 +304,7 @@ async function runGoal(
     sleep: () => Promise.resolve(),
     modelsConfig: unthrottledConfig,
     ...(options.hardDeadlineMs === undefined ? {} : { hardDeadlineMs: options.hardDeadlineMs }),
+    ...options.mission,
   };
   const controller = new AbortController();
   let killed = false;
@@ -447,6 +455,17 @@ describe("runMission custom-goal end to end (fixture web, scripted model over HT
     );
     const completed = events.at(-1);
     expect(completed?.type).toBe("run.completed");
+  });
+
+  it("routes only the synthesis step to the offline entry in max quality", async () => {
+    const { status, events } = await runGoal(
+      "I want to achieve acme's marketing and agentic work",
+      undefined,
+      { mission: maxQualityRun(unthrottledConfig) },
+    );
+    expect(status).toBe("completed");
+    expect(stepsServedOffline(events)).toEqual(["synthesise"]);
+    expect(maxQualityNotes(events)).toEqual(["synthesise"]);
   });
 
   it("runs a topic-only plan when no company is named and honours plan review", async () => {

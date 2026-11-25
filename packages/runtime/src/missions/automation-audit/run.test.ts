@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
-import { runMission } from "../../server";
+import { runMission, type RunMissionOptions } from "../../server";
 import { FIXTURE_ORIGIN, fixtureDns, fixtureFetch } from "../../testing/fixture-site";
+import { maxQualityNotes, maxQualityRun, stepsServedOffline } from "../../testing/max-quality";
 import { BuildAgentInputSchema } from "../build-agent/input";
 import { NextActionsSchema } from "../next-actions";
 import { matchGeneric } from "./genericity";
@@ -198,7 +199,11 @@ function plannerReply(user: string): Response {
 async function runAudit(
   input: unknown,
   verdict?: "not_enough_info" | "contradicted",
-  options: { editorPicks?: number; contradict?: RegExp } = {},
+  options: {
+    editorPicks?: number;
+    contradict?: RegExp;
+    mission?: Partial<RunMissionOptions>;
+  } = {},
 ): Promise<{ status: string; events: RunEvent[]; bodies: WireBody[] }> {
   const bodies: WireBody[] = [];
   const site = fixtureFetch((url, init) => {
@@ -248,6 +253,7 @@ async function runAudit(
     resolveDns: fixtureDns,
     sleep: () => Promise.resolve(),
     modelsConfig: unthrottledConfig,
+    ...options.mission,
   });
   return { status: result.status, events, bodies };
 }
@@ -337,6 +343,15 @@ describe("runMission automation-audit end to end (fixture site, fake provider ov
       expect(body.tools).toBeUndefined();
       expect(JSON.stringify(body)).not.toContain("<source");
     }
+  });
+
+  it("routes only the ranking step to the offline entry in max quality", async () => {
+    const { status, events } = await runAudit({ url: `${FIXTURE_ORIGIN}/` }, undefined, {
+      mission: maxQualityRun(unthrottledConfig),
+    });
+    expect(status).toBe("completed");
+    expect(stepsServedOffline(events)).toEqual(["rank"]);
+    expect(maxQualityNotes(events)).toEqual(["rank"]);
   });
 
   it("narrows the plan to the requested department", async () => {
