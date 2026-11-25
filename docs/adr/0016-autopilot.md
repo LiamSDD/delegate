@@ -43,12 +43,12 @@ It is triggered by: the request that created the run (`after()`), the child's ow
 
 Every hand-off parses the previous child's deliverable with its zod schema and builds the next input with the next mission's input schema; a failure stops Autopilot with the contract name and the zod issues.
 
-| Contract | From | To |
-| --- | --- | --- |
-| goal-brief → track | `goal-brief` + `next-actions` | first launchable action decides the track: company (X-ray → Audit → Build it) or repo (Repo X-ray → Ship-a-PR); else the resolved company; else brief only |
-| company-xray → automation-audit | X-ray brief's company URL, brief objective | `AutomationAuditInput { url, focus }` |
-| audit opportunity → build-agent | top opportunity not marked unverified | `BuildAgentInput { url, goal: automation, name, opportunityId, fromAuditRunId }` |
-| repo improvement → ship-a-pr | best-ranked verified improvement, preferring effort S | `ShipAPrInput { repoUrl, ref, improvement }` |
+| Contract                        | From                                                  | To                                                                                                                                                         |
+| ------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| goal-brief → track              | `goal-brief` + `next-actions`                         | first launchable action decides the track: company (X-ray → Audit → Build it) or repo (Repo X-ray → Ship-a-PR); else the resolved company; else brief only |
+| company-xray → automation-audit | X-ray brief's company URL, brief objective            | `AutomationAuditInput { url, focus }`                                                                                                                      |
+| audit opportunity → build-agent | top opportunity not marked unverified                 | `BuildAgentInput { url, goal: automation, name, opportunityId, fromAuditRunId }`                                                                           |
+| repo improvement → ship-a-pr    | best-ranked verified improvement, preferring effort S | `ShipAPrInput { repoUrl, ref, improvement }`                                                                                                               |
 
 ### 5. Safety
 
@@ -57,6 +57,7 @@ Every hand-off parses the previous child's deliverable with its zod schema and b
 - **Budgets:** at most 4 children, depth 1, 45 minutes of wall time from the parent's creation, 1.2 M tokens summed over children; each child also keeps its own run budget. Exceeding a cap stops before the next child with a stated reason. A running child that outlives the wall-time cap is cancelled.
 - **Stop on first failure:** a failed child ends Autopilot as failed, with the child's error in the report.
 - **Quotas:** the parent itself spends no model tokens and does not count; every child takes one unit of the per-guest run quota. An exhausted quota stops Autopilot with that reason.
+- **Hand-offs carry no privilege.** The fields passed on (an opportunity's automation text, an improvement's title and acceptance criteria, a URL) were written by models in the previous child. They are re-parsed with the next mission's input schema and become that child's input, exactly what a human click on today's "Build it" / "Ship it" buttons would send; the next child applies its own quarantine, URL guards and approvals to them. Autopilot never widens a child's capabilities.
 - Every child start writes a `policy.decided` (`autopilot`) event describing the tier and modes, so the audit view shows why a child could or could not reach a side effect.
 
 ### 6. Surfaces

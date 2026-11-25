@@ -458,7 +458,12 @@ export async function cancelAutopilotChildren(
   parentRunId: string,
   deps: Pick<DurableDeps, "registry">,
 ): Promise<void> {
-  const state = foldRun(await readAllEvents(app, userId, parentRunId));
+  let state: RunState;
+  try {
+    state = foldRun(await readAllEvents(app, userId, parentRunId));
+  } catch {
+    return;
+  }
   for (const child of state.children) {
     if (child.outcome !== undefined) continue;
     const record = await getRunRecord(app, userId, child.childRunId);
