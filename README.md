@@ -97,6 +97,27 @@ This repo is developed with Claude Code as a disciplined engineering team, and t
 - Hooks: lint on every edited file, secret scan before every commit, full check before every push.
 - Independent workstreams run as parallel sub-agents, each scoped to its own packages, then reviewed before merge.
 
+## Connect from Claude Code / Codex
+
+Delegate is a remote MCP server at `https://<host>/api/mcp` (Streamable HTTP). Create a workspace API token under **Settings → Connections**, which also shows ready-to-paste setup for Cursor, VS Code and any MCP client.
+
+```bash
+# Claude Code
+claude mcp add --transport http delegate https://<host>/api/mcp \
+  --header "Authorization: Bearer <your-delegate-token>"
+```
+
+```toml
+# Codex: ~/.codex/config.toml, with DELEGATE_TOKEN exported in your shell
+[mcp_servers.delegate]
+url = "https://<host>/api/mcp"
+bearer_token_env_var = "DELEGATE_TOKEN"
+```
+
+Then ask your agent to "run a company X-ray on acme.com with Delegate". The tools are `start_mission`, `get_run`, `wait_for_run`, `approve_plan`, `reject_plan`, `list_runs` and `get_artifact`; deliverables are also resources (`delegate://runs/{runId}/deliverable`). Runs started over MCP stream live in the web UI and go through the same policies, approvals, quotas and audit log. For stdio-only clients: `DELEGATE_URL=https://<host> DELEGATE_TOKEN=<token> pnpm --filter @delegate/mcp-server stdio`.
+
+The same page connects your own MCP servers (tools are listed on connect; side-effecting tools ask for approval unless you pre-approve them) and your GitHub repositories. Design and threat model: [ADR 0014](docs/adr/0014-connections.md).
+
 ## Run it locally
 
 ```bash
