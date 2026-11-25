@@ -11,7 +11,7 @@ import {
 import { DuplicateIndex, contentHash, fromHex, simhash } from "./dedupe";
 import { extractPage, pageSourceText, type ExtractedPage } from "./extract";
 import { Frontier, type FrontierEntry } from "./frontier";
-import { HostPoliteness, type HostStats } from "./politeness";
+import { HostPoliteness, realSleep, type HostStats } from "./politeness";
 import { COMPANY_PROFILE, scoreUrl, type CrawlProfile, type UrlSource } from "./priority";
 import { TrapGuard } from "./traps";
 import { hostOf, nonContentReason, normaliseUrl, otherLocale, urlKey } from "./url";
@@ -30,7 +30,7 @@ export const CRAWL_DEFAULTS = {
   sitemapParallelism: 3,
   maxFeeds: 2,
   maxLinksPerPage: 150,
-  minTextChars: 80,
+  minTextChars: 40,
   nearDuplicateMinChars: 300,
   maxAttempts: 3,
   fetchesPerPage: 3,
@@ -138,10 +138,6 @@ const SITEMAP_ACCEPT = "application/xml,text/xml;q=0.9,text/plain;q=0.5";
 const FEED_ACCEPT = "application/rss+xml,application/atom+xml,application/xml;q=0.9,text/xml;q=0.8";
 const PREFERRED_SITEMAP = /(page|main|post|doc|product|site|default|en)/i;
 
-function defaultSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function cancellableTimer(ms: number): { promise: Promise<void>; cancel: () => void } {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const promise = new Promise<void>((resolve) => {
@@ -232,8 +228,11 @@ export function formatProgress(progress: CrawlProgress): string {
 }
 
 export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
-  const now = options.now ?? (() => Date.now());
-  const sleep = options.sleep ?? defaultSleep;
+  const fetcherGate =
+    options.fetcher.gate instanceof HostPoliteness ? options.fetcher.gate : undefined;
+  const clockSource = fetcherGate ?? options.politeness;
+  const now = options.now ?? clockSource?.now ?? (() => Date.now());
+  const sleep = options.sleep ?? clockSource?.sleep ?? realSleep;
   const budget: CrawlBudget = {
     maxPages: CRAWL_DEFAULTS.maxPages,
     maxBytes: CRAWL_DEFAULTS.maxBytes,
@@ -251,8 +250,6 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
   };
   const profile = options.profile ?? COMPANY_PROFILE;
   const concurrency = clampConcurrency(options.concurrency);
-  const fetcherGate =
-    options.fetcher.gate instanceof HostPoliteness ? options.fetcher.gate : undefined;
   const gate =
     fetcherGate ?? options.politeness ?? new HostPoliteness({ now, sleep, minIntervalMs: 0 });
   const outerGate = options.fetcher.gate === undefined;
@@ -804,11 +801,11 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
       skip(entry.url, "language", `page language ${page.language}`);
       return;
     }
-    if (page.mainText.trim().length < budget.minTextChars) {
+    const text = pageSourceText(page);
+    if (entry.depth > 0 && text.trim().length < budget.minTextChars) {
       skip(entry.url, "thin", "too little main content");
       return;
     }
-    const text = pageSourceText(page);
     const hash = contentHash(page.mainText);
     const sim = simhash(page.mainText);
     const nearCheck = page.mainText.length >= CRAWL_DEFAULTS.nearDuplicateMinChars;
@@ -866,8 +863,11 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
     track(running, task);
   };
 
-  const eligible = (host: string) =>
-    (inFlightByHost.get(host) ?? 0) < gate.limit(host) && gate.readyIn(host) <= 0;
+  const eligible = (host: string) => {
+    const active = inFlightByHost.get(host) ?? 0;
+    if (active >= gate.limit(host) || gate.backoffIn(host) > 0) return false;
+    return active === 0 || gate.readyIn(host) <= 0;
+  };
 
   const nextReadyIn = (): number => {
     let best = Number.POSITIVE_INFINITY;
@@ -879,11 +879,10 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
   };
 
   if (!discovered) track(background, discover());
-  const deadlineState = { pending: true };
-  const deadlineWait =
-    options.sleep === undefined
-      ? cancellableTimer(Math.max(0, deadline - now()))
-      : { promise: sleep(Math.max(0, deadline - now())), cancel: () => undefined };
+  const deadlineState = { pending: sleep === realSleep };
+  const deadlineWait = deadlineState.pending
+    ? cancellableTimer(Math.max(0, deadline - now()))
+    : { promise: new Promise<void>(() => undefined), cancel: () => undefined };
   const deadlineTimer = deadlineWait.promise.then(() => {
     deadlineState.pending = false;
   });

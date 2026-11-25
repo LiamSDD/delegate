@@ -462,9 +462,7 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
   it("fails the research step when the site cannot be read", async () => {
     const { status, events } = await runFixture({
       extra: (url) =>
-        url.hostname === "www.acme.example" && url.pathname === "/"
-          ? new Response("down", { status: 503 })
-          : undefined,
+        url.hostname === "www.acme.example" ? new Response("down", { status: 503 }) : undefined,
     });
     expect(status).toBe("failed");
     const state = foldRun(events);

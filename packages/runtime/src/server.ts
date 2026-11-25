@@ -44,6 +44,7 @@ import { parsePromptFile, type PromptFile } from "./prompts";
 import { createAnthropicProvider } from "./providers/anthropic";
 import { createOpenAICompatibleProvider } from "./providers/openai-compatible";
 import { type ModelProvider } from "./providers/types";
+import { HostPoliteness } from "./crawl/politeness";
 import { createFetcher, type ResolveDns } from "./tools/fetch";
 import { createPinnedFetch } from "./tools/node-fetch";
 
@@ -93,7 +94,12 @@ export const RUNTIME_PROMPT_FILES = {
   rerank: "retrieval.rerank.v1.md",
 } as const;
 
-export const BUILD_AGENT_FETCH_PAGES = 80;
+export const BUILD_AGENT_FETCH_PAGES = 340;
+export const RESEARCH_FETCH_PAGES = 100;
+
+function fetchPagesFor(missionId: string): number {
+  return missionId === "build-agent" ? BUILD_AGENT_FETCH_PAGES : RESEARCH_FETCH_PAGES;
+}
 
 const inProcess = {
   knowledge: createMemoryKnowledgeStore(),
@@ -270,7 +276,11 @@ async function executeMission(
     fetchImpl: options.fetchImpl ?? createPinnedFetch(resolveDns),
     resolveDns,
     now,
-    ...(mission.id === "build-agent" ? { maxPages: BUILD_AGENT_FETCH_PAGES } : {}),
+    maxPages: fetchPagesFor(mission.id),
+    hostGate: new HostPoliteness({
+      now: () => now().getTime(),
+      ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
+    }),
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
   });
   const prompts = loadRuntimePrompts(options.prompts);

@@ -18,6 +18,7 @@ import {
 import { withQualityNote, type ModelCallResult } from "../../agent/model-call";
 import { callStructured } from "../../agent/structured";
 import { type PromptFile } from "../../prompts";
+import { COMPANY_PROFILE } from "../../crawl/priority";
 import { type Fetcher } from "../../tools/fetch";
 import { type SourceDocument } from "../../tools/sources";
 import { NEXT_ACTIONS_KIND, type NextActions } from "../next-actions";
@@ -74,6 +75,8 @@ export interface CompanyXrayDependencies {
 
 export const XRAY_LIMITS = {
   crawlPages: 8,
+  crawlBudgetPages: 60,
+  crawlBudgetMs: 20_000,
   targetMs: 90_000,
   gapFillEndsAtMs: 60_000,
   synthesisMaxTokens: 7_000,
@@ -127,6 +130,11 @@ export function createCompanyXrayMission(deps: CompanyXrayDependencies): Planned
     readerPrompt: prompts.reader,
     researcherPrompt: prompts.researcher,
     crawlPages: XRAY_LIMITS.crawlPages,
+    crawl: {
+      profile: COMPANY_PROFILE,
+      maxPages: XRAY_LIMITS.crawlBudgetPages,
+      maxDurationMs: XRAY_LIMITS.crawlBudgetMs,
+    },
     clock,
     gapTopics: missingSections,
     gapFillDeadlineMs: XRAY_LIMITS.gapFillEndsAtMs,

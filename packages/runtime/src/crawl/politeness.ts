@@ -57,7 +57,7 @@ interface HostState {
   waiters: (() => void)[];
 }
 
-function defaultSleep(ms: number): Promise<void> {
+export function realSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -65,8 +65,8 @@ export class HostPoliteness implements HostGate {
   readonly perHost: number;
   private readonly minIntervalMs: number;
   private readonly maxBackoffMs: number;
-  private readonly now: () => number;
-  private readonly sleep: (ms: number) => Promise<void>;
+  readonly now: () => number;
+  readonly sleep: (ms: number) => Promise<void>;
   private readonly hosts = new Map<string, HostState>();
 
   constructor(options: PolitenessOptions = {}) {
@@ -74,7 +74,7 @@ export class HostPoliteness implements HostGate {
     this.minIntervalMs = Math.max(0, options.minIntervalMs ?? POLITENESS_DEFAULTS.minIntervalMs);
     this.maxBackoffMs = options.maxBackoffMs ?? POLITENESS_DEFAULTS.maxBackoffMs;
     this.now = options.now ?? (() => Date.now());
-    this.sleep = options.sleep ?? defaultSleep;
+    this.sleep = options.sleep ?? realSleep;
   }
 
   private state(host: string): HostState {
@@ -127,18 +127,23 @@ export class HostPoliteness implements HostGate {
 
   async acquire(host: string, signal?: AbortSignal): Promise<HostRelease> {
     const state = this.state(host);
+    const aborted = () => signal?.aborted === true;
     for (;;) {
-      if (signal?.aborted === true) throw new Error("aborted");
-      if (state.active < state.limit) {
-        const wait = Math.max(state.nextStartAt, state.backoffUntil) - this.now();
-        if (wait <= 0) return this.start(state);
-        await this.sleep(wait);
-        continue;
-      }
+      if (aborted()) throw new Error("aborted");
+      const at = this.now();
+      const startAt = Math.max(at, state.nextStartAt, state.backoffUntil);
+      state.nextStartAt = startAt + state.intervalMs;
+      if (startAt > at) await this.sleep(startAt - at);
+      if (aborted()) throw new Error("aborted");
+      if (state.active < state.limit) return this.start(state);
       await new Promise<void>((resolve) => {
         state.waiters.push(resolve);
       });
     }
+  }
+
+  backoffIn(host: string): number {
+    return Math.max(0, this.state(host).backoffUntil - this.now());
   }
 
   private start(state: HostState): HostRelease {
@@ -147,7 +152,6 @@ export class HostPoliteness implements HostGate {
     state.peakActive = Math.max(state.peakActive, state.active);
     state.requests += 1;
     state.firstStartAt ??= at;
-    state.nextStartAt = at + state.intervalMs;
     let released = false;
     return (outcome) => {
       if (released) return;
