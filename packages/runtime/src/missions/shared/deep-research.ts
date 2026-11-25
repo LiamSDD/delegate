@@ -244,7 +244,11 @@ export async function runDeepResearch(options: DeepResearchOptions): Promise<Dee
   });
   if (coverage.thin.length === 0) return finish("no_gaps");
   for (let round = 1; ; round += 1) {
-    if (options.ctx.signal?.aborted === true) throw new RunAbortedError();
+    if (options.ctx.signal?.aborted === true) {
+      if (options.deadlineReached?.() !== true) throw new RunAbortedError();
+      stopReason = "deadline";
+      break;
+    }
     if (coverage.thin.length === 0 || coverage.ratio >= target) {
       stopReason = "coverage_met";
       break;

@@ -236,6 +236,29 @@ describe("runDeepResearch with a scripted planner", () => {
     expect(h2.fetched).toHaveLength(4);
   });
 
+  it("ends cleanly at the hard deadline but still fails on a real cancellation", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const h = harness({ pages: ["/newsroom/a"] });
+    const base = {
+      ctx: testRun({
+        provider: scriptedProvider("fake", () => textTurn("{}")),
+        signal: controller.signal,
+      }).ctx,
+      stepId: "deepen",
+      agent: { agentId: "a", say: () => Promise.resolve() },
+      prompt,
+      objective: "x",
+      canContinue: () => true,
+      usePlanner: () => false,
+      sections: h.sections,
+      candidates: h.candidates,
+    };
+    const outcome = await runDeepResearch({ ...base, deadlineReached: () => true });
+    expect(outcome.report.stopReason).toBe("deadline");
+    await expect(runDeepResearch({ ...base, deadlineReached: () => false })).rejects.toThrow();
+  });
+
   it("ignores candidate ids the planner invents", async () => {
     const h = harness({ pages: ["/a", "/b", "/c", "/d", "/e", "/newsroom/brand"] });
     const provider = scriptedProvider("fake", () =>
