@@ -10,3 +10,4 @@ export * from "./judge/xray-judge";
 export * from "./judge/calibration";
 export * from "./gate-verdict";
 export * from "./runner";
+export * from "./results";

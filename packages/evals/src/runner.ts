@@ -44,6 +44,12 @@ import {
   type JudgeCompleter,
   type JudgeCriterion,
 } from "./judge/xray-judge";
+import {
+  EVAL_RESULT_FILE_VERSION,
+  EvalResultFileSchema,
+  type EvalResultFile,
+  type ResultAgreement,
+} from "./results";
 import { compareScores, mean, meanConfidenceInterval, wilsonInterval } from "./stats";
 import { summariseTrials, type Trial } from "./types";
 
@@ -727,6 +733,12 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
     agreement,
   };
   writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
+  const resultFile = buildResultFile(summary, selected, byCase);
+  mkdirSync(join(options.resultsDir, summary.mission), { recursive: true });
+  writeFileSync(
+    resultFilePath(options.resultsDir, summary),
+    JSON.stringify(resultFile, null, 2) + "\n",
+  );
   writeFileSync(join(outDir, "summary.md"), renderSummary(summary));
   if (options.baseline) {
     const baseline: Baseline = {
@@ -751,6 +763,85 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
     writeFileSync(baselinePath, JSON.stringify(baseline, null, 2) + "\n");
   }
   return summary;
+}
+
+const CITATION_CHECKS: readonly string[] = ["citations_resolve", "quotes_in_sources"];
+
+function citationsVerified(record: TrialRecord): boolean | null {
+  if (record.outcome === "errored") return null;
+  const counted = record.checks.filter(
+    (entry) => CITATION_CHECKS.includes(entry.kind) && entry.skipped !== true,
+  );
+  return counted.length === 0 ? null : counted.every((entry) => entry.passed);
+}
+
+function resultAgreement(report: AgreementReport): ResultAgreement {
+  if (report.status !== "ok") return report;
+  return {
+    ...report,
+    criteria: report.criteria.map((row) => ({
+      criterion: row.criterion,
+      n: row.n,
+      exactMatchRate: row.exactMatchRate,
+      withinOneRate: row.withinOneRate,
+      kappa: row.kappa ?? null,
+      kappaLower: row.kappaInterval?.lower ?? null,
+      kappaUpper: row.kappaInterval?.upper ?? null,
+    })),
+  };
+}
+
+export function resultFilePath(resultsDir: string, summary: EvalSummary): string {
+  return join(resultsDir, summary.mission, `${summary.id}.json`);
+}
+
+export function buildResultFile(
+  summary: EvalSummary,
+  cases: readonly XrayCase[],
+  byCase: ReadonlyMap<string, readonly TrialRecord[]>,
+): EvalResultFile {
+  const flat = [...byCase.values()].flat();
+  return EvalResultFileSchema.parse({
+    version: EVAL_RESULT_FILE_VERSION,
+    id: summary.id,
+    mission: summary.mission,
+    mode: summary.mode,
+    ...(summary.replayOf === undefined
+      ? {}
+      : { replayOf: summary.replayOf.split("/").at(-1) ?? summary.replayOf }),
+    dataset: summary.dataset,
+    audience: summary.audience,
+    startedAt: summary.startedAt,
+    finishedAt: summary.finishedAt,
+    durationMs: Math.max(0, Date.parse(summary.finishedAt) - Date.parse(summary.startedAt)),
+    trialsPerCase: summary.trialsPerCase,
+    promptVersions: summary.promptVersions,
+    models: summary.serving,
+    judgeModels: summary.judgeServing,
+    totals: {
+      trials: flat.length,
+      costMicroUsd: flat.reduce((sum, record) => sum + record.metrics.costMicroUsd, 0),
+      tokens: flat.reduce((sum, record) => sum + record.metrics.totalTokens, 0),
+    },
+    cases: cases.map((evalCase) => ({
+      caseId: evalCase.id,
+      company: evalCase.company.name,
+      trials: (byCase.get(evalCase.id) ?? []).map((record) => ({
+        trial: record.trial,
+        runId: record.runId,
+        outcome: record.outcome,
+        ...(record.failureCode === undefined ? {} : { failureCode: record.failureCode }),
+        passed: record.passed,
+        score: record.score,
+        citationsVerified: citationsVerified(record),
+        judgeOverall: judgeMean(record) ?? null,
+        latencyMs: record.metrics.latencyMs,
+        costMicroUsd: record.metrics.costMicroUsd,
+        tokens: record.metrics.totalTokens,
+      })),
+    })),
+    agreement: resultAgreement(summary.agreement),
+  });
 }
 
 function pct(value: number): string {
