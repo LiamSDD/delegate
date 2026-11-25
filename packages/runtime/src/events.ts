@@ -176,6 +176,15 @@ export const CriticReportSchema = z.object({
 });
 export type CriticReport = z.infer<typeof CriticReportSchema>;
 
+export const ForkOriginSchema = z.object({
+  runId: id,
+  stepId: id,
+  parentSeq: z.number().int().nonnegative(),
+  seededThrough: z.number().int().positive(),
+  objectiveEdited: z.boolean(),
+});
+export type ForkOrigin = z.infer<typeof ForkOriginSchema>;
+
 export const RunEventSchema = z.discriminatedUnion("type", [
   event(
     "run.created",
@@ -185,6 +194,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       input: z.record(z.string(), z.unknown()),
       actor: ActorSchema,
       budget: z.object({ maxTokens: tokenCount, maxMicroUsd: MicroUsdSchema }),
+      forkedFrom: ForkOriginSchema.optional(),
     }),
   ),
   event(
@@ -406,6 +416,7 @@ export interface RunState {
   status: RunStatus;
   workspaceId?: string;
   missionId?: string;
+  forkedFrom?: ForkOrigin;
   plan: { version: number; steps: PlanStep[]; approved: boolean } | null;
   planRevisions: PlanRevision[];
   steps: StepState[];
@@ -501,6 +512,7 @@ export function foldRun(events: readonly RunEvent[]): RunState {
       case "run.created":
         state.workspaceId = event.payload.workspaceId;
         state.missionId = event.payload.missionId;
+        if (event.payload.forkedFrom !== undefined) state.forkedFrom = event.payload.forkedFrom;
         lifecycle = "planning";
         break;
       case "plan.proposed":

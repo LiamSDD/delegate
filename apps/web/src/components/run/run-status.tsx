@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils";
 
 import { actionButton, primaryButton } from "./primitives";
 
-function Banner({
+export function Banner({
   tone,
   icon,
   title,
@@ -74,7 +74,7 @@ function Banner({
           )}
         </div>
       </div>
-      {action === undefined ? null : <div className="flex shrink-0 gap-2">{action}</div>}
+      {action === undefined ? null : <div className="flex shrink-0 flex-wrap gap-2">{action}</div>}
     </div>
   );
 }

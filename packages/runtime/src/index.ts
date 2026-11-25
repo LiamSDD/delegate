@@ -24,3 +24,14 @@ export {
 } from "./tools/sources";
 export * from "./knowledge/types";
 export type { RunLease } from "./durable/lease";
+export {
+  assembleForkLog,
+  forkableSteps,
+  MAX_FORK_OBJECTIVE_CHARS,
+  planFork,
+  type ForkableStep,
+  type ForkPlan,
+  type ForkRefusal,
+  type ForkRequest,
+  type ForkSeedEvent,
+} from "./durable/fork";

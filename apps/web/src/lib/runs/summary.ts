@@ -1,4 +1,32 @@
-import { type CitationMetric, costLabel, formatDuration } from "./run-view";
+import type { RunEvent } from "@delegate/runtime";
+
+import { parseAudit } from "./audit";
+import { briefStats, parseBrief } from "./brief";
+import { buildAgentDeliverables } from "./build-agent";
+import { type CitationMetric, costLabel, formatDuration, type RunView } from "./run-view";
+
+type ReadyView = Extract<RunView, { ok: true }>;
+
+export function sourceCount(view: ReadyView, events: readonly RunEvent[]): number | null {
+  if (view.audit?.content !== undefined && view.audit.content !== null) {
+    const parsed = parseAudit(view.audit.content);
+    if (parsed.ok) return parsed.audit.sources.length;
+  }
+  if (view.brief?.content !== undefined && view.brief.content !== null) {
+    const parsed = parseBrief(view.brief.content);
+    if (parsed.ok) return briefStats(parsed.brief).sources;
+  }
+  if (view.missionId === "build-agent") {
+    return buildAgentDeliverables(events).assistant?.corpusStats.pages ?? null;
+  }
+  return null;
+}
+
+export function citationRate(citation: CitationMetric | null): number | null {
+  if (citation === null) return null;
+  if (citation.kind === "reported") return citation.value;
+  return citation.total === 0 ? null : citation.resolved / citation.total;
+}
 
 export interface SummaryInput {
   createdAt: string;

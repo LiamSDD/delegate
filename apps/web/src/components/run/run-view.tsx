@@ -1,9 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { type KeyboardEvent, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { parseBrief } from "@/lib/runs/brief";
+import {
+  initialReplayState,
+  replayClock,
+  replayDelayMs,
+  replayFrame,
+  replayReducer,
+} from "@/lib/runs/replay";
 import { buildRunView, elapsedMs } from "@/lib/runs/run-view";
 import { cn } from "@/lib/utils";
 
@@ -13,10 +20,13 @@ import { AgentLanes } from "./agent-lanes";
 import { AuditPanel } from "./audit-panel";
 import { BriefPanel } from "./brief-panel";
 import { BuildAgentPanel } from "./build-agent-panel";
+import { ForkBanner } from "./fork-banner";
+import { ForkButton, ForkPanel } from "./fork-panel";
 import { NextActions, nextActionsFor } from "./next-actions";
 import { PlanApprovalCard } from "./plan-approval-card";
 import { PlanPanel } from "./plan-panel";
 import { Eyebrow, useNow } from "./primitives";
+import { ReplayBar, ReplayButton } from "./replay-bar";
 import { OutcomeBanner, ResumedBanner, StreamBanner } from "./run-status";
 import { RunTopBar } from "./run-top-bar";
 import { SummaryStrip } from "./summary-strip";
@@ -95,12 +105,34 @@ function optionalText(raw: Record<string, unknown>, key: string): string | undef
 }
 
 export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
-  const { events, stream, liveFromSeq, malformed, reconnect } = useRunStream(runId);
+  const { events: recorded, stream, liveFromSeq, malformed, reconnect } = useRunStream(runId);
+  const [replay, dispatchReplay] = useReducer(replayReducer, initialReplayState);
+  const [forking, setForking] = useState(false);
+  const events = useMemo(() => replayFrame(recorded, replay), [recorded, replay]);
   const view = useMemo(() => (events.length === 0 ? null : buildRunView(events)), [events]);
   const ready = view?.ok === true ? view : null;
   const active = ready !== null && ready.outcome === null;
   const running = ready?.outcome === null || ready === null;
-  const now = useNow(active);
+  const liveNow = useNow(active && !replay.active);
+  const now = replayClock(recorded, replay) ?? liveNow;
+  const lastRecorded = recorded.at(-1);
+  const finished = lastRecorded?.type === "run.completed" || lastRecorded?.type === "run.failed";
+
+  useEffect(() => {
+    if (!replay.playing) return;
+    const previous = recorded[replay.cursor - 1];
+    const next = recorded[replay.cursor];
+    if (previous === undefined || next === undefined) return;
+    const timer = setTimeout(
+      () => {
+        dispatchReplay({ type: "tick", total: recorded.length });
+      },
+      replayDelayMs(previous, next, replay.speed),
+    );
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [recorded, replay]);
   const [chosenTab, setChosenTab] = useState<TabId | null>(null);
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
@@ -122,7 +154,7 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
     (ready?.brief !== null && ready?.brief !== undefined) ||
     (ready?.audit !== null && ready?.audit !== undefined) ||
     (isBuild && Object.values(ready?.state.artifacts ?? {}).some((a) => a.kind === "assistant"));
-  const pendingPlan = ready?.pendingPlan ?? null;
+  const pendingPlan = replay.active ? null : (ready?.pendingPlan ?? null);
   const tab: TabId = chosenTab ?? (pendingPlan !== null ? "plan" : hasBrief ? "brief" : "activity");
   const TABS: { id: TabId; label: string }[] = [
     { id: "plan", label: pendingPlan === null ? "Plan" : "Approve plan" },
@@ -197,12 +229,44 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
           onStop={stop}
           stopping={stopping}
           stopError={stopError}
+          replaying={replay.active}
+          actions={
+            finished && !replay.active ? (
+              <>
+                <ReplayButton
+                  onStart={() => {
+                    setForking(false);
+                    dispatchReplay({ type: "start", total: recorded.length });
+                  }}
+                />
+                <ForkButton
+                  onOpen={() => {
+                    setForking((open) => !open);
+                  }}
+                />
+              </>
+            ) : null
+          }
         />
       )}
 
       <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-4 py-4 md:px-6 md:py-6">
         <div aria-live="polite" data-print="hide" className="flex flex-col gap-3">
-          <StreamBanner stream={stream} onReconnect={reconnect} />
+          {replay.active ? (
+            <ReplayBar events={recorded} state={replay} dispatch={dispatchReplay} />
+          ) : (
+            <StreamBanner stream={stream} onReconnect={reconnect} />
+          )}
+          {forking && finished && !replay.active ? (
+            <ForkPanel
+              runId={runId}
+              events={recorded}
+              onClose={() => {
+                setForking(false);
+              }}
+            />
+          ) : null}
+          <ForkBanner runId={runId} events={recorded} />
           <ResumedBanner events={events} />
           {ready?.outcome === null || ready?.outcome === undefined ? null : (
             <OutcomeBanner
@@ -318,7 +382,7 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
           >
             <AgentLanes
               lanes={ready?.lanes ?? []}
-              liveFromSeq={liveFromSeq}
+              liveFromSeq={replay.active ? 0 : liveFromSeq}
               waiting={running}
               now={now}
             />

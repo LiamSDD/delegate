@@ -2,30 +2,12 @@
 
 import type { RunEvent } from "@delegate/runtime";
 
-import { parseAudit } from "@/lib/runs/audit";
-import { briefStats, parseBrief } from "@/lib/runs/brief";
-import { buildAgentDeliverables } from "@/lib/runs/build-agent";
 import type { RunView } from "@/lib/runs/run-view";
-import { summaryItems } from "@/lib/runs/summary";
+import { sourceCount, summaryItems } from "@/lib/runs/summary";
 
 import { Eyebrow } from "./primitives";
 
 type ReadyView = Extract<RunView, { ok: true }>;
-
-function sourceCount(view: ReadyView, events: readonly RunEvent[]): number | null {
-  if (view.audit?.content !== undefined && view.audit.content !== null) {
-    const parsed = parseAudit(view.audit.content);
-    if (parsed.ok) return parsed.audit.sources.length;
-  }
-  if (view.brief?.content !== undefined && view.brief.content !== null) {
-    const parsed = parseBrief(view.brief.content);
-    if (parsed.ok) return briefStats(parsed.brief).sources;
-  }
-  if (view.missionId === "build-agent") {
-    return buildAgentDeliverables(events).assistant?.corpusStats.pages ?? null;
-  }
-  return null;
-}
 
 export function SummaryStrip({ view, events }: { view: ReadyView; events: readonly RunEvent[] }) {
   if (view.outcome?.kind !== "completed" || view.finishedAt === null) return null;
