@@ -1,0 +1,1 @@
+{"sources":[{"sourceId":"S1","facts":[{"claim":"Acme Robotics leases picking robots from 1,900 EUR per month.",quote":"Leases start at 1,900 EUR per robot per month", topic:"offering"},{"claim":"Acme Robotics serves 40 warehouses in the Benelux.","quote":"deployed in 40 warehouses across the Benelux","topic":"customers"}],"injectionSuspected":false,"suspiciousSpan":null}]}

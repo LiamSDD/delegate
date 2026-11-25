@@ -1,0 +1,1 @@
+{"sources": [{"sourceId": "S1", "facts": [{"claim": "The pick-to-light option ships in March.", "quote": "the \"pick-to-light\" option ships in March", "topic": "offering"}], "injectionSuspected": false, "suspiciousSpan": null}]}

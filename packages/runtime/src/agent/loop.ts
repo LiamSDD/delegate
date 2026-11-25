@@ -12,6 +12,7 @@ import {
 import { RunAbortedError, type RunContext } from "./context";
 import { TextCoalescer } from "./emitter";
 import { ModelStreamError, callModel, type ModelCallResult } from "./model-call";
+import { repairToolCall } from "./tool-args";
 
 export const AGENT_MESSAGE_INTERVAL_MS = 250;
 
@@ -119,10 +120,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     }
 
     text = response.text;
+    const requested = response.toolCalls.map((call) => repairToolCall(options.tools, call));
     messages.push({
       role: "assistant",
       content: response.text,
-      ...(response.toolCalls.length === 0 ? {} : { toolCalls: response.toolCalls }),
+      ...(requested.length === 0 ? {} : { toolCalls: requested }),
       ...(response.reasoning === "" ? {} : { reasoning: response.reasoning }),
     });
     if (isAborted(run)) return finish("aborted");
@@ -138,14 +140,14 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         return finish("error", response.stopDetail);
       case "end":
       case "tool_use":
-        if (response.toolCalls.length === 0) return finish("end");
+        if (requested.length === 0) return finish("end");
     }
 
     const caller = {
       actor: { type: "agent" as const, id: agentId },
       provider: { id: response.provider, terms: response.entry.provider.terms },
     };
-    for (const call of response.toolCalls) {
+    for (const call of requested) {
       const overCap =
         options.maxToolCalls !== undefined && toolCalls.length >= options.maxToolCalls;
       const outcome = overCap

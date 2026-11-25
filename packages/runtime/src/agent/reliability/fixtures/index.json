@@ -1,0 +1,931 @@
+{
+  "cases": [
+    {
+      "id": "clean",
+      "kind": "control",
+      "schema": "facts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fenced-with-prose",
+      "kind": "control",
+      "schema": "facts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "trailing-commas",
+      "kind": "control",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"],
+          "reason": "C1 and C4 cite the pricing page; C7 is the only candidate about returns."
+        }
+      ]
+    },
+    {
+      "id": "half-quoted-key",
+      "kind": "control",
+      "schema": "facts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        }
+      ],
+      "note": "Key shape recorded in structured.test.ts at ef131fc."
+    },
+    {
+      "id": "bare-keys",
+      "kind": "control",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"],
+          "reason": "C1 and C4 cite the pricing page; C7 is the only candidate about returns."
+        }
+      ]
+    },
+    {
+      "id": "answer-twice",
+      "kind": "control",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"],
+          "reason": "C1 and C4 cite the pricing page; C7 is the only candidate about returns."
+        }
+      ]
+    },
+    {
+      "id": "trailing-prose",
+      "kind": "control",
+      "schema": "verdicts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            },
+            {
+              "id": "c2",
+              "atoms": [
+                {
+                  "text": "Acme serves 40 warehouses",
+                  "verdict": "supported"
+                },
+                {
+                  "text": "all of them are in Belgium",
+                  "verdict": "not_enough_info"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "single-quotes",
+      "kind": "syntax",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"],
+          "reason": "C1 and C4 cite the pricing page; C7 is the only candidate about returns."
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "python-literals",
+      "kind": "syntax",
+      "schema": "facts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "comments",
+      "kind": "syntax",
+      "schema": "design",
+      "stop": "end",
+      "acceptable": [
+        {
+          "name": "Acme Helper",
+          "tone": "friendly",
+          "maxAnswerSentences": 4,
+          "topics": ["pricing", "leasing"],
+          "escalate": true
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "inner-quotes",
+      "kind": "syntax",
+      "schema": "facts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "The pick-to-light option ships in March.",
+                  "quote": "the \"pick-to-light\" option ships in March",
+                  "topic": "offering"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "raw-newline-in-string",
+      "kind": "syntax",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C2"],
+          "reason": "C2 is the only candidate with a number:\n12 hours per week."
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "missing-comma",
+      "kind": "syntax",
+      "schema": "design",
+      "stop": "end",
+      "acceptable": [
+        {
+          "name": "Acme Helper",
+          "tone": "friendly",
+          "maxAnswerSentences": 4,
+          "topics": ["pricing", "leasing"],
+          "escalate": true
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "mismatched-close",
+      "kind": "syntax",
+      "schema": "verdicts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "prose-with-braces-first",
+      "kind": "syntax",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"],
+          "reason": "C1 and C4 cite the pricing page; C7 is the only candidate about returns."
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "smart-quotes",
+      "kind": "syntax",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"]
+        }
+      ],
+      "repairReply": true,
+      "note": "Not read by either pipeline; the follow-up turn fixes it."
+    },
+    {
+      "id": "number-and-boolean-as-strings",
+      "kind": "shape",
+      "schema": "design",
+      "stop": "end",
+      "acceptable": [
+        {
+          "name": "Acme Helper",
+          "tone": "friendly",
+          "maxAnswerSentences": 4,
+          "topics": ["pricing", "leasing"],
+          "escalate": true
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "double-encoded-array",
+      "kind": "shape",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "null-for-optional",
+      "kind": "shape",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "object-for-array",
+      "kind": "shape",
+      "schema": "verdicts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "wrapper-key",
+      "kind": "shape",
+      "schema": "verdicts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            },
+            {
+              "id": "c2",
+              "atoms": [
+                {
+                  "text": "Acme serves 40 warehouses",
+                  "verdict": "supported"
+                },
+                {
+                  "text": "all of them are in Belgium",
+                  "verdict": "not_enough_info"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "bare-array",
+      "kind": "shape",
+      "schema": "verdicts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            },
+            {
+              "id": "c2",
+              "atoms": [
+                {
+                  "text": "Acme serves 40 warehouses",
+                  "verdict": "supported"
+                },
+                {
+                  "text": "all of them are in Belgium",
+                  "verdict": "not_enough_info"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "enum-case",
+      "kind": "shape",
+      "schema": "verdicts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            },
+            {
+              "id": "c2",
+              "atoms": [
+                {
+                  "text": "Acme serves 40 warehouses",
+                  "verdict": "supported"
+                },
+                {
+                  "text": "all of them are in Belgium",
+                  "verdict": "not_enough_info"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "unknown-key-in-strict-object",
+      "kind": "shape",
+      "schema": "design",
+      "stop": "end",
+      "acceptable": [
+        {
+          "name": "Acme Helper",
+          "tone": "friendly",
+          "maxAnswerSentences": 4,
+          "topics": ["pricing", "leasing"],
+          "escalate": true
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "string-for-array",
+      "kind": "shape",
+      "schema": "design",
+      "stop": "end",
+      "acceptable": [
+        {
+          "name": "Acme Helper",
+          "tone": "friendly",
+          "maxAnswerSentences": 4,
+          "topics": ["pricing"],
+          "escalate": true
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "cut-in-optional-string",
+      "kind": "truncated",
+      "schema": "picks",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"],
+          "reason": "C1 and C4 cite the pricing page; C7 is the only candidate about returns."
+        },
+        {
+          "picks": ["C1", "C4", "C7"]
+        }
+      ],
+      "repairReply": true,
+      "continueReply": true
+    },
+    {
+      "id": "cut-after-key",
+      "kind": "truncated",
+      "schema": "picks",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"],
+          "reason": "C1 and C4 cite the pricing page; C7 is the only candidate about returns."
+        },
+        {
+          "picks": ["C1", "C4", "C7"]
+        }
+      ],
+      "repairReply": true,
+      "continueReply": true
+    },
+    {
+      "id": "cut-in-last-item-text",
+      "kind": "truncated",
+      "schema": "verdicts",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            },
+            {
+              "id": "c2",
+              "atoms": [
+                {
+                  "text": "Acme serves 40 warehouses",
+                  "verdict": "supported"
+                },
+                {
+                  "text": "all of them are in Belgium",
+                  "verdict": "not_enough_info"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "repairReply": true,
+      "continueReply": true
+    },
+    {
+      "id": "cut-in-verbatim-quote",
+      "kind": "truncated",
+      "schema": "facts",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            },
+            {
+              "sourceId": "S2",
+              "facts": [
+                {
+                  "claim": "Acme Robotics was founded in Eindhoven in 2017.",
+                  "quote": "Founded in Eindhoven in 2017",
+                  "topic": "company"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        },
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        }
+      ],
+      "repairReply": true,
+      "continueReply": true,
+      "note": "The earlier reader closed the quote, so a cut quote passed as verbatim."
+    },
+    {
+      "id": "cut-in-number",
+      "kind": "truncated",
+      "schema": "design",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "name": "Acme Helper",
+          "tone": "friendly",
+          "maxAnswerSentences": 12,
+          "topics": ["pricing", "leasing"],
+          "escalate": true
+        }
+      ],
+      "repairReply": true,
+      "continueReply": true,
+      "note": "The model was writing 12; closing the brackets after the first digit yields a valid 1."
+    },
+    {
+      "id": "cut-second-source",
+      "kind": "truncated",
+      "schema": "facts",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            },
+            {
+              "sourceId": "S2",
+              "facts": [
+                {
+                  "claim": "Acme Robotics was founded in Eindhoven in 2017.",
+                  "quote": "Founded in Eindhoven in 2017",
+                  "topic": "company"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        },
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        }
+      ],
+      "repairReply": true,
+      "continueReply": true
+    },
+    {
+      "id": "cut-first-source",
+      "kind": "truncated",
+      "schema": "facts",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        }
+      ],
+      "repairReply": true,
+      "continueReply": true
+    },
+    {
+      "id": "cut-then-restated-shorter",
+      "kind": "truncated",
+      "schema": "verdicts",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            },
+            {
+              "id": "c2",
+              "atoms": [
+                {
+                  "text": "Acme serves 40 warehouses",
+                  "verdict": "supported"
+                },
+                {
+                  "text": "all of them are in Belgium",
+                  "verdict": "not_enough_info"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "results": [
+            {
+              "id": "c1",
+              "atoms": [
+                {
+                  "text": "Acme leases robots",
+                  "verdict": "supported"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "repairReply": true,
+      "continueReply": true,
+      "note": "The continuation reply restates the whole answer instead of continuing."
+    },
+    {
+      "id": "cut-continued-with-overlap",
+      "kind": "truncated",
+      "schema": "design",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "name": "Acme Helper",
+          "tone": "friendly",
+          "maxAnswerSentences": 4,
+          "topics": ["pricing", "leasing"],
+          "escalate": true
+        }
+      ],
+      "repairReply": true,
+      "continueReply": true,
+      "note": "The continuation reply repeats the last member before going on."
+    },
+    {
+      "id": "reasoning-only",
+      "kind": "unusable",
+      "schema": "picks",
+      "stop": "end",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "reasoning-only-at-token-limit",
+      "kind": "unusable",
+      "schema": "picks",
+      "stop": "max_tokens",
+      "acceptable": [
+        {
+          "picks": ["C1", "C4", "C7"]
+        }
+      ],
+      "repairReply": true,
+      "note": "ADR 0003 Amendment 3: the whole output budget went to reasoning."
+    },
+    {
+      "id": "prose-only",
+      "kind": "unusable",
+      "schema": "facts",
+      "stop": "end",
+      "acceptable": [
+        {
+          "sources": [
+            {
+              "sourceId": "S1",
+              "facts": [
+                {
+                  "claim": "Acme Robotics leases picking robots from 1,900 EUR per month.",
+                  "quote": "Leases start at 1,900 EUR per robot per month",
+                  "topic": "offering"
+                },
+                {
+                  "claim": "Acme Robotics serves 40 warehouses in the Benelux.",
+                  "quote": "deployed in 40 warehouses across the Benelux",
+                  "topic": "customers"
+                }
+              ],
+              "injectionSuspected": false,
+              "suspiciousSpan": null
+            }
+          ]
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "words-for-number",
+      "kind": "unusable",
+      "schema": "design",
+      "stop": "end",
+      "acceptable": [
+        {
+          "name": "Acme Helper",
+          "tone": "friendly",
+          "maxAnswerSentences": 4,
+          "topics": ["pricing", "leasing"],
+          "escalate": true
+        }
+      ],
+      "repairReply": true
+    },
+    {
+      "id": "missing-required-twice",
+      "kind": "unusable",
+      "schema": "verdicts",
+      "stop": "end",
+      "acceptable": [],
+      "repairReply": true,
+      "note": "The model fails again after the follow-up; no pipeline can recover this."
+    }
+  ]
+}

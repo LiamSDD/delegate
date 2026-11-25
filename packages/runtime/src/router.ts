@@ -16,6 +16,7 @@ import {
   ProviderHttpError,
   ProviderNetworkError,
   ProviderTimeoutError,
+  QUIRK_JSON_OBJECT,
   RateLimitedError,
   toJsonSchema,
   type CallTimeouts,
@@ -504,9 +505,13 @@ export class ModelRouter {
       ...(signal === undefined ? {} : { signal }),
       ...(timeouts === undefined ? {} : { timeouts }),
     };
+    const { responseFormat, ...rest } = request;
+    const jsonModeUnsupported =
+      responseFormat?.type === "json_object" && !entry.quirks.includes(QUIRK_JSON_OBJECT);
     const stream = this.provider(entry).stream(
       {
-        ...request,
+        ...rest,
+        ...(responseFormat === undefined || jsonModeUnsupported ? {} : { responseFormat }),
         maxTokens: Math.min(request.maxTokens, entry.maxOutputTokens ?? request.maxTokens),
         model: entry.model,
         quirks: entry.quirks,

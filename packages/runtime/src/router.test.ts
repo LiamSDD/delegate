@@ -184,6 +184,32 @@ describe("ModelRouter", () => {
     expect(fallbacks).toEqual([]);
   });
 
+  it("passes a JSON-object request only to entries that carry the json-object quirk", async () => {
+    const json = parseModelsConfig({
+      ...config,
+      roles: {
+        ...config.roles,
+        planner: [
+          { provider: "a", model: "a-1", contextWindow: 8000, supportsTools: true },
+          {
+            provider: "c",
+            model: "c-1",
+            contextWindow: 128000,
+            supportsTools: true,
+            quirks: ["json-object"],
+          },
+        ],
+      },
+    });
+    const { router, providers } = setup(json);
+    const asked = { ...request, responseFormat: { type: "json_object" as const } };
+    await router.open("planner", asked);
+    providers.a.behaviours = [new ProviderHttpError("a", 503, "down")];
+    await router.open("planner", asked);
+    expect(providers.a.calls.map((call) => call.responseFormat)).toEqual([undefined, undefined]);
+    expect(providers.c.calls[0]?.responseFormat).toEqual({ type: "json_object" });
+  });
+
   it("clamps maxTokens to the entry's output cap", async () => {
     const capped = parseModelsConfig({
       ...config,

@@ -205,6 +205,18 @@ describe("Anthropic adapter", () => {
     }
   });
 
+  it("ignores a JSON-object request, which the Messages API has no mode for", async () => {
+    const captured: MessageCreateParamsStreaming[] = [];
+    const provider = createAnthropicProvider({
+      createStream: (params) => {
+        captured.push(params);
+        return Promise.resolve(replay(toolUseStream));
+      },
+    });
+    await collect(provider.stream({ ...request, responseFormat: { type: "json_object" } }));
+    expect("output_config" in (captured[0] ?? {})).toBe(false);
+  });
+
   it("builds params without forced tool_choice or disabled thinking and echoes signed thinking", async () => {
     const captured: MessageCreateParamsStreaming[] = [];
     const provider = createAnthropicProvider({

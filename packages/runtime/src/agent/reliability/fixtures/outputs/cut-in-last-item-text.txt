@@ -1,0 +1,1 @@
+{"results":[{"id":"c1","atoms":[{"text":"Acme leases robots","verdict":"supported"}]},{"id":"c2","atoms":[{"verdict":"supported","text":"Acme serves 40 ware

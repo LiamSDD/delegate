@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "clean",
+      "tool": "fetch_page",
+      "arguments": "{\"url\": \"https://acme.example/pricing\"}",
+      "expected": {
+        "url": "https://acme.example/pricing"
+      }
+    },
+    {
+      "id": "empty",
+      "tool": "list_sources",
+      "arguments": "",
+      "expected": {}
+    },
+    {
+      "id": "trailing-comma",
+      "tool": "fetch_page",
+      "arguments": "{\"url\": \"https://acme.example/pricing\",}",
+      "expected": {
+        "url": "https://acme.example/pricing"
+      }
+    },
+    {
+      "id": "single-quotes",
+      "tool": "fetch_page",
+      "arguments": "{'url': 'https://acme.example/pricing'}",
+      "expected": {
+        "url": "https://acme.example/pricing"
+      }
+    },
+    {
+      "id": "fenced",
+      "tool": "fetch_page",
+      "arguments": "```json\n{\"url\": \"https://acme.example/pricing\"}\n```",
+      "expected": {
+        "url": "https://acme.example/pricing"
+      }
+    },
+    {
+      "id": "wrapped-in-arguments",
+      "tool": "fetch_page",
+      "arguments": "{\"arguments\": {\"url\": \"https://acme.example/pricing\"}}",
+      "expected": {
+        "url": "https://acme.example/pricing"
+      }
+    },
+    {
+      "id": "double-encoded",
+      "tool": "fetch_page",
+      "arguments": "\"{\\\"url\\\": \\\"https://acme.example/pricing\\\"}\"",
+      "expected": {
+        "url": "https://acme.example/pricing"
+      }
+    },
+    {
+      "id": "number-as-string",
+      "tool": "fetch_page",
+      "arguments": "{\"url\": \"https://acme.example/pricing\", \"maxChars\": \"4000\"}",
+      "expected": {
+        "url": "https://acme.example/pricing",
+        "maxChars": 4000
+      }
+    },
+    {
+      "id": "string-for-array",
+      "tool": "search_reference",
+      "arguments": "{\"queries\": \"warehouse automation\", \"target\": \"Acme Robotics\"}",
+      "expected": {
+        "queries": ["warehouse automation"],
+        "target": "Acme Robotics"
+      }
+    },
+    {
+      "id": "cut-off",
+      "tool": "fetch_page",
+      "arguments": "{\"url\": \"https://acme.example/pri",
+      "expected": null,
+      "note": "Must stay refused: completing it would invent a URL."
+    },
+    {
+      "id": "wrong-field",
+      "tool": "fetch_page",
+      "arguments": "{\"link\": \"https://acme.example/pricing\"}",
+      "expected": null
+    },
+    {
+      "id": "not-a-url",
+      "tool": "fetch_page",
+      "arguments": "{\"url\": \"the pricing page\"}",
+      "expected": null
+    }
+  ]
+}

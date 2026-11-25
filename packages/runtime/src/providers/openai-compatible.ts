@@ -33,6 +33,8 @@ export interface OpenAICompatibleOptions {
   now?: () => number;
 }
 
+const JSON_MODE_REJECTION_STATUSES = new Set([400, 422]);
+const JSON_MODE_REJECTION_PATTERN = /response_format|json_object|json mode/i;
 const ERROR_BODY_MAX_BYTES = 4096;
 const ERROR_SNIPPET_CHARS = 300;
 
@@ -121,7 +123,7 @@ function toWireMessage(message: ChatMessage, echoReasoning: boolean): Record<str
   }
 }
 
-function toWireBody(request: ModelRequest): Record<string, unknown> {
+function toWireBody(request: ModelRequest, jsonMode: boolean): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: request.model,
     messages: toWireMessages(request),
@@ -143,6 +145,7 @@ function toWireBody(request: ModelRequest): Record<string, unknown> {
       },
     }));
   }
+  if (jsonMode) body.response_format = { type: "json_object" };
   if (request.responseFormat?.type === "json_schema") {
     body.response_format = {
       type: "json_schema",
@@ -169,9 +172,12 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
   const now = options.now ?? Date.now;
   const url = `${options.baseUrl.replace(/\/+$/, "")}${options.chatPath ?? "/chat/completions"}`;
 
+  const withoutJsonMode = new Set<string>();
+
   async function open(
     request: ModelRequest,
     streamOptions: StreamOptions | undefined,
+    jsonMode: boolean,
   ): Promise<Response> {
     const headersTimeoutMs = streamOptions?.timeouts?.firstTokenMs ?? timeoutMs;
     const controller = new AbortController();
@@ -192,7 +198,7 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
       return await fetchImpl(url, {
         method: "POST",
         headers,
-        body: JSON.stringify(toWireBody(request)),
+        body: JSON.stringify(toWireBody(request, jsonMode)),
         redirect: "error",
         signal,
       });
@@ -215,7 +221,16 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
     const startedAt = Date.now();
     const callIdleMs = Math.max(idleTimeoutMs, streamOptions?.timeouts?.firstTokenMs ?? 0);
     const callTotalMs = streamOptions?.timeouts?.totalMs ?? totalTimeoutMs;
-    const response = await open(request, streamOptions);
+    const jsonMode =
+      request.responseFormat?.type === "json_object" && !withoutJsonMode.has(request.model);
+    let response = await open(request, streamOptions, jsonMode);
+    if (jsonMode && JSON_MODE_REJECTION_STATUSES.has(response.status)) {
+      const reason = await snippet(response, idleTimeoutMs);
+      if (!JSON_MODE_REJECTION_PATTERN.test(reason))
+        throw new ProviderHttpError(options.id, response.status, reason);
+      withoutJsonMode.add(request.model);
+      response = await open(request, streamOptions, false);
+    }
     if (response.status === 429) {
       const retryAfterMs = parseRetryAfter(response.headers, now());
       await response.body?.cancel().catch(() => undefined);
