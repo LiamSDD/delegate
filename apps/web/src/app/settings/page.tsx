@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { ArrivalPage } from "@/components/arrival-page";
 
@@ -18,6 +19,17 @@ export default function SettingsPage() {
         "Model providers, including bring-your-own Claude key",
         "Data retention and the audit log viewer",
       ]}
-    />
+    >
+      <p className="border-l-2 border-border-strong pl-4 text-sm text-text-muted">
+        Available now:{" "}
+        <Link
+          href="/settings/connections"
+          className="text-text underline underline-offset-4 hover:text-accent"
+        >
+          connections
+        </Link>
+        : API tokens for Claude Code and Codex, your MCP servers, GitHub and automation defaults.
+      </p>
+    </ArrivalPage>
   );
 }
