@@ -11,7 +11,7 @@ out="$root/.env.vercel.local"
 restore_echo() { stty echo 2>/dev/null || true; }
 trap restore_echo EXIT INT TERM
 
-ask() { printf '%s: ' "$1"; IFS= read -r value; printf '%s' "$value"; }
+ask() { printf '%s: ' "$1" >&2; IFS= read -r value; printf '%s' "$value"; }
 ask_hidden() {
   printf '%s (hidden): ' "$1" >&2
   stty -echo 2>/dev/null || true
