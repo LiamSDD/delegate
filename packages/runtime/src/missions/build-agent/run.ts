@@ -53,6 +53,8 @@ import {
 
 export const BUILD_AGENT_LIMITS = {
   targetMs: 180_000,
+  embedConcurrency: 4,
+  embedBudgetMs: 45_000,
   designEvidence: 8,
   designMaxTokens: 1_500,
   evalPassages: 24,
@@ -427,6 +429,11 @@ export function createBuildAgentMission(deps: BuildAgentDependencies): PlannedMi
             missing.map((chunk) => `${chunk.title}\n${chunk.heading ?? ""}\n${chunk.text}`),
             "passage",
             ctx.signal,
+            {
+              concurrency: BUILD_AGENT_LIMITS.embedConcurrency,
+              budgetMs: BUILD_AGENT_LIMITS.embedBudgetMs,
+              now: () => ctx.now().getTime(),
+            },
           );
           await knowledge.setEmbeddings(
             missing.flatMap((chunk, position) => {
@@ -434,12 +441,22 @@ export function createBuildAgentMission(deps: BuildAgentDependencies): PlannedMi
               return embedding === undefined ? [] : [{ chunkId: chunk.chunkId, embedding }];
             }),
           );
-          if (embedded.failed > 0)
-            note = cut(
-              `${embedded.failed} of ${missing.length} chunks could not be embedded (${embedded.lastError ?? "rejected"}); they stay searchable by full text.`,
-              300,
-            );
-          if (embedded.failed === missing.length && missing.length > 0) embeddings = undefined;
+          const notes = [
+            ...(embedded.failed > 0
+              ? [
+                  `${embedded.failed} of ${missing.length} chunks could not be embedded (${embedded.lastError ?? "rejected"})`,
+                ]
+              : []),
+            ...(embedded.skipped > 0
+              ? [
+                  `${embedded.skipped} of ${missing.length} chunks were left unembedded to keep indexing within ${Math.round(BUILD_AGENT_LIMITS.embedBudgetMs / 1000)} s${embedded.lastError !== undefined && embedded.failed === 0 ? ` (${embedded.lastError})` : ""}`,
+                ]
+              : []),
+          ];
+          if (notes.length > 0)
+            note = cut(`${notes.join("; ")}; they stay searchable by full text.`, 300);
+          if (embedded.failed + embedded.skipped === missing.length && missing.length > 0)
+            embeddings = undefined;
         } catch (error) {
           if (!(error instanceof EmbeddingError)) throw error;
           note = cut(

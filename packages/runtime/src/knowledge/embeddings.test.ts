@@ -56,4 +56,37 @@ describe("embedAll", () => {
       ),
     ).rejects.toThrow(EmbeddingError);
   });
+
+  it("embeds batches in parallel and stops at the time budget, leaving the rest unembedded (gate run, curl 2026-11-25)", async () => {
+    let clock = 0;
+    let inFlight = 0;
+    let peak = 0;
+    const slow: EmbeddingProvider = {
+      provider: "fake",
+      model: "fake",
+      dimensions: 2,
+      maxBatch: 2,
+      async embed(texts) {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await Promise.resolve();
+        clock += 1_000;
+        inFlight -= 1;
+        return texts.map(() => [1, 0]);
+      },
+    };
+    const texts = Array.from({ length: 40 }, (_, index) => `chunk ${index}`);
+    const result = await embedAll(slow, texts, "passage", undefined, {
+      concurrency: 3,
+      budgetMs: 5_000,
+      now: () => clock,
+    });
+    expect(peak).toBe(3);
+    expect(result.skipped).toBeGreaterThan(0);
+    expect(result.vectors).toHaveLength(40);
+    const embedded = result.vectors.filter((vector) => vector !== undefined).length;
+    expect(embedded + result.skipped + result.failed).toBe(40);
+    expect(embedded).toBeLessThan(20);
+    expect(result.vectors.slice(0, 2).every((vector) => vector !== undefined)).toBe(true);
+  });
 });

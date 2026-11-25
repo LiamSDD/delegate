@@ -143,7 +143,14 @@ export function resolveEmbeddings(options: {
 export interface EmbedAllResult {
   vectors: (number[] | undefined)[];
   failed: number;
+  skipped: number;
   lastError?: string;
+}
+
+export interface EmbedAllOptions {
+  concurrency?: number;
+  budgetMs?: number;
+  now?: () => number;
 }
 
 export async function embedAll(
@@ -151,9 +158,14 @@ export async function embedAll(
   texts: readonly string[],
   kind: EmbeddingInput,
   signal?: AbortSignal,
+  options: EmbedAllOptions = {},
 ): Promise<EmbedAllResult> {
-  const vectors: (number[] | undefined)[] = [];
+  const now = options.now ?? Date.now;
+  const deadline = options.budgetMs === undefined ? Infinity : now() + options.budgetMs;
+  const concurrency = Math.max(1, Math.floor(options.concurrency ?? 1));
+  const vectors: (number[] | undefined)[] = texts.map(() => undefined);
   let failed = 0;
+  let skipped = 0;
   let lastError: string | undefined;
   const run = async (batch: readonly string[]): Promise<(number[] | undefined)[]> => {
     try {
@@ -175,7 +187,36 @@ export async function embedAll(
       return [...(await run(batch.slice(0, middle))), ...(await run(batch.slice(middle)))];
     }
   };
-  for (let start = 0; start < texts.length; start += provider.maxBatch)
-    vectors.push(...(await run(texts.slice(start, start + provider.maxBatch))));
-  return { vectors, failed, ...(lastError === undefined ? {} : { lastError }) };
+  const starts: number[] = [];
+  for (let start = 0; start < texts.length; start += provider.maxBatch) starts.push(start);
+  let next = 0;
+  let embeddedBatches = 0;
+  let halted: Error | undefined;
+  const worker = async () => {
+    while (next < starts.length) {
+      const start = starts[next] ?? 0;
+      next += 1;
+      const batch = texts.slice(start, start + provider.maxBatch);
+      if (halted !== undefined || now() >= deadline || signal?.aborted === true) {
+        skipped += batch.length;
+        continue;
+      }
+      try {
+        const embedded = await run(batch);
+        embedded.forEach((vector, offset) => {
+          vectors[start + offset] = vector;
+        });
+        embeddedBatches += 1;
+      } catch (error) {
+        halted ??= error instanceof Error ? error : new EmbeddingError("embedding failed");
+        skipped += batch.length;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, starts.length) }, worker));
+  if (halted !== undefined) {
+    if (embeddedBatches === 0) throw halted;
+    lastError = halted.message;
+  }
+  return { vectors, failed, skipped, ...(lastError === undefined ? {} : { lastError }) };
 }
