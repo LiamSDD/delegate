@@ -22,6 +22,8 @@ const GENERIC_CAPITALISED = new Set([
   "ceo",
   "cto",
   "cfo",
+  "ci",
+  "cd",
   "crm",
   "erp",
   "faq",
@@ -186,7 +188,7 @@ export function topicQueries(goal: string, exclude: readonly string[]): string[]
         .slice(0, TARGET_LIMITS.queryWords)
         .join(" "),
     )
-    .filter((query) => query.length >= 3);
+    .filter((query) => query.length >= 2);
   const unique: string[] = [];
   for (const query of clauses)
     if (!unique.some((existing) => existing.toLowerCase() === query.toLowerCase()))

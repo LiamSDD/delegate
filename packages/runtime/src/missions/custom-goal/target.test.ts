@@ -61,6 +61,12 @@ describe("analyseGoal", () => {
       brands: ["nike"],
       queries: ["marketing", "agentic"],
     });
+    expect(analyseGoal("Make us better at AI")).toEqual({
+      domain: null,
+      brands: [],
+      queries: ["AI"],
+    });
+    expect(analyseGoal("Speed up CI for our monorepo").brands).toEqual([]);
     expect(analyseGoal("Make our weekly planning less painful")).toMatchObject({
       domain: null,
       brands: [],
