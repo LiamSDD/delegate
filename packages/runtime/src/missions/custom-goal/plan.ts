@@ -12,12 +12,13 @@ export const GOAL_STEP_IDS = {
   synthesise: "synthesise",
   critic: "critic",
   connectors: "use_connectors",
+  deepen: "deepen_research",
 } as const;
 
-export const GOAL_STEP_LIMITS = { min: 3, max: 8 } as const;
+export const GOAL_STEP_LIMITS = { min: 3, max: 10 } as const;
 
 export const GOAL_PLANNING_HINTS =
-  "Decompose the user's goal into 3 to 8 steps chosen only from the step library. resolve_target, research_topic, synthesise and critic are always part of the plan. If the input names a company, a domain or brand candidates, crawl and read its site (research, read) and optionally look it up externally (research_external); if it names none, leave the site steps out. research_topic can run in parallel with the company steps. Synthesis drafts the goal brief from quarantined facts only; the critic checks every cited claim. Mention the goal's workstreams in the objectives of the steps they affect.";
+  "Decompose the user's goal into 3 to 8 steps chosen only from the step library. resolve_target, research_topic, synthesise and critic are always part of the plan. If the input names a company, a domain or brand candidates, crawl and read its site (research, read) and optionally look it up externally (research_external); if it names none, leave the site steps out. research_topic takes resolve_target as input so it can search for the company together with the topic, and runs in parallel with the company steps. Synthesis drafts the goal brief from quarantined facts only; deepen_research then runs gap analysis on thin workstreams and redrafts within the time budget; the critic checks every cited claim and whether it is about the target. Mention the goal's workstreams in the objectives of the steps they affect.";
 
 const resolve: PlanStep = {
   id: GOAL_STEP_IDS.resolve,
@@ -37,11 +38,28 @@ const topic: PlanStep = {
   id: GOAL_STEP_IDS.topic,
   role: "researcher",
   objective:
-    "Research the goal's topics in public reference sources and read them through the quarantined reader.",
-  inputs: [],
+    "Research the goal's topics together with the resolved company in public reference sources, falling back to general topic articles only when nothing about the company is found, and read them through the quarantined reader.",
+  inputs: [GOAL_STEP_IDS.resolve],
   capabilities: [CAPABILITIES.webFetch],
-  acceptance: ["Every fact carries a verbatim quote from its source"],
-  budgetShare: 0.2,
+  acceptance: [
+    "Every fact carries a verbatim quote from its source",
+    "General topic articles are used only when no article about the company matches",
+  ],
+  budgetShare: 0.15,
+};
+
+const deepen: PlanStep = {
+  id: GOAL_STEP_IDS.deepen,
+  role: "researcher",
+  objective:
+    "Find workstreams with too few supported findings, follow up the most relevant unread company pages, feeds and target-plus-topic searches, and redraft the brief, for at most two rounds within the time budget.",
+  inputs: [GOAL_STEP_IDS.synthesise],
+  capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
+  acceptance: [
+    "Every follow-up is chosen from leads the runtime found; new pages are read only in quarantine",
+    "Each round is recorded with its thin sections, leads and coverage",
+  ],
+  budgetShare: 0.12,
 };
 
 const site: PlanStep = {
@@ -61,7 +79,7 @@ const read: PlanStep = {
   inputs: [GOAL_STEP_IDS.site],
   capabilities: [],
   acceptance: ["Every fact carries a verbatim quote", "Suspected prompt injection is flagged"],
-  budgetShare: 0.25,
+  budgetShare: 0.22,
 };
 
 const external: PlanStep = {
@@ -83,10 +101,10 @@ function synthesise(inputs: string[]): PlanStep {
     inputs,
     capabilities: [CAPABILITIES.artifactWrite],
     acceptance: [
-      "Every finding, action basis and risk cites a fetched source",
-      "Each action names an owner role, effort, impact and the Delegate mission that could run it",
+      "Every finding, action basis and risk cites a fetched source and is about the target, not a general definition",
+      "Each action names its cited evidence, a first concrete step, a measurable success metric, an owner role, effort and impact",
     ],
-    budgetShare: 0.25,
+    budgetShare: 0.22,
   };
 }
 
@@ -99,9 +117,9 @@ const critic: PlanStep = {
   capabilities: [CAPABILITIES.artifactWrite],
   acceptance: [
     "Every remaining claim is supported by its cited quotes",
-    "Citation accuracy is reported",
+    "Citation accuracy and specificity are reported",
   ],
-  budgetShare: 0.13,
+  budgetShare: 0.12,
 };
 
 const connectors: PlanStep = {
@@ -137,9 +155,10 @@ function basePlan(hasCompany: boolean): PlanStep[] {
   if (!hasCompany)
     return [
       resolve,
-      { ...topic, budgetShare: 0.35 },
+      { ...topic, budgetShare: 0.3 },
       synthesise([GOAL_STEP_IDS.resolve, GOAL_STEP_IDS.topic]),
-      { ...critic, budgetShare: 0.2 },
+      deepen,
+      { ...critic, inputs: [GOAL_STEP_IDS.deepen], budgetShare: 0.2 },
     ];
   return [
     resolve,
@@ -153,6 +172,7 @@ function basePlan(hasCompany: boolean): PlanStep[] {
       GOAL_STEP_IDS.external,
       GOAL_STEP_IDS.topic,
     ]),
-    critic,
+    deepen,
+    { ...critic, inputs: [GOAL_STEP_IDS.deepen] },
   ];
 }

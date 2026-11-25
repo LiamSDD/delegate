@@ -182,6 +182,8 @@ export interface DeepResearchOptions {
   coverageTarget?: number;
   minClaimsPerSection?: number;
   canContinue: () => boolean;
+  canRedraft?: () => boolean;
+  deadlineReached?: () => boolean;
   usePlanner: () => boolean;
   sections: () => SectionDraft[];
   candidates: () => FollowUpCandidate[];
@@ -191,6 +193,39 @@ export interface DeepResearchOptions {
 export interface DeepResearchOutcome {
   report: ResearchReport;
   facts: TopicFact[];
+}
+
+interface PlayedRound {
+  targets: FollowUpCandidate[];
+  selectedBy: ResearchRound["selectedBy"];
+  settled: PromiseSettledResult<TopicFact[]>[];
+  fresh: TopicFact[];
+}
+
+async function playRound(
+  options: DeepResearchOptions,
+  candidates: readonly FollowUpCandidate[],
+  thin: readonly SectionDraft[],
+  perRound: number,
+): Promise<PlayedRound> {
+  const { targets, selectedBy } = await selectTargets(options.ctx, {
+    stepId: options.stepId,
+    prompt: options.prompt,
+    objective: options.objective,
+    thin,
+    candidates,
+    max: perRound,
+    usePlanner: options.usePlanner(),
+  });
+  const settled = await Promise.allSettled(targets.map((candidate) => candidate.execute()));
+  const aborted = settled.find(
+    (entry) => entry.status === "rejected" && entry.reason instanceof RunAbortedError,
+  );
+  if (aborted?.status === "rejected") throw aborted.reason;
+  const fresh = settled.flatMap((entry) => (entry.status === "fulfilled" ? entry.value : []));
+  if (fresh.length > 0 && options.redraft !== undefined && (options.canRedraft?.() ?? true))
+    await options.redraft(fresh);
+  return { targets, selectedBy, settled, fresh };
 }
 
 export async function runDeepResearch(options: DeepResearchOptions): Promise<DeepResearchOutcome> {
@@ -227,26 +262,21 @@ export async function runDeepResearch(options: DeepResearchOptions): Promise<Dee
       stopReason = "no_candidates";
       break;
     }
-    const { targets, selectedBy } = await selectTargets(options.ctx, {
-      stepId: options.stepId,
-      prompt: options.prompt,
-      objective: options.objective,
-      thin: coverage.thin,
-      candidates,
-      max: perRound,
-      usePlanner: options.usePlanner(),
-    });
-    for (const candidate of targets) tried.add(candidate.key);
-    const settled = await Promise.allSettled(targets.map((candidate) => candidate.execute()));
-    const aborted = settled.find(
-      (entry) => entry.status === "rejected" && entry.reason instanceof RunAbortedError,
-    );
-    if (aborted?.status === "rejected") throw aborted.reason;
-    const fresh = settled.flatMap((entry) => (entry.status === "fulfilled" ? entry.value : []));
-    facts.push(...fresh);
     const before = coverage.ratio;
     const thinTitles = coverage.thin.map((section) => section.title);
-    if (fresh.length > 0 && options.redraft !== undefined) await options.redraft(facts);
+    const attempt = await playRound(options, candidates, coverage.thin, perRound).catch(
+      (error: unknown) => {
+        if (options.deadlineReached?.() !== true) throw error;
+        return null;
+      },
+    );
+    if (attempt === null) {
+      stopReason = "deadline";
+      break;
+    }
+    const { targets, selectedBy, settled, fresh } = attempt;
+    for (const candidate of targets) tried.add(candidate.key);
+    facts.push(...fresh);
     coverage = coverageOf(options.sections(), minClaims);
     const record: ResearchRound = {
       round,

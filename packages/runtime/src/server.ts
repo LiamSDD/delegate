@@ -157,7 +157,7 @@ export const RUNTIME_PROMPT_FILES = {
   rerank: "retrieval.rerank.v1.md",
   reflect: "reflect.v1.md",
   engineer: "ship-a-pr.engineer.v1.md",
-  goalSynthesis: "custom-goal.synthesis.v1.md",
+  goalSynthesis: "custom-goal.synthesis.v2.md",
   goalConnectors: "custom-goal.connectors.v1.md",
   repoArchitect: "repo-xray.architect.v1.md",
   repoImprover: "repo-xray.improver.v1.md",

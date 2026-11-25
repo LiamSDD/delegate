@@ -63,7 +63,7 @@ function readerReply(user: string): Response {
         quote.length >= 8
           ? [
               {
-                claim: `Source states: ${quote}`,
+                claim: quote,
                 quote,
                 topic: label.startsWith("company_site") ? "company" : "practice",
               },
@@ -104,6 +104,8 @@ function synthesisReply(user: string): Response {
           impact: "high",
           mission: "automation-audit",
           basis: cite(first(company)),
+          firstStep: "Interview the warehouse operations lead about order handling",
+          successMetric: "Cut order-handling time per order by 20% within two quarters",
         },
         {
           title: "Launch a customer help assistant on the public site",
@@ -112,6 +114,8 @@ function synthesisReply(user: string): Response {
           impact: "medium",
           mission: "build-agent",
           basis: cite(first(company)),
+          firstStep: "Collect the twenty most common customer questions from support",
+          successMetric: "Answer 50% of help questions without a human within 90 days",
         },
         {
           title: "Define campaign metrics",
@@ -119,7 +123,29 @@ function synthesisReply(user: string): Response {
           effort: "low",
           impact: "high",
           mission: "not-a-mission",
-          basis: cite(first(practice)),
+          basis: cite(practice.at(-1) ?? first(practice)),
+          firstStep: "List the current campaigns and their owners in one sheet",
+          successMetric: "Track 3 campaign KPIs weekly",
+        },
+        {
+          title: "Run a company-xray on Acme",
+          owner: "Head of Strategy",
+          effort: "low",
+          impact: "high",
+          mission: "company-xray",
+          basis: cite(first(company)),
+          firstStep: "Start the Company X-ray mission from the dashboard",
+          successMetric: "One brief with 10 cited claims",
+        },
+        {
+          title: "Improve the brand",
+          owner: "Head of Brand",
+          effort: "low",
+          impact: "high",
+          mission: null,
+          basis: cite(first(company)),
+          firstStep: "Explore options",
+          successMetric: "Better brand",
         },
         {
           title: "Uncited action",
@@ -128,9 +154,11 @@ function synthesisReply(user: string): Response {
           impact: "high",
           mission: null,
           basis: { text: "No source says this.", citations: ["S42"] },
+          firstStep: "Do the thing nobody sourced",
+          successMetric: "100% made up",
         },
       ],
-      risks: [cite(first(practice))],
+      risks: [cite(company[1] ?? first(company))],
       openQuestions: ["What budget is available?"],
     }),
   );
@@ -192,6 +220,11 @@ function referenceApi(url: URL): Response | undefined {
               title: "Software agent",
               extract:
                 "A software agent is a computer program that acts for a user or another program in a relationship of agency, deciding which actions are appropriate.",
+            },
+            "3": {
+              title: "Marketing automation",
+              extract:
+                "In a 2023 Forrester survey, teams using marketing automation cut campaign set-up time by 30 percent across 400 companies.",
             },
           },
         },
@@ -308,6 +341,7 @@ describe("runMission custom-goal end to end (fixture web, scripted model over HT
     expect(state.steps.every((step) => step.status === "succeeded")).toBe(true);
     expect(state.steps.map((step) => step.id).sort()).toEqual([
       "critic",
+      "deepen_research",
       "read",
       "research",
       "research_external",
@@ -331,17 +365,54 @@ describe("runMission custom-goal end to end (fixture web, scripted model over HT
       resolvedBy: "wikidata",
       entity: "Q8",
     });
-    expect(brief.workstreams.map((stream) => stream.name)).toEqual([
-      "Marketing",
-      "Company context",
-    ]);
+    expect(brief.workstreams.map((stream) => stream.name)).toEqual(["Company context"]);
     expect(brief.actions.map((action) => [action.rank, action.title, action.mission])).toEqual([
       [1, "Define campaign metrics", null],
       [2, "Launch a customer help assistant on the public site", "build-agent"],
       [3, "Map the order-handling workflow for automation", "automation-audit"],
     ]);
-    expect(brief.actions[2]).toMatchObject({ effort: "medium", impact: "high", score: 1.5 });
+    expect(brief.actions[0]?.basis.text).toMatch(/^Acme Robotics/);
+    expect(brief.actions[2]).toMatchObject({
+      effort: "medium",
+      impact: "high",
+      score: 1.5,
+      firstStep: "Interview the warehouse operations lead about order handling",
+      successMetric: "Cut order-handling time per order by 20% within two quarters",
+    });
     expect(brief.risks[0]?.text).toMatch(/^Narrowed:/);
+    const published = [
+      ...brief.workstreams.flatMap((stream) => stream.findings),
+      ...brief.actions.map((action) => action.basis),
+      ...brief.risks,
+    ].map((claim) => claim.text);
+    for (const text of published) {
+      expect(text).not.toMatch(/^Marketing is the act/);
+      expect(text).not.toMatch(/^A software agent is/);
+      expect(text).not.toMatch(/Forrester survey/);
+    }
+    expect(brief.context?.length ?? 0).toBeLessThanOrEqual(2);
+    const deepened = events.find(
+      (event) => event.type === "step.completed" && event.stepId === "deepen_research",
+    );
+    if (deepened?.type !== "step.completed") throw new Error("no deep research step");
+    const research = deepened.payload.research;
+    expect(research?.rounds.length).toBeGreaterThanOrEqual(1);
+    expect(research?.rounds[0]?.thin).toEqual(expect.arrayContaining(["marketing"]));
+    expect(brief.verification?.research?.stopReason).toBe(research?.stopReason);
+    expect(brief.context?.map((claim) => claim.text).join(" ")).toMatch(/Marketing is the act/);
+    expect(typeof brief.verification?.specificity.dropped).toBe("number");
+    expect(brief.verification?.specificity.generic).toBeGreaterThanOrEqual(2);
+    expect(brief.verification?.specificity.score).toBeLessThan(1);
+    const dropReasons = events
+      .filter((event) => event.type === "critic.flagged")
+      .map((event) => event.payload.reason)
+      .join("\n");
+    expect(dropReasons).toMatch(
+      /Run a company-xray on Acme: Action removed: it only says to run a mission/,
+    );
+    expect(dropReasons).toMatch(
+      /Improve the brand: Action removed: it its first step is too vague|Improve the brand: Action removed/,
+    );
     const sourceIds = new Set(brief.sources.map((source) => source.sourceId));
     const claims = [
       ...brief.workstreams.flatMap((stream) => stream.findings),
@@ -384,11 +455,12 @@ describe("runMission custom-goal end to end (fixture web, scripted model over HT
       },
     );
     expect(status).toBe("completed");
-    expect(reviewed).toBe(4);
+    expect(reviewed).toBe(5);
     expect(foldRun(events).steps.map((step) => step.id)).toEqual([
       "resolve_target",
       "research_topic",
       "synthesise",
+      "deepen_research",
       "critic",
     ]);
     expect(events.find((event) => event.type === "plan.approved")).toMatchObject({
@@ -398,14 +470,15 @@ describe("runMission custom-goal end to end (fixture web, scripted model over HT
     expect(requested.some((url) => url.includes("srsearch=marketing+agentic"))).toBe(true);
     const brief = finalBrief(events);
     expect(brief.company).toBeNull();
-    expect(brief.actions.length).toBeGreaterThan(0);
-    const next = events.find(
-      (event) => event.type === "artifact.created" && event.payload.kind === "next-actions",
-    );
-    if (next?.type !== "artifact.created") throw new Error("no next actions");
-    expect(NextActionsSchema.parse(next.payload.content).actions).toEqual([
-      expect.objectContaining({ missionId: "automation-audit", available: false }),
-    ]);
+    expect(brief.actions.map((action) => action.title)).toEqual(["Define campaign metrics"]);
+    expect(brief.actions[0]?.basis.text).toMatch(/Forrester survey/);
+    for (const claim of brief.workstreams.flatMap((stream) => stream.findings))
+      expect(claim.text).not.toMatch(/ is (the act|a computer program)/);
+    expect(
+      events.some(
+        (event) => event.type === "artifact.created" && event.payload.kind === "next-actions",
+      ),
+    ).toBe(false);
   });
 });
 
@@ -436,10 +509,17 @@ describe("custom-goal time limit and resume", () => {
       expect(foldRun(run.events).status).toBe("running");
       const killedAt = run.events.length;
       const fetchedBefore = run.requested.length;
+      const topicDone = run.events.some(
+        (event) => event.type === "step.completed" && event.stepId === "research_topic",
+      );
       const resumed = await run.resume();
       expect(resumed).toMatchObject({ status: "completed", resumed: true });
       expect(resumed.skippedSteps).toEqual(
-        expect.arrayContaining(["resolve_target", "research", "research_topic"]),
+        expect.arrayContaining([
+          "resolve_target",
+          "research",
+          ...(topicDone ? ["research_topic"] : []),
+        ]),
       );
       const restarted = run.events
         .slice(killedAt)
@@ -447,9 +527,10 @@ describe("custom-goal time limit and resume", () => {
         .map((event) => event.stepId);
       expect(restarted).not.toContain("research");
       expect(restarted).not.toContain("resolve_target");
-      const refetched = run.requested.slice(fetchedBefore);
+      const earlier = new Set(run.requested.slice(0, fetchedBefore));
+      const refetched = run.requested.slice(fetchedBefore).filter((url) => earlier.has(url));
       expect(refetched.some((url) => url.includes("search=acme&"))).toBe(false);
-      expect(refetched.some((url) => url.includes("prop=extracts"))).toBe(false);
+      if (topicDone) expect(refetched.some((url) => url.includes("prop=extracts"))).toBe(false);
       expect(
         refetched.filter(
           (url) =>

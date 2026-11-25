@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-import { type CriticClaim, type KeptClaim } from "../../agent/critic";
+import { keptParts, type CriticClaim, type KeptClaim } from "../../agent/critic";
+import { ResearchReportSchema, SpecificityReportSchema } from "../../events";
 import { SourceRecordSchema } from "../../tools/sources";
 import { BriefSourceSchema, ClaimSchema, SourceMixSchema, type Claim } from "../company-xray/brief";
 
@@ -51,7 +52,10 @@ export const ActionDraftSchema = z.object({
   impact: lowerLevel,
   mission: optionalMission.default(null),
   basis: ClaimSchema,
+  firstStep: z.string().trim().min(1).max(300),
+  successMetric: z.string().trim().min(1).max(200),
 });
+export type ActionDraft = z.infer<typeof ActionDraftSchema>;
 
 export const ActionSchema = z.object({
   rank: z.number().int().min(1),
@@ -62,6 +66,8 @@ export const ActionSchema = z.object({
   impact: LevelSchema,
   mission: FollowUpMissionSchema.nullable(),
   basis: ClaimSchema,
+  firstStep: z.string().trim().min(1).max(300).optional(),
+  successMetric: z.string().trim().min(1).max(200).optional(),
 });
 export type GoalAction = z.infer<typeof ActionSchema>;
 
@@ -71,6 +77,7 @@ export const GoalSynthesisOutputSchema = z.object({
   actions: z.array(z.unknown()).max(12).default([]),
   risks: z.array(z.unknown()).max(8).default([]),
   openQuestions: z.array(z.unknown()).max(8).default([]),
+  context: z.array(z.unknown()).max(8).default([]),
 });
 export type GoalSynthesisOutput = z.infer<typeof GoalSynthesisOutputSchema>;
 
@@ -79,7 +86,18 @@ export interface GoalSections {
   actions: GoalAction[];
   risks: Claim[];
   openQuestions: string[];
+  context?: Claim[];
 }
+
+export const CONTEXT_LINES = 2;
+
+export const GoalVerificationSchema = z.object({
+  citationAccuracy: z.number().min(0).max(1).nullable(),
+  publishedAccuracy: z.number().min(0).max(1).nullable().optional(),
+  specificity: SpecificityReportSchema,
+  research: ResearchReportSchema.optional(),
+});
+export type GoalVerification = z.infer<typeof GoalVerificationSchema>;
 
 export const GoalCompanySchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -130,6 +148,8 @@ const GoalBriefBase = z.object({
   generatedAt: z.iso.datetime({ offset: true }),
   promptVersions: z.array(z.string()).max(20),
   partial: GoalPartialSchema.optional(),
+  context: z.array(ClaimSchema).max(CONTEXT_LINES).optional(),
+  verification: GoalVerificationSchema.optional(),
 });
 
 export const GoalBriefSchema = GoalBriefBase.extend({
@@ -214,9 +234,12 @@ export function normaliseGoalSynthesis(
     .flatMap((claim) => keep(claim, "risks") ?? [])
     .slice(0, 8);
   const openQuestions = parseAll(raw.openQuestions, z.string().trim().min(1).max(300)).slice(0, 8);
+  const context = parseAll(raw.context, ClaimSchema)
+    .flatMap((claim) => keep(claim, "context") ?? [])
+    .slice(0, CONTEXT_LINES);
   return {
     objective: raw.objective,
-    sections: { workstreams: workstreams.slice(0, 8), actions, risks, openQuestions },
+    sections: { workstreams: workstreams.slice(0, 8), actions, risks, openQuestions, context },
     discarded,
     dropped,
   };
@@ -239,6 +262,7 @@ export function listGoalClaims(sections: GoalSections): CriticClaim[] {
     ),
     ...sections.actions.map((action, a) => toCritic(`action.${a}`, action.basis)),
     ...sections.risks.map((claim, r) => toCritic(`risk.${r}`, claim)),
+    ...(sections.context ?? []).map((claim, c) => toCritic(`context.${c}`, claim)),
   ];
 }
 
@@ -246,25 +270,25 @@ export function applyGoalClaims(
   sections: GoalSections,
   kept: ReadonlyMap<string, KeptClaim>,
 ): GoalSections {
-  const pick = (id: string): Claim | undefined => {
-    const claim = kept.get(id);
-    if (claim === undefined) return undefined;
-    return {
+  const pickAll = (id: string): Claim[] =>
+    keptParts(kept, id).map((claim) => ({
       text: claim.text,
       citations: claim.citations,
       ...(claim.support === "supported" ? {} : { support: claim.support }),
-    };
-  };
+    }));
   const workstreams = sections.workstreams.flatMap((stream, s) => {
-    const findings = stream.findings.flatMap((_, c) => pick(`workstream.${s}.${c}`) ?? []);
+    const findings = stream.findings.flatMap((_, c) => pickAll(`workstream.${s}.${c}`)).slice(0, 8);
     return findings.length === 0 ? [] : [{ name: stream.name, findings }];
   });
   const actions = sections.actions
     .flatMap((action, a) => {
-      const basis = pick(`action.${a}`);
+      const basis = pickAll(`action.${a}`)[0];
       return basis === undefined ? [] : [{ ...action, basis }];
     })
     .map((action, index) => ({ ...action, rank: index + 1 }));
-  const risks = sections.risks.flatMap((_, r) => pick(`risk.${r}`) ?? []);
-  return { workstreams, actions, risks, openQuestions: sections.openQuestions };
+  const risks = sections.risks.flatMap((_, r) => pickAll(`risk.${r}`)).slice(0, 8);
+  const context = (sections.context ?? [])
+    .flatMap((_, c) => pickAll(`context.${c}`))
+    .slice(0, CONTEXT_LINES);
+  return { workstreams, actions, risks, openQuestions: sections.openQuestions, context };
 }
