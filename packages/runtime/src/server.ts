@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { lookup } from "node:dns/promises";
 
-import { defaultPolicy, ownerDefaultPolicy } from "@delegate/policy";
+import {
+  defaultPolicy,
+  ownerDefaultPolicy,
+  shipDemoPolicy,
+  shipOwnerPolicy,
+  type Policy,
+} from "@delegate/policy";
 
 import {
   createRunContext,
@@ -39,6 +45,16 @@ import {
 import { runBuildAgent } from "./missions/build-agent/run";
 import { createMemoryAssistantStore, type AssistantStore } from "./missions/build-agent/schema";
 import { runCompanyXray } from "./missions/company-xray/run";
+import { runShipAPr, type ShipLimits } from "./missions/ship-a-pr/run";
+import { type AwaitShipApproval } from "./missions/ship-a-pr/schema";
+import {
+  createGitHubAppClient,
+  readGitHubAppConfig,
+  type GitHubAppClient,
+  type RepoRef,
+} from "./github/app";
+import { createSandboxProvider } from "./sandbox";
+import { SandboxUnavailableError, type SandboxProvider } from "./sandbox/types";
 import { type AwaitPlanApproval } from "./plan-approval";
 import { parsePromptFile, type PromptFile } from "./prompts";
 import { createAnthropicProvider } from "./providers/anthropic";
@@ -74,6 +90,21 @@ export interface RunMissionOptions {
   assistants?: AssistantStore;
   memory?: MemoryStore;
   embeddings?: EmbeddingProvider | null;
+  awaitShipApproval?: AwaitShipApproval;
+  sandboxes?: SandboxProvider;
+  github?: GitHubAppClient | null;
+  cloneUrl?: (repo: RepoRef) => string;
+  shipLimits?: Partial<ShipLimits>;
+}
+
+export function githubAppFromEnv(
+  env: Record<string, string | undefined>,
+  fetchImpl?: typeof fetch,
+): GitHubAppClient | null {
+  const config = readGitHubAppConfig(env);
+  return config === null
+    ? null
+    : createGitHubAppClient({ config, ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }) });
 }
 
 export const RUNTIME_PROMPT_FILES = {
@@ -91,6 +122,7 @@ export const RUNTIME_PROMPT_FILES = {
   gaps: "build-agent.gaps.v1.md",
   answer: "assistant.answer.v1.md",
   rerank: "retrieval.rerank.v1.md",
+  engineer: "ship-a-pr.engineer.v1.md",
 } as const;
 
 export const BUILD_AGENT_FETCH_PAGES = 80;
@@ -104,7 +136,12 @@ export function inProcessStores(): { knowledge: KnowledgeStore; assistants: Assi
   return inProcess;
 }
 
-const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set(["build-agent"]);
+const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set(["build-agent", "ship-a-pr"]);
+
+function policiesFor(missionId: MissionId, audience: Audience): Policy[] {
+  if (missionId === "ship-a-pr") return [audience === "owner" ? shipOwnerPolicy : shipDemoPolicy];
+  return [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy];
+}
 
 export type RuntimePrompts = Record<keyof typeof RUNTIME_PROMPT_FILES, PromptFile>;
 
@@ -257,7 +294,7 @@ async function executeMission(
     env: options.env,
     emitter: createRunEmitter(emit),
     budget: new Budget({ run: RUN_BUDGETS[audience] }),
-    policies: [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy],
+    policies: policiesFor(mission.id, audience),
     createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
     environment: "server",
     ...(options.latency === undefined ? {} : { latency: options.latency }),
@@ -292,7 +329,41 @@ async function executeMission(
   const notes =
     options.memory === undefined ? [] : memoryNotes(await options.memory.read().catch(() => []));
   let status: "completed" | "failed";
-  if (mission.id === "automation-audit") {
+  if (mission.id === "ship-a-pr") {
+    const input = MISSIONS["ship-a-pr"].inputSchema.parse(parsed.data);
+    let sandboxes: SandboxProvider;
+    let github: GitHubAppClient | null;
+    try {
+      sandboxes = options.sandboxes ?? createSandboxProvider(options.env);
+      github =
+        options.github === undefined
+          ? audience === "owner"
+            ? githubAppFromEnv(options.env, options.fetchImpl)
+            : null
+          : options.github;
+    } catch (error) {
+      return invalid(
+        options.runId,
+        options.emit,
+        error instanceof SandboxUnavailableError ? "sandbox_unavailable" : "misconfigured",
+        error instanceof Error ? error.message.slice(0, 300) : "Ship-a-PR is misconfigured",
+      );
+    }
+    status = await runShipAPr({
+      ctx,
+      input,
+      prompts: { planner: prompts.planner, engineer: prompts.engineer },
+      sandboxes,
+      github,
+      ...(options.cloneUrl === undefined ? {} : { cloneUrl: options.cloneUrl }),
+      ...(options.awaitShipApproval === undefined
+        ? {}
+        : { awaitShipApproval: options.awaitShipApproval }),
+      ...(options.shipLimits === undefined ? {} : { limits: options.shipLimits }),
+      ...(restorable && resume !== undefined ? { existingArtifacts: resume.artifacts } : {}),
+      run,
+    });
+  } else if (mission.id === "automation-audit") {
     const input = MISSIONS["automation-audit"].inputSchema.parse(parsed.data);
     status = await runAutomationAudit({ ctx, input, fetcher, prompts, run });
   } else if (mission.id === "build-agent") {

@@ -136,6 +136,14 @@ export function redactEventDraft(draft: RunEventDraft): RunEventDraft {
         ),
       };
     }
+    case "sandbox.command": {
+      const output = redactPii(draft.payload.output);
+      const previous = draft.payload.redactions ?? 0;
+      return {
+        ...draft,
+        payload: withCount({ ...draft.payload, output: output.text }, previous + output.count),
+      };
+    }
     default:
       return draft;
   }

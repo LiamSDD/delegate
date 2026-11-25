@@ -738,6 +738,9 @@ export function foldRun(events: readonly RunEvent[]): RunState {
       case "ship.approval.requested": {
         const ship = (state.ship ??= { commands: 0, failedCommands: 0 });
         ship.approval = { ...event.payload, seq: event.seq, status: "pending" };
+        state.pendingApprovals = state.pendingApprovals.filter(
+          (pending) => pending.approvalId !== event.payload.approvalId,
+        );
         state.pendingApprovals.push({
           approvalId: event.payload.approvalId,
           policyId: SHIP_APPROVAL_POLICY_ID,

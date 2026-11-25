@@ -7,6 +7,9 @@ import { ASSISTANT_KIND, AssistantArtifactSchema } from "./build-agent/schema";
 import { CompanyXrayBriefSchema } from "./company-xray/brief";
 import { CompanyXrayInputSchema } from "./company-xray/input";
 import { XRAY_PLAN } from "./company-xray/plan";
+import { ShipAPrInputSchema } from "./ship-a-pr/input";
+import { SHIP_CAPABILITIES } from "./ship-a-pr/plan";
+import { SHIP_RESULT_KIND, ShipResultSchema } from "./ship-a-pr/schema";
 
 export const MISSIONS = {
   "company-xray": {
@@ -39,6 +42,16 @@ export const MISSIONS = {
     deliverableKind: ASSISTANT_KIND,
     capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
   },
+  "ship-a-pr": {
+    id: "ship-a-pr",
+    title: "Ship-a-PR",
+    description:
+      "Implements one Repo X-ray improvement in an isolated sandbox with the Engineer (read, write and run only inside the repository), runs the repository's own tests and lint before and after, and after human approval opens a pull request through the GitHub App on an authorised repository, or hands over a patch and test report.",
+    inputSchema: ShipAPrInputSchema,
+    deliverableSchema: ShipResultSchema,
+    deliverableKind: SHIP_RESULT_KIND,
+    capabilities: [...SHIP_CAPABILITIES],
+  },
 } as const;
 
 export type MissionId = keyof typeof MISSIONS;
@@ -48,3 +61,4 @@ export * from "./company-xray";
 export * from "./automation-audit";
 export * from "./next-actions";
 export * from "./build-agent";
+export * from "./ship-a-pr";
