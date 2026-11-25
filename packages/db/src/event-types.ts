@@ -19,6 +19,7 @@ export const RUN_EVENT_TYPES = [
   "run.completed",
   "run.failed",
   "model.fallback",
+  "playbook.applied",
 ] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
