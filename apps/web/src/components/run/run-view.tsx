@@ -25,6 +25,7 @@ import { ForkButton, ForkPanel } from "./fork-panel";
 import { NextActions, nextActionsFor } from "./next-actions";
 import { PlanApprovalCard } from "./plan-approval-card";
 import { PlanPanel } from "./plan-panel";
+import { PlaybookChip } from "./playbook-chip";
 import { Eyebrow, useNow } from "./primitives";
 import { ReplayBar, ReplayButton } from "./replay-bar";
 import { OutcomeBanner, ResumedBanner, StreamBanner } from "./run-status";
@@ -277,6 +278,9 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
             />
           )}
           {ready === null ? null : <SummaryStrip view={ready} events={events} />}
+          {ready?.state.playbook === undefined ? null : (
+            <PlaybookChip applied={ready.state.playbook} />
+          )}
         </div>
         {view?.ok === false ? (
           <div

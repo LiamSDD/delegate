@@ -14,6 +14,7 @@ export interface MissionRunArgs {
   awaitPlanApproval: AwaitPlanApproval;
   planApprover: Actor;
   resumeFrom?: readonly RunEvent[];
+  scope?: { workspaceId: string; userId: string };
 }
 
 export type MissionRunner = (args: MissionRunArgs) => Promise<{ status: "completed" | "failed" }>;

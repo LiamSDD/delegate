@@ -1,3 +1,5 @@
+import { createDbPlaybookStore } from "@delegate/db";
+import type { PlaybookStore } from "@delegate/runtime";
 import { after } from "next/server";
 
 import { isFakeRunnerEnabled } from "@/flags";
@@ -16,7 +18,15 @@ export function selectRunner(env: Record<string, string | undefined>): {
   run: MissionRunner;
 } {
   if (isFakeRunnerEnabled(env)) return { execution: "simulated", run: createFakeRunner() };
-  return { execution: "live", run: createRuntimeRunner({ env }) };
+  return { execution: "live", run: createRuntimeRunner({ env, playbooks: dbPlaybooks }) };
+}
+
+export function dbPlaybooks(scope: { workspaceId: string; userId: string }): PlaybookStore {
+  const store = () => getAppDatabase().then((app) => createDbPlaybookStore(app.db, scope));
+  return {
+    read: (key) => store().then((playbooks) => playbooks.read(key)),
+    record: (run, options) => store().then((playbooks) => playbooks.record(run, options)),
+  };
 }
 
 export function apiDeps(): ApiDeps {

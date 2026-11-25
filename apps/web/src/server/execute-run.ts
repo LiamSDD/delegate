@@ -85,6 +85,7 @@ async function executeHeld(
       input: options.input,
       emit,
       signal,
+      scope: { workspaceId: ctx.workspaceId, userId: ctx.userId },
       ...(options.resumeFrom === undefined ? {} : { resumeFrom: options.resumeFrom }),
       planApprover:
         options.autoApprovePlan === true

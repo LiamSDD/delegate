@@ -29,6 +29,12 @@ export default async function AgentsPage() {
           every claim and says so when the answer is not there. Built from an Audit with one click
           on “Build it”.
         </p>
+        <Link
+          href="/agents/playbooks"
+          className="self-start text-sm font-medium text-accent hover:underline"
+        >
+          What the agents learned from past runs
+        </Link>
       </header>
 
       {assistants.length === 0 ? (

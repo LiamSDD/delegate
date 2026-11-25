@@ -92,7 +92,7 @@ export function loadEvalResults(resultsDir: string): LoadedResults {
   const invalid: string[] = [];
   for (const name of readdirSync(resultsDir).sort()) {
     const dir = path.join(resultsDir, name);
-    if (!statSync(dir).isDirectory() || isRunDirectory(dir)) continue;
+    if (name === "evolution" || !statSync(dir).isDirectory() || isRunDirectory(dir)) continue;
     for (const entry of readdirSync(dir).sort()) {
       if (!entry.endsWith(".json")) continue;
       const relative = `${name}/${entry}`;
