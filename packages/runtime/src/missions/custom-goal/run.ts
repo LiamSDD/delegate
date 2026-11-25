@@ -26,6 +26,7 @@ import { type PromptFile } from "../../prompts";
 import { READER_DEFAULTS, quoteAppearsIn, readUntrusted } from "../../quarantine/reader";
 import { NoModelAvailableError } from "../../router";
 import { COMPANY_PROFILE } from "../../crawl/priority";
+import { type ExistingArtifact } from "../../durable/checkpoints";
 import { type Fetcher } from "../../tools/fetch";
 import { executeToolCall, type ToolCaller, type ToolCallOutcome } from "../../tools/registry";
 import { SourceStore, type SourceDocument } from "../../tools/sources";
@@ -54,7 +55,10 @@ import {
 import {
   FOLLOW_UP_MISSIONS,
   GOAL_BRIEF_KIND,
+  GOAL_CHECKPOINT_KIND,
+  GoalBriefDraftSchema,
   GoalBriefSchema,
+  GoalCheckpointSchema,
   GoalSynthesisOutputSchema,
   RANK_FORMULA,
   applyGoalClaims,
@@ -63,6 +67,7 @@ import {
   normaliseGoalSynthesis,
   type FollowUpMission,
   type GoalBriefDraft,
+  type GoalCheckpoint,
   type GoalCompany,
   type GoalSections,
 } from "./schema";
@@ -86,9 +91,12 @@ export interface CustomGoalDependencies {
   fetcher: Fetcher;
   prompts: CustomGoalPrompts;
   run?: Omit<PlannedRunOptions, "plannerPrompt">;
+  existingArtifacts?: readonly ExistingArtifact[];
+  hardDeadlineMs?: number;
 }
 
 export const GOAL_LIMITS = {
+  hardDeadlineMs: 230_000,
   crawlPages: 6,
   crawlBudgetPages: 40,
   crawlBudgetMs: 15_000,
@@ -243,11 +251,50 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
   const target = analyseGoal(input.goal, input.url);
   const store = new SourceStore();
   const readerTask = goalReaderTask(input.goal);
+  const hardDeadlineMs = Math.max(0, deps.hardDeadlineMs ?? GOAL_LIMITS.hardDeadlineMs);
+  const deadlineAt = ctx.now().getTime() + hardDeadlineMs;
+  const deadline = new AbortController();
+  const deadlineTimer = setTimeout(() => {
+    deadline.abort();
+  }, hardDeadlineMs);
+  deadlineTimer.unref();
+  const researchSignal =
+    ctx.signal === undefined ? deadline.signal : AbortSignal.any([ctx.signal, deadline.signal]);
+  const researchCtx: RunContext = { ...ctx, signal: researchSignal };
+  const overtime = () => deadline.signal.aborted || ctx.now().getTime() >= deadlineAt;
+  const skippedForTime: string[] = [];
   const resolver = createCompanyResolver(deps.fetcher, ctx.signal);
-  const reference = createReferenceSearch(deps.fetcher, store, ctx.signal);
+  const reference = createReferenceSearch(deps.fetcher, store, researchSignal);
   let company: GoalCompany | null = null;
   let kit: ResearchKit | undefined;
   let brief: BriefState | undefined;
+  let restoredDiscoveries: GoalCheckpoint["discoveries"];
+  const existing = deps.existingArtifacts ?? [];
+  for (const artifact of existing) {
+    if (artifact.kind !== GOAL_CHECKPOINT_KIND) continue;
+    const parsed = GoalCheckpointSchema.safeParse(artifact.content);
+    if (!parsed.success) continue;
+    if (parsed.data.company !== undefined) company = parsed.data.company;
+    if (parsed.data.discoveries !== undefined) restoredDiscoveries = parsed.data.discoveries;
+    for (const document of parsed.data.documents) store.restore(document);
+  }
+  const savedBrief = existing.filter((artifact) => artifact.kind === GOAL_BRIEF_KIND).at(-1);
+  const parsedBrief =
+    savedBrief === undefined ? undefined : GoalBriefDraftSchema.safeParse(savedBrief.content);
+  if (savedBrief !== undefined && parsedBrief?.success === true)
+    brief = {
+      artifactId: savedBrief.artifactId,
+      version: savedBrief.version,
+      objective: parsedBrief.data.objective,
+      sections: {
+        workstreams: parsedBrief.data.workstreams,
+        actions: parsedBrief.data.actions,
+        risks: parsedBrief.data.risks,
+        openQuestions: parsedBrief.data.openQuestions,
+      },
+      facts: [],
+      final: parsedBrief.data.status === "complete",
+    };
 
   const promptVersions = [
     prompts.reader,
@@ -266,9 +313,14 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         : { provider: { id: entry.provider.id, terms: entry.provider.terms } }),
     };
   };
-  const runTool = (task: SubAgentTask, tool: typeof resolver.tool, args: unknown) =>
+  const runTool = (
+    task: SubAgentTask,
+    tool: typeof resolver.tool,
+    args: unknown,
+    runCtx: RunContext = ctx,
+  ) =>
     executeToolCall(
-      ctx,
+      runCtx,
       task.grant,
       [tool],
       { name: tool.name, argumentsJson: JSON.stringify(args) },
@@ -278,7 +330,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
   const read = (stepId: string, documents: readonly SourceDocument[]) => {
     const entry = chainHead(ctx, "fast");
     if (entry === undefined) throw new NoModelAvailableError("fast", []);
-    return readUntrusted(ctx, {
+    return readUntrusted(researchCtx, {
       stepId,
       task: readerTask,
       systemPrompt: prompts.reader.body,
@@ -295,8 +347,9 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
   };
 
   const kitFor = (url: string): ResearchKit => {
-    kit ??= createResearchKit({
-      ctx,
+    if (kit !== undefined) return kit;
+    kit = createResearchKit({
+      ctx: researchCtx,
       missionId: MISSION_ID,
       fetcher: deps.fetcher,
       siteUrl: url,
@@ -315,8 +368,70 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       callsAfterGapFill: [],
       sources: store,
     });
+    if (restoredDiscoveries !== undefined)
+      kit.env.discoveries = {
+        names: [...restoredDiscoveries.names],
+        githubOrgs: [...restoredDiscoveries.githubOrgs],
+        feeds: [...restoredDiscoveries.feeds],
+        unfetched: [...restoredDiscoveries.unfetched],
+      };
     return kit;
   };
+
+  const documentsOf = (result: SubAgentResult, kind?: SourceDocument["record"]["kind"]) =>
+    result.sources.flatMap((record) => {
+      const document = store.get(record.sourceId);
+      return document === undefined || (kind !== undefined && record.kind !== kind)
+        ? []
+        : [document];
+    });
+  const saveCheckpoint = async (stepId: string, checkpoint: GoalCheckpoint) => {
+    if (
+      checkpoint.documents.length === 0 &&
+      checkpoint.company === undefined &&
+      checkpoint.discoveries === undefined
+    )
+      return;
+    await emit({
+      runId,
+      type: "artifact.created",
+      stepId,
+      payload: {
+        artifactId: crypto.randomUUID(),
+        kind: GOAL_CHECKPOINT_KIND,
+        title: `Checkpoint: ${stepId}`,
+        version: 1,
+        content: GoalCheckpointSchema.parse(checkpoint),
+      },
+    });
+  };
+  const timeSkip = async (task: SubAgentTask): Promise<SubAgentResult> => {
+    skippedForTime.push(task.step.id);
+    const message = `Skipped: the run reached its ${Math.round(hardDeadlineMs / 1000)} s time limit, so the brief is written from what was already gathered.`;
+    await task.agent.say(message);
+    return skipped(message, 0.3);
+  };
+  const bounded = (
+    executor: StepExecutor,
+    checkpoint: (result: SubAgentResult) => GoalCheckpoint,
+  ): StepExecutor => ({
+    ...executor,
+    run: async (task) => {
+      if (overtime()) return timeSkip(task);
+      let result: SubAgentResult;
+      try {
+        result = await executor.run(task);
+      } catch (error) {
+        if (!deadline.signal.aborted || ctx.signal?.aborted === true) throw error;
+        return timeSkip(task);
+      }
+      await saveCheckpoint(task.step.id, checkpoint(result));
+      return result;
+    },
+  });
+  const withDocuments = (result: SubAgentResult): GoalCheckpoint => ({
+    documents: documentsOf(result),
+  });
   const delegate = async (task: SubAgentTask, stepId: string): Promise<SubAgentResult> => {
     if (company === null)
       return skipped("Skipped: the goal names no company that could be resolved.", 0.5);
@@ -420,7 +535,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     run: async (task) => {
       if (target.queries.length === 0)
         return skipped("The goal has no searchable topic words.", 0.4);
-      const outcome = await runTool(task, reference.tool, { queries: target.queries });
+      const outcome = await runTool(task, reference.tool, { queries: target.queries }, researchCtx);
       const documents = reference.created();
       if (documents.length === 0) {
         await task.agent.say(`No reference articles matched ${target.queries.join("; ")}.`);
@@ -457,7 +572,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       if (connectorTools.length === 0 || prompt === undefined)
         return skipped("No MCP connectors are connected to this workspace.", 0.5);
       const loop = await runAgentLoop({
-        run: ctx,
+        run: researchCtx,
         step: task.grant,
         agentId: task.agent.agentId,
         role: "worker",
@@ -539,6 +654,14 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       rankFormula: RANK_FORMULA,
       generatedAt: ctx.now().toISOString(),
       promptVersions,
+      ...(skippedForTime.length === 0
+        ? {}
+        : {
+            partial: {
+              reason: `Partial: the run reached its ${Math.round(hardDeadlineMs / 1000)} s time limit, so some research steps were skipped.`,
+              skippedSteps: [...skippedForTime],
+            },
+          }),
     };
   };
   const publishFinal = async (state: BriefState, stepId: string | undefined) => {
@@ -687,6 +810,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       const state = brief;
       if (state === undefined || !inputArtifacts(task).includes(state.artifactId))
         throw new Error("The critic has no drafted brief to check");
+      if (state.facts.length === 0) state.facts = findingsToFacts(inputFindings(task));
       const outcome = await runCriticSafely(ctx, listGoalClaims(state.sections), {
         stepId: task.step.id,
         agent: task.agent,
@@ -729,12 +853,22 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         ? `${GOAL_PLANNING_HINTS}${GOAL_CONNECTOR_HINTS}`
         : GOAL_PLANNING_HINTS,
       executors: [
-        resolve,
-        site,
-        topic,
-        external,
-        readSite,
-        ...(hasConnectors ? [connectorStep] : []),
+        {
+          ...resolve,
+          run: async (task) => {
+            const result = await resolve.run(task);
+            await saveCheckpoint(task.step.id, { company, documents: [] });
+            return result;
+          },
+        },
+        bounded(site, (result) => ({
+          documents: documentsOf(result, "company_site"),
+          ...(kit === undefined ? {} : { discoveries: kit.env.discoveries }),
+        })),
+        bounded(topic, withDocuments),
+        bounded(external, withDocuments),
+        bounded(readSite, withDocuments),
+        ...(hasConnectors ? [bounded(connectorStep, withDocuments)] : []),
         synthesise,
         critic,
       ],
@@ -748,7 +882,24 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     defaultPlan: defaultGoalPlan(target.domain !== null || target.brands.length > 0, hasConnectors),
     clock,
     finish: async (outcome) => {
+      clearTimeout(deadlineTimer);
       const state = brief;
+      if (state?.facts.length === 0)
+        state.facts = findingsToFacts(
+          outcome.results.get(GOAL_STEP_IDS.synthesise)?.findings ?? [],
+        );
+      if (skippedForTime.length > 0)
+        await emit({
+          runId,
+          type: "critic.flagged",
+          payload: {
+            claimId: "deadline:partial",
+            claim: `Skipped for time: ${skippedForTime.join(", ")}`,
+            reason: `The run reached its ${Math.round(hardDeadlineMs / 1000)} s time limit; the brief is partial and says so`,
+            severity: "info",
+            category: "claim",
+          },
+        });
       if (state === undefined)
         return { status: "failed", error: stepFailure(outcome, GOAL_STEP_IDS.synthesise) };
       if (!state.final) {

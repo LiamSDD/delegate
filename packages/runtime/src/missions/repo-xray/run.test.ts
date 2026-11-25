@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
-import { runMission } from "../../server";
+import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
+import { resumeMission, runMission } from "../../server";
 import { repoTarGz } from "../../testing/tarball";
 import { NextActionsSchema } from "../next-actions";
 import { archiveUrl } from "./archive";
@@ -239,14 +239,20 @@ function criticReply(user: string): Response {
   );
 }
 
-async function runRepo(files: Record<string, string>) {
+async function runRepo(
+  files: Record<string, string>,
+  options: { hardDeadlineMs?: number; killAt?: string } = {},
+) {
   const bodies: WireBody[] = [];
   const requested: string[] = [];
   const archive = repoTarGz(`widget-${COMMIT.slice(0, 7)}`, files, COMMIT);
   const fetchImpl: typeof fetch = (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     requested.push(url);
-    if (url === archiveUrl("acme", "widget", "HEAD"))
+    if (
+      url === archiveUrl("acme", "widget", "HEAD") ||
+      url === archiveUrl("acme", "widget", COMMIT)
+    )
       return Promise.resolve(
         new Response(archive, { status: 200, headers: { "content-type": "application/x-gzip" } }),
       );
@@ -266,22 +272,54 @@ async function runRepo(files: Record<string, string>) {
   const append = (draft: RunEventDraft) => {
     events.push(parseRunEvent({ ...draft, seq: events.length + 1, at: new Date().toISOString() }));
   };
-  const result = await runMission({
+  const common = {
     runId: "run_repo",
-    missionId: "repo-xray",
-    input: { url: "https://github.com/acme/widget" },
-    context: { audience: "public-demo", classification: "public" },
+    context: { audience: "public-demo" as const, classification: "public" as const },
     env: {},
-    emit: (draft) => {
-      append(draft);
-      return Promise.resolve();
-    },
     fetchImpl,
     resolveDns: () => Promise.resolve(["93.184.216.34"]),
     sleep: () => Promise.resolve(),
     modelsConfig: unthrottledConfig,
+    ...(options.hardDeadlineMs === undefined ? {} : { hardDeadlineMs: options.hardDeadlineMs }),
+  };
+  append({
+    runId: "run_repo",
+    type: "run.created",
+    payload: {
+      workspaceId: "ws_1",
+      missionId: "repo-xray",
+      input: { url: "https://github.com/acme/widget" },
+      actor: { type: "guest", id: "guest_1" },
+      budget: { maxTokens: 300_000, maxMicroUsd: 0 },
+    },
   });
-  return { status: result.status, events, bodies, requested };
+  const controller = new AbortController();
+  let killed = false;
+  const result = await runMission({
+    ...common,
+    missionId: "repo-xray",
+    input: { url: "https://github.com/acme/widget" },
+    signal: controller.signal,
+    emit: (draft) => {
+      if (killed) return Promise.reject(new Error("process killed"));
+      append(draft);
+      if (draft.type === "step.started" && draft.stepId === options.killAt) {
+        killed = true;
+        controller.abort();
+      }
+      return Promise.resolve();
+    },
+  });
+  const resume = () =>
+    resumeMission({
+      ...common,
+      events: [...events],
+      emit: (draft) => {
+        append(draft);
+        return Promise.resolve();
+      },
+    });
+  return { status: result.status, events, bodies, requested, resume };
 }
 
 function artifactOfKind(events: readonly RunEvent[], kind: string): unknown {
@@ -443,6 +481,50 @@ describe("Repo X-ray end to end with a scripted model", () => {
     expect(actions.actions).toEqual([
       expect.objectContaining({ id: "ship-a-pr", missionId: "ship-a-pr", available: false }),
     ]);
+  });
+});
+
+describe("Repo X-ray durability and time limit", () => {
+  it("resumes after a crash without redoing the model steps that finished", async () => {
+    const run = await runRepo(FILES, { killAt: "critic" });
+    expect(run.status).toBe("failed");
+    expect(foldRun(run.events).status).toBe("running");
+    const killedAt = run.events.length;
+    const modelCalls = run.bodies.length;
+    const resumed = await run.resume();
+    expect(resumed).toMatchObject({ status: "completed", resumed: true });
+    expect(resumed.skippedSteps).toEqual(
+      expect.arrayContaining(["fetch_repo", "analyse", "read_docs", "architect", "improve"]),
+    );
+    const restarted = run.events
+      .slice(killedAt)
+      .filter((event) => event.type === "step.started")
+      .map((event) => event.stepId);
+    expect(restarted).toEqual(["critic"]);
+    const newPrompts = run.bodies.slice(modelCalls).map((body) => body.messages[0]?.content ?? "");
+    expect(newPrompts.every((system) => system.includes("You are the critic"))).toBe(true);
+    expect(
+      run.requested.filter((url) => url === archiveUrl("acme", "widget", COMMIT)),
+    ).toHaveLength(1);
+    const xray = RepoXraySchema.parse(artifactOfKind(run.events, "repo-xray"));
+    expect(xray.status).toBe("complete");
+    expect(xray.repo.commit).toBe(COMMIT);
+    expect(xray.improvements.length).toBeGreaterThan(0);
+    expect(xray.architecture.summary.length).toBeGreaterThan(0);
+  });
+
+  it("skips the model steps once the hard deadline passes and publishes a partial X-ray", async () => {
+    const run = await runRepo(FILES, { hardDeadlineMs: 0 });
+    expect(run.status).toBe("completed");
+    const systems = run.bodies.map((body) => body.messages[0]?.content ?? "");
+    expect(systems.some((system) => system.includes("quarantined reader"))).toBe(false);
+    expect(systems.some((system) => system.includes("architect on a Repo X-ray"))).toBe(false);
+    expect(systems.some((system) => system.includes("You are the critic"))).toBe(false);
+    const xray = RepoXraySchema.parse(artifactOfKind(run.events, "repo-xray"));
+    expect(xray.partial?.skippedSteps).toEqual(
+      expect.arrayContaining(["read_docs", "architect", "improve", "critic"]),
+    );
+    expect(xray.hotspots.length).toBeGreaterThan(0);
   });
 });
 

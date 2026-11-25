@@ -93,6 +93,7 @@ export interface RunMissionOptions {
   env: Record<string, string | undefined>;
   emit: (event: RunEventDraft) => Promise<void>;
   signal?: AbortSignal;
+  hardDeadlineMs?: number;
   fetchImpl?: typeof fetch;
   resolveDns?: (host: string) => Promise<string[]>;
   now?: () => Date;
@@ -180,7 +181,12 @@ export function inProcessStores(): { knowledge: KnowledgeStore; assistants: Assi
   return inProcess;
 }
 
-const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set(["build-agent", "ship-a-pr"]);
+const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set([
+  "build-agent",
+  "ship-a-pr",
+  "custom-goal",
+  "repo-xray",
+]);
 
 function policiesFor(missionId: MissionId, audience: Audience, connected: boolean): Policy[] {
   if (missionId === "ship-a-pr")
@@ -491,10 +497,26 @@ async function executeMission(
     });
   } else if (mission.id === "custom-goal") {
     const input = MISSIONS["custom-goal"].inputSchema.parse(parsed.data);
-    status = await runCustomGoal({ ctx, input, fetcher, prompts, run });
+    status = await runCustomGoal({
+      ctx,
+      input,
+      fetcher,
+      prompts,
+      ...(options.hardDeadlineMs === undefined ? {} : { hardDeadlineMs: options.hardDeadlineMs }),
+      ...(restorable && resume !== undefined ? { existingArtifacts: resume.artifacts } : {}),
+      run,
+    });
   } else if (mission.id === "repo-xray") {
     const input = MISSIONS["repo-xray"].inputSchema.parse(options.input);
-    status = await runRepoXray({ ctx, input, fetcher, prompts, run });
+    status = await runRepoXray({
+      ctx,
+      input,
+      fetcher,
+      prompts,
+      ...(options.hardDeadlineMs === undefined ? {} : { hardDeadlineMs: options.hardDeadlineMs }),
+      ...(restorable && resume !== undefined ? { existingArtifacts: resume.artifacts } : {}),
+      run,
+    });
   } else {
     const input = MISSIONS["company-xray"].inputSchema.parse(parsed.data);
     status = await runCompanyXray({ ctx, input, fetcher, prompts, run });

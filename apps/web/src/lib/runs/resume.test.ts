@@ -37,6 +37,8 @@ describe("resumeDecision", () => {
     expect(resumeDecision({ ...base, leaseExpiresAt: ago(1) }, now)).toBe("resume");
     expect(resumeDecision({ ...base, lastEventAt: ago(LEASE_TTL_MS + 1) }, now)).toBe("resume");
     expect(resumeDecision({ ...base, lastEventAt: ago(1_000) }, now)).toBe("none");
+    for (const mission of ["custom-goal", "repo-xray"])
+      expect(resumeDecision({ ...base, mission, leaseExpiresAt: ago(1) }, now)).toBe("resume");
   });
 
   it("hands runs that cannot be resumed to the stale sweeper", () => {

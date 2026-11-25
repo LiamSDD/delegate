@@ -216,6 +216,12 @@ export const RepoXraySchema = z.object({
     claimsDropped: z.int().nonnegative(),
     citationAccuracy: z.number().min(0).max(1).nullable(),
   }),
+  partial: z
+    .object({
+      reason: z.string().min(1).max(300),
+      skippedSteps: z.array(z.string().min(1).max(60)).max(12),
+    })
+    .optional(),
   generatedAt: z.iso.datetime({ offset: true }),
   promptVersions: z.array(z.string()),
 });
