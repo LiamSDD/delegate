@@ -19,6 +19,10 @@ export const RUN_EVENT_TYPES = [
   "run.completed",
   "run.failed",
   "model.fallback",
+  "sandbox.command",
+  "ship.approval.requested",
+  "ship.approval.decided",
+  "pr.opened",
 ] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
