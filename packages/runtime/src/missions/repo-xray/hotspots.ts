@@ -1,6 +1,6 @@
 import { type RepoAnalysis } from "./analysis";
 import { headCitation, lineCitation } from "./evidence";
-import { type RiskyKind } from "./scan";
+import { isTestFile, type RiskyKind } from "./scan";
 import { type Hotspot } from "./schema";
 import { type RepoSnapshot } from "./snapshot";
 
@@ -86,7 +86,11 @@ export function buildHotspots(snapshot: RepoSnapshot, analysis: RepoAnalysis): H
     hotspots.push({
       id: `secret:${path}`.slice(0, 60),
       kind: "secret-like",
-      severity: secrets.some((secret) => secret.kind !== "generic-assignment") ? "high" : "medium",
+      severity: isTestFile(path)
+        ? "low"
+        : secrets.some((secret) => secret.kind !== "generic-assignment")
+          ? "high"
+          : "medium",
       title: `Secret-like value committed in ${path}`,
       detail: `${secrets.length} value${secrets.length === 1 ? "" : "s"} matching ${[...new Set(secrets.map((secret) => secret.kind))].join(", ")} patterns. Values are redacted here; if real, rotate them and move them to environment configuration.`,
       citations: secrets.slice(0, 3).map((secret) => lineCitation(path, secret.line)),

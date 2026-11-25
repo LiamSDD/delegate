@@ -62,9 +62,9 @@ export function isCodeFile(path: string): boolean {
   );
 }
 
-const TEST_DIRECTORY = /(^|\/)(tests?|__tests__|specs?|testing|e2e)\//;
+const TEST_DIRECTORY = /(^|\/)(tests?|__tests__|specs?|testing|e2e|test-d)\//;
 const TEST_FILE =
-  /(\.(test|spec)\.[cm]?[jt]sx?$)|(^test_.*\.py$)|(_test\.py$)|(_test\.go$)|(Test\.(java|kt)$)|(_spec\.rb$)|(\.test\.py$)/;
+  /(\.(test|spec|test-d)\.[cm]?[jt]sx?$)|(^test_.*\.py$)|(_test\.py$)|(_test\.go$)|(Test\.(java|kt)$)|(_spec\.rb$)|(\.test\.py$)/;
 
 export function isTestFile(path: string): boolean {
   return isCodeFile(path) && (TEST_FILE.test(baseName(path)) || TEST_DIRECTORY.test(path));

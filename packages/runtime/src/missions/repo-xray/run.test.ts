@@ -430,11 +430,7 @@ describe("Repo X-ray end to end with a scripted model", () => {
     expect(xray.tests.ci.map((ci) => formatCitation(ci.citation))).toEqual([
       ".github/workflows/ci.yml:8",
     ]);
-    expect(xray.tests.gaps.map((gap) => gap.module)).toEqual([
-      "src/index.ts",
-      "src/io.ts",
-      "src/cli.ts",
-    ]);
+    expect(xray.tests.gaps.map((gap) => gap.module)).toEqual(["src/io.ts", "src/cli.ts"]);
     expect(xray.onboarding.entryPoints.map((entry) => entry.path)).toEqual([
       "src/index.ts",
       "src/cli.ts",

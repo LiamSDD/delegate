@@ -41,6 +41,18 @@ export function isSafePath(path: string): boolean {
   return path.length <= 300 && SAFE_PATH.test(path);
 }
 
+const AUXILIARY =
+  /^(?:(?:[\w.-]+\/)*(?:examples?|demos?|benchmarks?|\.[\w-]+)\/|docs?\/conf\.py$)|\.d\.[cm]?ts$|(^|\/)[\w.-]+\.config\.[cm]?[jt]s$|(^|\/)\.?eslintrc\.[cm]?js$|(^|\/)(setup|noxfile|conftest|fabfile)\.py$/;
+const RE_EXPORT_SHELL = /(^|\/)(__init__\.py|index\.[cm]?[jt]sx?|mod\.rs)$/;
+
+export function isAuxiliary(path: string): boolean {
+  return AUXILIARY.test(path);
+}
+
+function isReExportShell(path: string): boolean {
+  return RE_EXPORT_SHELL.test(path);
+}
+
 export function isSafeScript(command: string): boolean {
   return SAFE_SCRIPT.test(command);
 }
@@ -270,7 +282,9 @@ export function analyseSnapshot(snapshot: RepoSnapshot): RepoAnalysis {
 
   const testFiles = all.filter((file) => isTestFile(file.path));
   const testPaths = new Set(testFiles.map((file) => file.path));
-  const codeFiles = all.filter((file) => isCodeFile(file.path) && !testPaths.has(file.path));
+  const codeFiles = all.filter(
+    (file) => isCodeFile(file.path) && !testPaths.has(file.path) && !isAuxiliary(file.path),
+  );
   const moduleOf = moduleAssignment(codeFiles.map((file) => file.path));
 
   const importers = new Map<string, Set<string>>();
@@ -333,7 +347,7 @@ export function analyseSnapshot(snapshot: RepoSnapshot): RepoAnalysis {
         manifest.ecosystem === "pypi"
           ? pythonScriptTarget(safeFiles, entry.target)
           : entryTargetPath(safeFiles, directory, entry.target);
-      if (path === null || seenEntries.has(path)) continue;
+      if (path === null || seenEntries.has(path) || isAuxiliary(path)) continue;
       seenEntries.add(path);
       entryPoints.push({
         path,
@@ -363,7 +377,7 @@ export function analyseSnapshot(snapshot: RepoSnapshot): RepoAnalysis {
 
   const gaps: CoverageGap[] = [];
   for (const module of modules.values()) {
-    if (module.testFiles.length > 0) continue;
+    if (module.testFiles.length > 0 || module.files.every(isReExportShell)) continue;
     const main = [...module.files]
       .map((path) => safeFiles.get(path))
       .filter((file): file is RepoFile => file !== undefined)

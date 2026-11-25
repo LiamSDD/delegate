@@ -215,7 +215,7 @@ describe("analyseSnapshot", () => {
       ["deprecated-dependency", "request"],
       ["unpinned-dependency", "zod"],
     ]);
-    expect(analysis.gaps.map((gap) => gap.module)).toEqual(["src/index.ts", "src/db.ts"]);
+    expect(analysis.gaps.map((gap) => gap.module)).toEqual(["src/db.ts"]);
   });
 
   it("groups larger repos into directory modules and resolves Python imports", async () => {
@@ -272,5 +272,22 @@ describe("analyseSnapshot", () => {
     ]);
     expect(analysis.tests.frameworks.map((framework) => framework.name)).toEqual(["node:test"]);
     expect(analysis.ci[0]?.testLine).toBe(4);
+  });
+
+  it("keeps examples, config files, declarations and re-export shells out of modules and gaps", async () => {
+    const body = "export function run() {\n  return 1;\n}\n\nexport const two = 2;\n";
+    const { analysis } = await analyse({
+      "src/core.ts": body,
+      "src/index.ts": 'export * from "./core";\n\n\n\n\n',
+      "src/types.d.ts": "export interface A {\n  a: string;\n}\n\n\n",
+      "examples/basic/main.ts": body,
+      "eslint.config.js": body,
+      "docs/conf.py": "project = 'x'\n\n\n\n\n",
+    });
+    expect(analysis.modules.map((module) => module.id).sort()).toEqual([
+      "src/core.ts",
+      "src/index.ts",
+    ]);
+    expect(analysis.gaps.map((gap) => gap.module)).toEqual(["src/core.ts"]);
   });
 });
