@@ -5,3 +5,4 @@ export { appRole } from "./rls";
 export * from "./runs";
 export * from "./tenancy";
 export * from "./connections";
+export * from "./learning";

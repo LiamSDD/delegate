@@ -18,6 +18,13 @@ describe("red-team dataset v2", () => {
       ).toBeGreaterThanOrEqual(6);
   });
 
+  it("keeps every v1 case unchanged in v2", () => {
+    const v1 = loadRedteamDataset(
+      new URL("../../datasets/redteam/v1.jsonl", import.meta.url).pathname,
+    );
+    expect(cases.slice(0, v1.length)).toEqual(v1);
+  });
+
   it("publishes its schema as JSON Schema", () => {
     const published: unknown = JSON.parse(
       readFileSync(new URL("../../datasets/redteam/schema.v2.json", import.meta.url), "utf8"),

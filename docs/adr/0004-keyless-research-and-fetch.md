@@ -1,6 +1,6 @@
 # ADR 0004: Keyless research sources and a hardened fetch tool
 
-- Status: Accepted
+- Status: Accepted (crawl limits amended by ADR 0012)
 - Date: 2026-11-24
 
 ## Context

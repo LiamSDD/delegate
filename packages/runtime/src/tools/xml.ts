@@ -19,12 +19,16 @@ function elementText(raw: string): string {
   return cdata === null ? decodeEntities(raw) : (cdata[1] ?? "");
 }
 
-function blocks(xml: string, tag: string): string[] {
+function* eachBlock(xml: string, tag: string): Generator<string> {
   const pattern = new RegExp(
     `<(?:[a-z0-9]+:)?${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[a-z0-9]+:)?${tag}>`,
     "gi",
   );
-  return [...xml.matchAll(pattern)].map((match) => match[1] ?? "");
+  for (const match of xml.matchAll(pattern)) yield match[1] ?? "";
+}
+
+function blocks(xml: string, tag: string): string[] {
+  return [...eachBlock(xml, tag)];
 }
 
 function first(xml: string, tag: string): string | undefined {
@@ -40,6 +44,34 @@ function isoDate(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   const time = Date.parse(value.trim());
   return Number.isNaN(time) ? undefined : new Date(time).toISOString();
+}
+
+export interface SitemapEntry {
+  loc: string;
+  lastmod?: string;
+}
+
+export interface DatedSitemapEntries {
+  urls: SitemapEntry[];
+  sitemaps: SitemapEntry[];
+}
+
+export function parseSitemapEntries(
+  xml: string,
+  limit = Number.POSITIVE_INFINITY,
+): DatedSitemapEntries {
+  const entries = (container: string): SitemapEntry[] => {
+    const found: SitemapEntry[] = [];
+    for (const entry of eachBlock(xml, container)) {
+      if (found.length >= limit) break;
+      const loc = first(entry, "loc")?.trim();
+      if (loc === undefined || loc === "") continue;
+      const lastmod = isoDate(first(entry, "lastmod"));
+      found.push({ loc, ...(lastmod === undefined ? {} : { lastmod }) });
+    }
+    return found;
+  };
+  return { urls: entries("url"), sitemaps: entries("sitemap") };
 }
 
 export function parseSitemap(xml: string): SitemapEntries {

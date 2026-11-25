@@ -7,7 +7,7 @@ import { executeToolCall, type ToolCaller } from "./registry";
 import {
   createResearchEnvironment,
   createResearchTools,
-  rankCandidates,
+  pickForReading,
   siteScope,
   type ResearchEnvironment,
 } from "./research";
@@ -57,27 +57,29 @@ describe("siteScope", () => {
   });
 });
 
-describe("rankCandidates", () => {
-  it("prefers one page per research category, shallow and unlocalised, and skips assets", () => {
-    const ranked = rankCandidates(
+describe("pickForReading", () => {
+  it("keeps the homepage, then the best page per research topic, then the highest scores", () => {
+    const source = (key: string, score: number, depth: number, topic?: string) => ({
+      key,
+      score,
+      depth,
+      ...(topic === undefined ? {} : { topic }),
+      document: {} as never,
+      page: { mainText: "x".repeat(600), structuredLines: [] } as never,
+    });
+    const picked = pickForReading(
       [
-        "https://acme.example/de/about",
-        "https://acme.example/about",
-        "https://acme.example/blog/2020/01/old-post",
-        "https://acme.example/pricing",
-        "https://acme.example/logo.png",
-        "https://acme.example/customers/case-studies",
-        "https://acme.example/legal/imprint",
-        "https://acme.example/careers",
+        source("blog-1", 130, 1, "news"),
+        source("home", 1_000, 0),
+        source("pricing-2", 120, 2, "pricing"),
+        source("pricing", 150, 1, "pricing"),
+        source("random", 140, 1),
+        source("careers", 110, 1, "careers"),
       ],
+      ["about", "pricing", "careers", "news"],
       4,
     );
-    expect(ranked).toEqual([
-      "https://acme.example/about",
-      "https://acme.example/pricing",
-      "https://acme.example/customers/case-studies",
-      "https://acme.example/careers",
-    ]);
+    expect(picked.map((entry) => entry.key)).toEqual(["home", "pricing", "careers", "blog-1"]);
   });
 });
 

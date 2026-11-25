@@ -1,5 +1,8 @@
+import { CAPABILITIES } from "@delegate/policy";
+
 import { BudgetExceededError } from "../budget";
-import { diffPlans, type Actor, type PlanStep } from "../events";
+import { diffPlans, type Actor, type PlanStep, type PlaybookApplied } from "../events";
+import { plannerGuidance, stepGuidance } from "../learning/playbook";
 import { PlanApprovalDecisionSchema, type AwaitPlanApproval } from "../plan-approval";
 import { type PromptFile } from "../prompts";
 import { NoModelAvailableError } from "../router";
@@ -35,6 +38,7 @@ export interface PlannedMission {
   defaultPlan: readonly PlanStep[];
   clock: MissionClock;
   finish: (outcome: OrchestrationResult) => Promise<MissionFinish>;
+  fixedPlan?: string;
 }
 
 export interface ResumePoint extends OrchestratorResume {
@@ -49,6 +53,7 @@ export interface PlannedRunOptions {
   approver?: Actor;
   concurrency?: number;
   resume?: ResumePoint;
+  playbook?: PlaybookApplied;
 }
 
 export function classifyFailure(error: unknown): MissionFailureInfo {
@@ -108,14 +113,25 @@ export async function runPlannedMission(
     return "failed" as const;
   };
 
+  const playbook = options.playbook;
+  const plannerMission: PlannerMission =
+    playbook === undefined
+      ? mission.planner
+      : { ...mission.planner, guidance: plannerGuidance(playbook) };
+
   try {
     let version = 1;
     let steps: PlanStep[];
     const resume = options.resume;
     if (resume === undefined) {
-      const planner = plannerUsable(ctx);
+      if (playbook !== undefined)
+        await emit({ runId, type: "playbook.applied", payload: playbook });
+      const planner =
+        mission.fixedPlan === undefined
+          ? plannerUsable(ctx)
+          : { usable: false, reason: mission.fixedPlan };
       const proposed = await proposePlan(ctx, {
-        mission: mission.planner,
+        mission: plannerMission,
         defaultPlan: mission.defaultPlan,
         prompt: options.plannerPrompt,
         usePlanner: planner.usable,
@@ -210,12 +226,16 @@ export async function runPlannedMission(
       version,
       executors: mission.planner.executors,
       ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+      ...(playbook === undefined
+        ? {}
+        : { guidance: (step: PlanStep) => stepGuidance(playbook, step, CAPABILITIES.webFetch) }),
       ...(resume === undefined
         ? {}
         : { resume: { completed: resume.completed, failed: resume.failed } }),
       replan: async (state) => {
+        if (mission.fixedPlan !== undefined) return null;
         if (!plannerUsable(ctx).usable || !mission.clock.fits(["planner"])) return null;
-        return revisePlan(ctx, { mission: mission.planner, prompt: options.plannerPrompt, state });
+        return revisePlan(ctx, { mission: plannerMission, prompt: options.plannerPrompt, state });
       },
     });
     if (outcome.fatal !== undefined) return await fail(classifyFailure(outcome.fatal));

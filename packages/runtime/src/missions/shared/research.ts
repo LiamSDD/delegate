@@ -23,12 +23,19 @@ import {
 import { NoModelAvailableError } from "../../router";
 import { type Fetcher } from "../../tools/fetch";
 import { executeToolCall, type ToolCaller, type ToolCallOutcome } from "../../tools/registry";
+import { formatProgress } from "../../crawl/engine";
 import {
   createResearchEnvironment,
   createResearchTools,
+  type ResearchCrawlSettings,
   type ResearchEnvironment,
 } from "../../tools/research";
-import { SOURCE_KINDS, type SourceDocument, type SourceRecord } from "../../tools/sources";
+import {
+  SOURCE_KINDS,
+  type SourceDocument,
+  type SourceRecord,
+  type SourceStore,
+} from "../../tools/sources";
 
 export const RESEARCH_STEP_IDS = {
   site: "research",
@@ -151,10 +158,12 @@ export interface ResearchKitOptions {
   readerPrompt: PromptFile;
   researcherPrompt: PromptFile;
   crawlPages: number;
+  crawl?: Partial<ResearchCrawlSettings>;
   clock: MissionClock;
   gapTopics: (facts: readonly TopicFact[]) => string[];
   gapFillDeadlineMs: number;
   callsAfterGapFill: readonly ModelRole[];
+  sources?: SourceStore;
 }
 
 export interface ResearchKit {
@@ -205,6 +214,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
   const env = createResearchEnvironment({
     fetcher: options.fetcher,
     siteUrl: options.siteUrl,
+    ...(options.crawl === undefined ? {} : { crawl: options.crawl }),
     ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
     digest: async (documents, execution) => {
       if (!quarantineSteps.has(execution.stepId)) {
@@ -227,6 +237,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
       ].join("\n");
     },
   });
+  if (options.sources !== undefined) env.sources = options.sources;
   const tools = createResearchTools(env);
   const toolNamed = (name: string) => tools.filter((tool) => tool.name === name);
   const caller = (): ToolCaller => {
@@ -273,9 +284,11 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
     capabilities: [CAPABILITIES.webFetch],
     required: true,
     description:
-      "Crawl the company's own site (robots.txt, sitemap, same-site scope, page cap) and collect pages such as product, pricing, customers, careers and docs. No model calls.",
+      "Crawl the company's own site with the shared crawl engine (robots.txt and Crawl-delay, sitemaps, feeds and links, same-site scope, per-host rate limits, page and time budgets), then keep the most informative pages, such as product, pricing, customers, careers and docs, for reading. No model calls.",
     run: async (task) => {
+      env.onCrawlProgress = (progress) => task.agent.say(formatProgress(progress));
       const crawl = await runTool(task, "crawl_site", { maxPages: options.crawlPages });
+      delete env.onCrawlProgress;
       const documents = env.sources.all();
       if (documents.length === 0)
         throw new FatalStepError(
@@ -411,6 +424,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
         `Feeds found: ${env.discoveries.feeds.length === 0 ? "none" : env.discoveries.feeds.join(", ")}`,
         "Already fetched:",
         ...fetched.map((url) => `- ${url}`),
+        ...(task.guidance ?? []),
       ].join("\n");
       const before = new Set(env.sources.all().map((document) => document.record.sourceId));
       const loop = await runAgentLoop({

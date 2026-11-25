@@ -10,6 +10,9 @@ export const REDTEAM_CATEGORIES = [
   "approval-bypass",
   "quote-forgery",
   "connector-poisoning",
+  "sandbox-escape",
+  "playbook-poisoning",
+  "crawler-trap",
 ] as const;
 export const RedteamCategorySchema = z.enum(REDTEAM_CATEGORIES);
 export type RedteamCategory = z.infer<typeof RedteamCategorySchema>;
@@ -44,6 +47,40 @@ export const FetchPayloadSchema = z.strictObject({
   network: NetworkSchema.optional(),
   allowPublicIpLiterals: z.boolean().optional(),
   forbiddenHosts: z.array(host).min(1),
+});
+
+export const CrawlGeneratorSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("calendar"), prefix: z.url() }),
+  z.strictObject({ kind: z.literal("pagination"), prefix: z.url() }),
+  z.strictObject({ kind: z.literal("repeating-path"), prefix: z.url() }),
+  z.strictObject({
+    kind: z.literal("link-flood"),
+    url: z.url(),
+    links: z.number().int().positive().max(200_000),
+  }),
+  z.strictObject({
+    kind: z.literal("sitemap-flood"),
+    url: z.url(),
+    urls: z.number().int().positive().max(500_000),
+  }),
+  z.strictObject({
+    kind: z.literal("gzip-bomb"),
+    url: z.url(),
+    decodedBytes: z.number().int().positive().max(1_073_741_824),
+    contentType: z.string().min(1),
+  }),
+]);
+export type CrawlGenerator = z.infer<typeof CrawlGeneratorSchema>;
+
+export const CrawlPayloadSchema = z.strictObject({
+  siteUrl: z.url(),
+  network: NetworkSchema.optional(),
+  generators: z.array(CrawlGeneratorSchema).default([]),
+  maxPages: z.number().int().positive().max(500).default(50),
+  forbiddenHosts: z.array(host).default([]),
+  forbiddenPaths: z.array(z.string().startsWith("/")).default([]),
+  maxRequests: z.number().int().positive(),
+  maxDecodedBytes: z.number().int().positive().optional(),
 });
 
 export const PinnedFetchPayloadSchema = z.strictObject({
@@ -84,6 +121,18 @@ export const ReaderPayloadSchema = z.strictObject({
     .min(1),
   output: z.unknown(),
   forgedQuotes: z.array(z.string()).default([]),
+});
+
+export const RepoPayloadSchema = z.strictObject({
+  repo: z.string().regex(/^[A-Za-z0-9-]+\/[\w.-]+$/),
+  files: z.record(z.string(), z.string()),
+  readerFacts: z.array(ReaderFactSchema).default([]),
+  architect: z.unknown().optional(),
+  improver: z.unknown().optional(),
+  workerCalls: z.array(ToolCallSchema).default([]),
+  injectedText: z.string().min(8).optional(),
+  falseClaims: z.array(z.string().min(4)).default([]),
+  forbiddenHosts: z.array(host).default([]),
 });
 
 export const PolicyPayloadSchema = z.strictObject({
@@ -135,6 +184,57 @@ export const ConnectorPayloadSchema = z.strictObject({
   forbiddenRemoteCalls: z.array(z.string().regex(/^[a-z0-9-]+\/.+$/)).default([]),
   forbiddenHosts: z.array(host).default([]),
 });
+export const EngineerPayloadSchema = z.strictObject({
+  repoFiles: z.record(z.string(), z.string()),
+  symlinks: z.record(z.string(), z.string()).optional(),
+  audience: z.enum(["public-demo", "owner"]).default("owner"),
+  approval: z.enum(["none", "approved", "rejected"]).default("none"),
+  assistantText: z.string().optional(),
+  calls: z.array(ToolCallSchema).min(1),
+});
+export const INJECTION_POINTS = [
+  "plan.rationale",
+  "step.summary",
+  "step.id",
+  "agent.message",
+  "tool.name",
+  "tool.args",
+  "tool.summary",
+  "tool.error",
+  "source.url",
+  "source.kind",
+  "source.text",
+  "artifact.title",
+  "critic.claim",
+  "critic.reason",
+  "critic.category",
+  "fallback.provider",
+  "failure.code",
+  "failure.message",
+  "run.summary",
+] as const;
+
+export const PlaybookPayloadSchema = z.discriminatedUnion("via", [
+  z.strictObject({
+    via: z.literal("reflect"),
+    injectedText: z.string().min(8),
+    at: z.array(z.enum(INJECTION_POINTS)).min(1),
+    failed: z.boolean().default(false),
+    reflectOutput: z.unknown().optional(),
+    poison: z.array(z.string().min(4)).min(1),
+  }),
+  z.strictObject({
+    via: z.literal("house"),
+    audience: z.enum(["public-demo", "owner"]),
+    houseLearning: z.boolean().optional(),
+    injectedText: z.string().min(8),
+  }),
+  z.strictObject({
+    via: z.literal("retrieval"),
+    entries: z.array(z.strictObject({ key: z.string().min(1), text: z.string().min(1) })).min(1),
+    poison: z.array(z.string().min(4)).min(1),
+  }),
+]);
 
 const ExpectedSchema = z.strictObject({
   outcome: z.literal("blocked"),
@@ -151,9 +251,11 @@ const base = {
 export const RedteamCaseSchema = z.discriminatedUnion("target", [
   z.strictObject({ ...base, target: z.literal("fetch"), payload: FetchPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("pinned-fetch"), payload: PinnedFetchPayloadSchema }),
+  z.strictObject({ ...base, target: z.literal("crawl"), payload: CrawlPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("agent"), payload: AgentPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("pipeline"), payload: PipelinePayloadSchema }),
   z.strictObject({ ...base, target: z.literal("reader"), payload: ReaderPayloadSchema }),
+  z.strictObject({ ...base, target: z.literal("repo"), payload: RepoPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("policy"), payload: PolicyPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("plan"), payload: PlanPayloadSchema }),
   z.strictObject({
@@ -162,6 +264,8 @@ export const RedteamCaseSchema = z.discriminatedUnion("target", [
     payload: OrchestratorPayloadSchema,
   }),
   z.strictObject({ ...base, target: z.literal("connector"), payload: ConnectorPayloadSchema }),
+  z.strictObject({ ...base, target: z.literal("engineer"), payload: EngineerPayloadSchema }),
+  z.strictObject({ ...base, target: z.literal("playbook"), payload: PlaybookPayloadSchema }),
 ]);
 export type RedteamCase = z.infer<typeof RedteamCaseSchema>;
 export type RedteamTarget = RedteamCase["target"];

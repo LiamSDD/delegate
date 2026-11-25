@@ -38,9 +38,24 @@ export class FetchBlockedError extends Error {
     readonly url: string,
     message: string,
     readonly status?: number,
+    readonly retryAfterMs?: number,
   ) {
     super(message);
   }
+}
+
+export interface HostOutcome {
+  latencyMs: number;
+  status?: number;
+  retryAfterMs?: number;
+  failed?: boolean;
+}
+
+export type HostRelease = (outcome: HostOutcome) => void;
+
+export interface HostGate {
+  acquire(host: string, signal?: AbortSignal): Promise<HostRelease>;
+  setCrawlDelay(host: string, delayMs: number): void;
 }
 
 export type ResolveDns = (host: string) => Promise<string[]>;
@@ -57,6 +72,7 @@ export interface FetcherOptions {
   maxPages?: number;
   perHostIntervalMs?: number;
   allowPublicIpLiterals?: boolean;
+  hostGate?: HostGate;
 }
 
 export interface FetchRequest {
@@ -77,10 +93,31 @@ export interface FetchedDocument {
   fetchedAt: string;
 }
 
+export interface DownloadRequest {
+  url: string;
+  accept: string;
+  contentTypes: readonly RegExp[];
+  maxBytes: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  respectRobots?: boolean;
+}
+
+export interface DownloadedFile {
+  url: string;
+  finalUrl: string;
+  status: number;
+  contentType: string;
+  bytes: Uint8Array;
+  fetchedAt: string;
+}
+
 export interface Fetcher {
   fetch(request: FetchRequest): Promise<FetchedDocument>;
+  download(request: DownloadRequest): Promise<DownloadedFile>;
   pagesFetched(): number;
   sitemapsFor(url: string): Promise<string[]>;
+  gate?: HostGate;
 }
 
 const ALLOWED_PORTS = new Set(["", "80", "443"]);
@@ -97,6 +134,17 @@ const ALLOWED_CONTENT_TYPES = [
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const DEFAULT_ACCEPT =
   "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,application/json;q=0.8";
+
+const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
+
+export function parseRetryAfter(value: string | null, nowMs: number): number | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return Math.min(Number(trimmed) * 1000, MAX_RETRY_AFTER_MS);
+  const at = Date.parse(trimmed);
+  if (Number.isNaN(at)) return undefined;
+  return Math.min(Math.max(0, at - nowMs), MAX_RETRY_AFTER_MS);
+}
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -281,10 +329,13 @@ export function createFetcher(options: FetcherOptions): Fetcher {
             accept: "text/plain",
             ...(signal === undefined ? {} : { signal }),
           },
-          false,
-          true,
+          { countsAsPage: false, contentTypes: "any" },
         );
-        return parseRobots(document.text);
+        const robots = parseRobots(document.text);
+        const delay = robots.crawlDelaySeconds(userAgent);
+        if (delay !== undefined && delay > 0)
+          options.hostGate?.setCrawlDelay(url.host, delay * 1000);
+        return robots;
       } catch (error) {
         if (error instanceof FetchBlockedError) {
           const clientError =
@@ -312,11 +363,42 @@ export function createFetcher(options: FetcherOptions): Fetcher {
     }
   }
 
-  async function request(
-    input: FetchRequest,
-    countsAsPage: boolean,
-    anyContentType = false,
-  ): Promise<FetchedDocument> {
+  interface TransferOptions {
+    countsAsPage: boolean;
+    contentTypes: readonly RegExp[] | "any";
+    maxBytes?: number;
+    timeoutMs?: number;
+  }
+
+  interface Transfer {
+    url: string;
+    finalUrl: string;
+    status: number;
+    contentType: string;
+    header: string | null;
+    bytes: Uint8Array;
+    truncated: boolean;
+    fetchedAt: string;
+  }
+
+  async function request(input: FetchRequest, mode: TransferOptions): Promise<FetchedDocument> {
+    const transfer = await transferBytes(input, mode);
+    return {
+      url: transfer.url,
+      finalUrl: transfer.finalUrl,
+      status: transfer.status,
+      contentType: transfer.contentType,
+      text: decode(transfer.bytes, charsetOf(transfer.header)),
+      bytes: transfer.bytes.byteLength,
+      ...(transfer.truncated ? { truncated: true } : {}),
+      fetchedAt: transfer.fetchedAt,
+    };
+  }
+
+  async function transferBytes(input: FetchRequest, mode: TransferOptions): Promise<Transfer> {
+    const countsAsPage = mode.countsAsPage;
+    const limit = mode.maxBytes ?? maxBytes;
+    const timeLimit = mode.timeoutMs ?? timeoutMs;
     if (input.signal?.aborted === true) {
       throw new FetchBlockedError("aborted", input.url, "The run was cancelled");
     }
@@ -326,11 +408,11 @@ export function createFetcher(options: FetcherOptions): Fetcher {
       }
       pages += 1;
     }
-    const deadline = new Deadline(timeoutMs, input.signal);
+    const deadline = new Deadline(timeLimit, input.signal);
     const fail = (url: string, error: unknown): never => {
       if (error instanceof FetchBlockedError) throw error;
       if (deadline.timedOut) {
-        throw new FetchBlockedError("timeout", url, `No complete response within ${timeoutMs} ms`);
+        throw new FetchBlockedError("timeout", url, `No complete response within ${timeLimit} ms`);
       }
       if (input.signal?.aborted === true) {
         throw new FetchBlockedError("aborted", url, "The run was cancelled");
@@ -347,7 +429,14 @@ export function createFetcher(options: FetcherOptions): Fetcher {
         const url = validateFetchUrl(current, allowLiterals);
         await assertPublic(url);
         if (input.respectRobots !== false) await assertRobots(url, input.signal);
-        await politeSlot(url.host);
+        let release: HostRelease | undefined;
+        if (options.hostGate === undefined) await politeSlot(url.host);
+        else release = await options.hostGate.acquire(url.host, deadline.signal);
+        const startedAt = now().getTime();
+        const settle = (outcome: Omit<HostOutcome, "latencyMs">) => {
+          release?.({ latencyMs: Math.max(0, now().getTime() - startedAt), ...outcome });
+          release = undefined;
+        };
         let response: Response;
         try {
           response = await options.fetchImpl(url.href, {
@@ -357,64 +446,82 @@ export function createFetcher(options: FetcherOptions): Fetcher {
             signal: deadline.signal,
           });
         } catch (error) {
+          settle({ failed: true });
           return fail(url.href, error);
         }
-        if (REDIRECT_STATUSES.has(response.status)) {
-          await response.body?.cancel().catch(() => undefined);
-          const location = response.headers.get("location");
-          if (location === null) {
+        try {
+          if (REDIRECT_STATUSES.has(response.status)) {
+            settle({ status: response.status });
+            await response.body?.cancel().catch(() => undefined);
+            const location = response.headers.get("location");
+            if (location === null) {
+              throw new FetchBlockedError(
+                "http_error",
+                url.href,
+                "Redirect without a location",
+                response.status,
+              );
+            }
+            if (hop >= maxRedirects) {
+              throw new FetchBlockedError(
+                "too_many_redirects",
+                input.url,
+                `More than ${maxRedirects} redirects`,
+              );
+            }
+            current = new URL(location, url).href;
+            continue;
+          }
+          if (!response.ok) {
+            const retryAfterMs = parseRetryAfter(
+              response.headers.get("retry-after"),
+              now().getTime(),
+            );
+            settle({
+              status: response.status,
+              failed: response.status >= 500 || response.status === 429,
+              ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+            });
+            await response.body?.cancel().catch(() => undefined);
             throw new FetchBlockedError(
               "http_error",
               url.href,
-              "Redirect without a location",
+              `HTTP ${response.status}`,
               response.status,
+              retryAfterMs,
             );
           }
-          if (hop >= maxRedirects) {
+          const header = response.headers.get("content-type");
+          const type = mediaType(header);
+          const allowed = mode.contentTypes;
+          if (allowed !== "any" && !allowed.some((pattern) => pattern.test(type))) {
+            await response.body?.cancel().catch(() => undefined);
             throw new FetchBlockedError(
-              "too_many_redirects",
-              input.url,
-              `More than ${maxRedirects} redirects`,
+              "content_type",
+              url.href,
+              `Content type ${type || "missing"} is not allowed`,
             );
           }
-          current = new URL(location, url).href;
-          continue;
+          const { bytes, truncated } =
+            response.body === null
+              ? { bytes: new Uint8Array(), truncated: false }
+              : await readCapped(response.body, limit, deadline).catch((error: unknown) =>
+                  fail(url.href, error),
+                );
+          settle({ status: response.status });
+          return {
+            url: input.url,
+            finalUrl: url.href,
+            status: response.status,
+            contentType: type,
+            header,
+            bytes,
+            truncated,
+            fetchedAt: now().toISOString(),
+          };
+        } finally {
+          settle({ failed: true });
         }
-        if (!response.ok) {
-          await response.body?.cancel().catch(() => undefined);
-          throw new FetchBlockedError(
-            "http_error",
-            url.href,
-            `HTTP ${response.status}`,
-            response.status,
-          );
-        }
-        const header = response.headers.get("content-type");
-        const type = mediaType(header);
-        if (!anyContentType && !ALLOWED_CONTENT_TYPES.some((pattern) => pattern.test(type))) {
-          await response.body?.cancel().catch(() => undefined);
-          throw new FetchBlockedError(
-            "content_type",
-            url.href,
-            `Content type ${type || "missing"} is not allowed`,
-          );
-        }
-        const { bytes, truncated } =
-          response.body === null
-            ? { bytes: new Uint8Array(), truncated: false }
-            : await readCapped(response.body, maxBytes, deadline).catch((error: unknown) =>
-                fail(url.href, error),
-              );
-        return {
-          url: input.url,
-          finalUrl: url.href,
-          status: response.status,
-          contentType: type,
-          text: decode(bytes, charsetOf(header)),
-          bytes: bytes.byteLength,
-          ...(truncated ? { truncated: true } : {}),
-          fetchedAt: now().toISOString(),
-        };
       }
     } catch (error) {
       return fail(current, error);
@@ -424,11 +531,42 @@ export function createFetcher(options: FetcherOptions): Fetcher {
   }
 
   return {
-    fetch: (input) => request(input, true),
+    fetch: (input) => request(input, { countsAsPage: true, contentTypes: ALLOWED_CONTENT_TYPES }),
+    download: async (input) => {
+      const transfer = await transferBytes(
+        {
+          url: input.url,
+          accept: input.accept,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          ...(input.respectRobots === undefined ? {} : { respectRobots: input.respectRobots }),
+        },
+        {
+          countsAsPage: true,
+          contentTypes: input.contentTypes,
+          maxBytes: input.maxBytes + 1,
+          ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        },
+      );
+      if (transfer.truncated || transfer.bytes.byteLength > input.maxBytes)
+        throw new FetchBlockedError(
+          "too_large",
+          input.url,
+          `Response exceeds the ${input.maxBytes}-byte cap`,
+        );
+      return {
+        url: transfer.url,
+        finalUrl: transfer.finalUrl,
+        status: transfer.status,
+        contentType: transfer.contentType,
+        bytes: transfer.bytes,
+        fetchedAt: transfer.fetchedAt,
+      };
+    },
     pagesFetched: () => pages,
     sitemapsFor: async (url) => {
       const robots = await robotsFor(validateFetchUrl(url, allowLiterals), undefined);
       return robots === "unreachable" ? [] : robots.sitemaps;
     },
+    ...(options.hostGate === undefined ? {} : { gate: options.hostGate }),
   };
 }

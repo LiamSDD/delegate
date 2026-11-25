@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { isFakeRunnerEnabled, isOwnerModeEnabled } from "./flags";
+import { isFakeRunnerEnabled, isOwnerModeEnabled, isShipAPrEnabled } from "./flags";
+
+describe("isShipAPrEnabled", () => {
+  it("is off unless DELEGATE_SHIP_A_PR=1, so the sandbox quota is never spent by default", () => {
+    expect(isShipAPrEnabled({ DELEGATE_SHIP_A_PR: "1" })).toBe(true);
+    expect(isShipAPrEnabled({ DELEGATE_SHIP_A_PR: "true" })).toBe(false);
+    expect(isShipAPrEnabled({})).toBe(false);
+  });
+});
 
 describe("isFakeRunnerEnabled", () => {
   it("is on only when explicitly requested outside production", () => {

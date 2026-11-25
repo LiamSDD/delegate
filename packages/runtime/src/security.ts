@@ -11,7 +11,10 @@ export {
 } from "./agent/planner";
 export { type StepExecutor, type SubAgentResult } from "./agent/subagent";
 export { createResearchKit, type ResearchKit } from "./missions/shared/research";
-export { createResearchEnvironment, createResearchTools } from "./tools/research";
+export { createResearchEnvironment, createResearchTools, siteScope } from "./tools/research";
+export { crawl, type CrawlResult } from "./crawl/engine";
+export { HostPoliteness } from "./crawl/politeness";
+export { COMPANY_PROFILE } from "./crawl/priority";
 export {
   detectInjection,
   quoteAppearsIn,
@@ -28,6 +31,15 @@ export {
   type ResolveDns,
 } from "./tools/fetch";
 export { classifyAddress, isIpLiteral } from "./tools/ip";
+export { runShipAPr, type ShipAPrDependencies } from "./missions/ship-a-pr/run";
+export { createLocalSandboxProvider } from "./sandbox/local";
+export { isProtectedPath } from "./sandbox/paths";
+export {
+  type FileChange,
+  type GitHubAppClient,
+  type PullRequestChange,
+  type RepoSession,
+} from "./github/app";
 export { createPinnedFetch } from "./tools/node-fetch";
 export {
   defineTool,

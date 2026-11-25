@@ -2,3 +2,5 @@ results/*
 !results/baseline.json
 !results/redteam.json
 !results/xray/
+!results/evolution/
+results/evolution/runs/

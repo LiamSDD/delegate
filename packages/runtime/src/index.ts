@@ -35,3 +35,4 @@ export {
   type ForkRequest,
   type ForkSeedEvent,
 } from "./durable/fork";
+export * from "./learning";

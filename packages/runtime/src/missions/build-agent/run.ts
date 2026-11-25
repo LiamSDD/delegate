@@ -26,6 +26,7 @@ import { NoModelAvailableError } from "../../router";
 import { type Fetcher } from "../../tools/fetch";
 import { plural } from "../shared/research";
 import { collectAnswer, composeSystemPrompt, streamAnswer } from "./answer";
+import { CRAWL_STATE_KIND, parseCheckpoint } from "../../crawl/checkpoint";
 import { crawlSite } from "./crawler";
 import { type BuildAgentInput } from "./input";
 import { BUILD_AGENT_PLANNING_HINTS, BUILD_AGENT_STEP_IDS, buildAgentPlan } from "./plan";
@@ -358,11 +359,18 @@ export function createBuildAgentMission(deps: BuildAgentDependencies): PlannedMi
     capabilities: [CAPABILITIES.webFetch],
     required: true,
     description:
-      "Crawls the company's own site: same registrable domain, sitemap first then breadth-first internal links, robots.txt, 1 request per second, at most 60 pages and 5 MB; stores every page as a public document with chunks. Pages already stored for this run are reused, not refetched.",
+      "Crawls the company's own site with the shared crawl engine: same registrable domain, sitemaps and feeds then relevance-ranked breadth-first links, robots.txt and Crawl-delay, at most 6 concurrent requests per host, at most 300 pages, 60 MB and 120 s; stores every page as a public document with chunks. Progress is checkpointed, so a re-run resumes the frontier and never refetches a stored page.",
     run: async (task) => {
       await task.agent.say(
         `Crawling ${new URL(input.url).hostname} (sitemap first, robots.txt respected).`,
       );
+      const previous = latest(CRAWL_STATE_KIND);
+      const checkpoint = previous === undefined ? undefined : parseCheckpoint(previous.content);
+      if (checkpoint !== undefined)
+        await task.agent.say(
+          `Resuming the crawl: ${plural(checkpoint.pages.length, "page")} already stored, ${checkpoint.frontier.length} URLs queued.`,
+        );
+      const host = new URL(input.url).hostname;
       const report = await crawlSite({
         ctx,
         grant: task.grant,
@@ -370,6 +378,11 @@ export function createBuildAgentMission(deps: BuildAgentDependencies): PlannedMi
         knowledge,
         collection,
         startUrl: input.url,
+        ...(checkpoint === undefined ? {} : { checkpoint }),
+        onProgress: (text) => task.agent.say(text),
+        onCheckpoint: async (state) => {
+          await publish(task.step.id, CRAWL_STATE_KIND, `Crawl progress for ${host}`, state);
+        },
       });
       if (report.pages.length === 0)
         throw new FatalStepError(

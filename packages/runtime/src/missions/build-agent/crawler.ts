@@ -1,40 +1,44 @@
-import { createHash } from "node:crypto";
-
 import { CAPABILITIES } from "@delegate/policy";
 import { z } from "zod";
 
 import { type RunContext } from "../../agent/context";
 import { chainHead } from "../../agent/pacing";
+import { type CrawlCheckpoint, type CrawlStateArtifact } from "../../crawl/checkpoint";
+import {
+  crawl,
+  crawlStateArtifact,
+  formatProgress,
+  type CrawlPage,
+  type CrawlProgress,
+} from "../../crawl/engine";
+import { DOCS_PROFILE } from "../../crawl/priority";
 import { chunkPage } from "../../knowledge/chunker";
 import { type KnowledgeStore, type StoredPage } from "../../knowledge/types";
 import { detectInjection } from "../../quarantine/reader";
-import { FetchBlockedError, type FetchedDocument, type Fetcher } from "../../tools/fetch";
-import { htmlToText } from "../../tools/html";
+import { type FetchedDocument, type Fetcher } from "../../tools/fetch";
 import { defineTool, executeToolCall, type StepGrant } from "../../tools/registry";
 import { siteScope } from "../../tools/research";
-import { normaliseUrlKey } from "../../tools/sources";
-import { parseSitemap } from "../../tools/xml";
 import { type CrawlReport } from "./schema";
 
 export const CRAWL_LIMITS = {
-  maxPages: 60,
-  maxBytes: 5 * 1024 * 1024,
-  maxDurationMs: 110_000,
-  maxSitemapFetches: 3,
-  maxSitemapUrls: 400,
-  maxQueue: 600,
+  maxPages: 300,
+  maxBytes: 60 * 1024 * 1024,
+  maxDurationMs: 120_000,
+  maxDepth: 6,
+  maxQueue: 3_000,
+  maxSitemapFetches: 12,
+  maxSitemapUrls: 5_000,
   minTextChars: 40,
   maxLinksPerPage: 200,
+  maxPerPattern: 60,
+  concurrency: 32,
+  checkpointEveryPages: 60,
+  progressEveryMs: 4_000,
+  maxStoredLinks: 500,
+  maxSkippedReported: 200,
 } as const;
 
 export type CrawlLimits = { [K in keyof typeof CRAWL_LIMITS]: number };
-
-const BINARY_EXTENSION =
-  /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|pdf|docx?|xlsx?|pptx?|zip|gz|tgz|rar|7z|dmg|exe|msi|apk|mp4|mov|avi|webm|mp3|wav|ogg|css|js|mjs|map|json|xml|txt|rss|atom|woff2?|ttf|otf|eot)$/i;
-const EXCLUDED_SEGMENT =
-  /^(login|log-in|signin|sign-in|signup|sign-up|register|logout|cart|checkout|account|my-account|wp-admin|wp-login\.php|wp-json|cdn-cgi|search|feed|tag|tags|author|print|share)$/i;
-const LOCALE_SEGMENT = /^[a-z]{2}([-_][a-z]{2})?$/i;
-const ENGLISH_LOCALE = /^en([-_][a-z]{2})?$/i;
 
 export interface CrawlOptions {
   ctx: RunContext;
@@ -44,55 +48,15 @@ export interface CrawlOptions {
   collection: string;
   startUrl: string;
   limits?: Partial<CrawlLimits>;
+  checkpoint?: CrawlCheckpoint;
+  onCheckpoint?: (state: CrawlStateArtifact) => Promise<void>;
+  onProgress?: (text: string, progress: CrawlProgress) => Promise<void>;
 }
 
-export function canonicalUrl(raw: string): string | undefined {
-  try {
-    const url = new URL(raw);
-    url.hash = "";
-    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
-    return url.href;
-  } catch {
-    return undefined;
-  }
-}
-
-function firstSegment(url: URL): string | undefined {
-  return url.pathname.split("/").find((segment) => segment !== "");
-}
-
-export function crawlEligible(raw: string, start: URL, inScope: (url: string) => boolean): boolean {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return false;
-  if (url.search !== "" || url.username !== "" || url.password !== "") return false;
-  if (!inScope(url.href)) return false;
-  if (BINARY_EXTENSION.test(url.pathname)) return false;
-  const segments = url.pathname.split("/").filter((segment) => segment !== "");
-  if (segments.some((segment) => EXCLUDED_SEGMENT.test(segment))) return false;
-  const locale = firstSegment(url);
-  const startLocale = firstSegment(start);
-  if (
-    locale !== undefined &&
-    LOCALE_SEGMENT.test(locale) &&
-    !ENGLISH_LOCALE.test(locale) &&
-    locale.toLowerCase() !== startLocale?.toLowerCase()
-  )
-    return false;
-  return true;
-}
-
-function isHtml(document: FetchedDocument): boolean {
-  return document.contentType === "text/html" || document.contentType === "application/xhtml+xml";
-}
-
-function reasonOf(error: unknown): string {
-  if (error instanceof FetchBlockedError) return `${error.code}: ${error.message}`.slice(0, 200);
-  return (error instanceof Error ? error.message : "fetch failed").slice(0, 200);
+interface Recorded {
+  page: StoredPage;
+  cached: boolean;
+  flagged: number;
 }
 
 export async function crawlSite(options: CrawlOptions): Promise<CrawlReport> {
@@ -118,7 +82,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlReport> {
         });
         documents.set(input.url, document);
         return {
-          summary: `${document.status} ${document.contentType} ${document.bytes} bytes`,
+          summary: `${document.status} ${document.contentType} ${document.bytes} bytes${document.truncated === true ? " (truncated)" : ""}`,
           forModel: "",
         };
       } catch (error) {
@@ -152,151 +116,129 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlReport> {
     throw failure ?? new Error(outcome.content.slice(0, 200));
   };
 
-  const report: CrawlReport = {
-    collection,
-    startUrl: start.href,
-    pages: [],
-    skipped: [],
-    bytes: 0,
-    sitemapUrls: 0,
-    durationMs: 0,
-  };
-  const seen = new Set<string>();
-  const hashes = new Set<string>();
-  const queue: string[] = [];
-  const enqueue = (raw: string) => {
-    const url = canonicalUrl(raw);
-    if (url === undefined || queue.length >= limits.maxQueue) return;
-    const key = normaliseUrlKey(url);
-    if (seen.has(key) || !crawlEligible(url, start, (candidate) => scope.contains(candidate)))
-      return;
-    seen.add(key);
-    queue.push(url);
-  };
-  const skip = (url: string, reason: string) => {
-    if (report.skipped.length < 200) report.skipped.push({ url, reason });
-  };
-  const outOfTime = () => ctx.now().getTime() - startedAt >= limits.maxDurationMs;
-
-  enqueue(start.href);
-  const sitemapQueue = [
-    ...(await options.fetcher.sitemapsFor(start.origin).catch(() => [])),
-    `${start.origin}/sitemap.xml`,
-  ].filter((url) => scope.contains(url));
-  const sitemapSeen = new Set<string>();
-  const fromSitemaps: string[] = [];
-  let sitemapFetches = 0;
-  while (sitemapQueue.length > 0 && sitemapFetches < limits.maxSitemapFetches) {
-    const next = sitemapQueue.shift();
-    if (next === undefined || sitemapSeen.has(next)) continue;
-    sitemapSeen.add(next);
-    sitemapFetches += 1;
-    try {
-      const document = await fetchVia(next);
-      report.bytes += document.bytes;
-      const entries = parseSitemap(document.text);
-      sitemapQueue.push(...entries.sitemaps.filter((url) => scope.contains(url)));
-      fromSitemaps.push(...entries.urls);
-    } catch (error) {
-      skip(next, reasonOf(error));
-    }
-  }
-  const sitemapUrls = [...new Set(fromSitemaps)]
-    .filter((url) => crawlEligible(url, start, (candidate) => scope.contains(candidate)))
-    .sort(
-      (a, b) =>
-        new URL(a).pathname.split("/").length - new URL(b).pathname.split("/").length ||
-        a.length - b.length,
-    )
-    .slice(0, limits.maxSitemapUrls);
-  report.sitemapUrls = sitemapUrls.length;
-  for (const url of sitemapUrls) enqueue(url);
-
-  const record = (page: StoredPage, cached: boolean, flaggedChunks: number) => {
-    report.pages.push({
-      url: page.url,
-      title: page.title,
-      documentId: page.documentId,
-      chunks: page.chunkCount,
-      flaggedChunks,
-      cached,
+  const recorded = new Map<string, Recorded>();
+  const cachedPages = new Map<string, StoredPage>();
+  let flaggedByDocument: Promise<Map<string, number>> | undefined;
+  const flaggedFor = async (documentId: string): Promise<number> => {
+    flaggedByDocument ??= knowledge.listChunks(collection).then((chunks) => {
+      const counts = new Map<string, number>();
+      for (const chunk of chunks)
+        if (chunk.flagged) counts.set(chunk.documentId, (counts.get(chunk.documentId) ?? 0) + 1);
+      return counts;
     });
-    for (const link of page.links) enqueue(link);
+    return (await flaggedByDocument).get(documentId) ?? 0;
   };
 
-  while (queue.length > 0 && report.pages.length < limits.maxPages) {
-    if (ctx.signal?.aborted === true) break;
-    if (report.bytes >= limits.maxBytes) {
-      skip(queue[0] ?? "", "byte cap reached");
-      break;
+  const store = async (page: CrawlPage): Promise<boolean> => {
+    if (page.kind === "cached") {
+      const stored = cachedPages.get(page.entry.url);
+      if (stored === undefined) return false;
+      recorded.set(page.entry.url, {
+        page: stored,
+        cached: true,
+        flagged: await flaggedFor(stored.documentId),
+      });
+      return true;
     }
-    if (outOfTime()) {
-      skip(queue[0] ?? "", "time cap reached");
-      break;
-    }
-    const url = queue.shift();
-    if (url === undefined) break;
-    const cached = await knowledge.getPage(collection, url);
-    if (cached !== null) {
-      hashes.add(cached.contentHash);
-      const flagged = (await knowledge.listChunks(collection)).filter(
-        (chunk) => chunk.documentId === cached.documentId && chunk.flagged,
-      ).length;
-      record(cached, true, flagged);
-      continue;
-    }
-    let document: FetchedDocument;
-    try {
-      document = await fetchVia(url);
-    } catch (error) {
-      skip(url, reasonOf(error));
-      continue;
-    }
-    report.bytes += document.bytes;
-    if (!isHtml(document)) {
-      skip(url, `not HTML (${document.contentType})`);
-      continue;
-    }
-    const finalUrl = canonicalUrl(document.finalUrl) ?? url;
-    if (!scope.contains(finalUrl)) {
-      skip(url, "redirected outside the site");
-      continue;
-    }
-    seen.add(normaliseUrlKey(finalUrl));
-    const html = htmlToText(document.text, finalUrl);
-    const text = [html.description ?? "", html.text]
-      .filter((part) => part.trim() !== "")
-      .join("\n\n");
-    if (text.length < limits.minTextChars) {
-      skip(url, "too little text");
-      continue;
-    }
-    const contentHash = createHash("sha256").update(text).digest("hex");
-    if (hashes.has(contentHash)) {
-      skip(url, "duplicate content");
-      continue;
-    }
-    hashes.add(contentHash);
-    const chunks = chunkPage(text).map((chunk) => ({
+    const chunks = chunkPage(page.text).map((chunk) => ({
       ...chunk,
       flagged: detectInjection(chunk.text) !== undefined,
     }));
-    const links = html.links
+    if (chunks.length === 0) return false;
+    const links = page.page.links
       .map((link) => link.href)
       .filter((href) => scope.contains(href))
-      .slice(0, limits.maxLinksPerPage);
+      .slice(0, limits.maxStoredLinks);
     const stored = await knowledge.putPage({
       collection,
-      url,
-      title: (html.title || finalUrl).slice(0, 300),
-      contentHash,
-      fetchedAt: document.fetchedAt,
-      bytes: document.bytes,
+      url: page.entry.url,
+      title: (page.page.title || page.finalUrl).slice(0, 300),
+      contentHash: page.contentHash,
+      fetchedAt: page.document.fetchedAt,
+      bytes: page.document.bytes,
       links,
       chunks,
     });
-    record(stored, false, chunks.filter((chunk) => chunk.flagged).length);
+    recorded.set(page.entry.url, {
+      page: stored,
+      cached: false,
+      flagged: chunks.filter((chunk) => chunk.flagged).length,
+    });
+    return true;
+  };
+
+  const result = await crawl({
+    fetcher: options.fetcher,
+    fetch: ({ url }) => fetchVia(url),
+    seeds: [start.href],
+    scope: (url) => scope.contains(url),
+    profile: DOCS_PROFILE,
+    concurrency: limits.concurrency,
+    budget: {
+      maxPages: limits.maxPages,
+      maxBytes: limits.maxBytes,
+      maxDurationMs: limits.maxDurationMs,
+      maxDepth: limits.maxDepth,
+      maxQueue: limits.maxQueue,
+      maxSitemapFetches: limits.maxSitemapFetches,
+      maxSitemapUrls: limits.maxSitemapUrls,
+      minTextChars: limits.minTextChars,
+      maxLinksPerPage: limits.maxLinksPerPage,
+      maxPerPattern: limits.maxPerPattern,
+    },
+    ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
+    ...(options.checkpoint === undefined ? {} : { checkpoint: options.checkpoint }),
+    cached: async (url) => {
+      const stored = await knowledge.getPage(collection, url);
+      if (stored === null) return undefined;
+      cachedPages.set(url, stored);
+      return { title: stored.title, links: stored.links, contentHash: stored.contentHash };
+    },
+    onPage: store,
+    progressEveryMs: limits.progressEveryMs,
+    ...(options.onProgress === undefined
+      ? {}
+      : {
+          onProgress: (progress: CrawlProgress) =>
+            options.onProgress?.(formatProgress(progress), progress),
+        }),
+    checkpointEveryPages: limits.checkpointEveryPages,
+    ...(options.onCheckpoint === undefined
+      ? {}
+      : {
+          onCheckpoint: (checkpoint: CrawlCheckpoint, progress: CrawlProgress) =>
+            options.onCheckpoint?.(crawlStateArtifact(start.href, checkpoint, progress)) ??
+            Promise.resolve(),
+        }),
+  });
+
+  const pages: CrawlReport["pages"] = [];
+  for (const record of result.pages) {
+    let entry = recorded.get(record.url);
+    if (entry === undefined) {
+      const stored = await knowledge.getPage(collection, record.url);
+      if (stored === null) continue;
+      entry = { page: stored, cached: true, flagged: await flaggedFor(stored.documentId) };
+    }
+    pages.push({
+      url: entry.page.url,
+      title: entry.page.title,
+      documentId: entry.page.documentId,
+      chunks: entry.page.chunkCount,
+      flaggedChunks: entry.flagged,
+      cached: entry.cached,
+    });
   }
-  report.durationMs = Math.max(0, ctx.now().getTime() - startedAt);
-  return report;
+  return {
+    collection,
+    startUrl: start.href,
+    pages,
+    skipped: result.skipped.slice(0, limits.maxSkippedReported).map((skip) => ({
+      url: skip.url,
+      reason: `${skip.code}: ${skip.reason}`.slice(0, 200),
+    })),
+    bytes: result.stats.bytes,
+    sitemapUrls: result.stats.sitemapUrls,
+    durationMs: Math.max(0, ctx.now().getTime() - startedAt),
+  };
 }

@@ -1,6 +1,9 @@
+import { Readable, Transform } from "node:stream";
+import { createGunzip, gzipSync } from "node:zlib";
+
 import { FetchBlockedError, createFetcher, type Fetcher } from "@delegate/runtime/security";
 
-import { type Network, type Route } from "./schema";
+import { type CrawlGenerator, type Network, type Route } from "./schema";
 
 export const PUBLIC_ADDRESS = "93.184.215.14";
 
@@ -104,18 +107,123 @@ export function recordingFetcher(
       : { allowPublicIpLiterals: options.allowPublicIpLiterals }),
   });
   const blocks: string[] = [];
+  const recorded = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof FetchBlockedError && SECURITY_FETCH_CODES.has(error.code))
+        blocks.push(error.code);
+      throw error;
+    }
+  };
   return {
     blocks,
-    fetch: async (request) => {
-      try {
-        return await inner.fetch(request);
-      } catch (error) {
-        if (error instanceof FetchBlockedError && SECURITY_FETCH_CODES.has(error.code))
-          blocks.push(error.code);
-        throw error;
-      }
-    },
+    fetch: (request) => recorded(() => inner.fetch(request)),
+    download: (request) => recorded(() => inner.download(request)),
     pagesFetched: () => inner.pagesFetched(),
     sitemapsFor: (url) => inner.sitemapsFor(url),
   };
+}
+
+function html(body: string): Response {
+  return new Response(
+    `<!doctype html><html lang="en"><head><title>Page</title></head><body><main>${body}</main></body></html>`,
+    {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    },
+  );
+}
+
+function filler(seed: number): string {
+  let state = seed + 11;
+  return Array.from({ length: 50 }, () => {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return `term${state % 800}`;
+  }).join(" ");
+}
+
+function generated(
+  generator: CrawlGenerator,
+  url: URL,
+  counter: { decoded: number },
+): Response | undefined {
+  switch (generator.kind) {
+    case "calendar": {
+      if (!url.href.startsWith(generator.prefix)) return undefined;
+      const month = Number(url.searchParams.get("month") ?? "0");
+      return html(
+        `<p>Events in month ${month}. ${filler(month)}</p><a href="${generator.prefix}calendar?month=${month + 1}">Next month</a> <a href="${generator.prefix}calendar?month=${month - 1}">Previous month</a>`,
+      );
+    }
+    case "pagination": {
+      if (!url.href.startsWith(generator.prefix)) return undefined;
+      const page = Number(url.searchParams.get("page") ?? "1");
+      return html(
+        `<p>Archive page ${page}. ${filler(1_000 + page)}</p><a href="${generator.prefix}?page=${page + 1}">Older posts</a>`,
+      );
+    }
+    case "repeating-path": {
+      if (!url.href.startsWith(generator.prefix)) return undefined;
+      const depth = url.pathname.split("/").length;
+      return html(
+        `<p>Section at depth ${depth}. ${filler(2_000 + depth)}</p><a href="loop/">More</a>`,
+      );
+    }
+    case "link-flood": {
+      if (url.href !== generator.url) return undefined;
+      const links = Array.from(
+        { length: generator.links },
+        (_, index) => `<a href="/flood/${index}">${index}</a>`,
+      ).join(" ");
+      return html(`<p>${filler(3)}</p>${links}`);
+    }
+    case "sitemap-flood": {
+      if (url.href !== generator.url) return undefined;
+      const entries = Array.from(
+        { length: generator.urls },
+        (_, index) => `<url><loc>${url.origin}/flood/${index}</loc></url>`,
+      ).join("");
+      return new Response(`<urlset>${entries}</urlset>`, {
+        headers: { "content-type": "application/xml" },
+      });
+    }
+    case "gzip-bomb": {
+      if (url.href !== generator.url) return undefined;
+      const compressed = gzipSync(Buffer.alloc(generator.decodedBytes, 0x20));
+      const count = new Transform({
+        transform(chunk: Buffer, _encoding, done) {
+          counter.decoded += chunk.byteLength;
+          done(null, chunk);
+        },
+      });
+      const decoded = Readable.from([compressed]).pipe(createGunzip()).pipe(count);
+      return new Response(Readable.toWeb(decoded) as ReadableStream<Uint8Array>, {
+        headers: { "content-type": generator.contentType },
+      });
+    }
+  }
+}
+
+export interface CrawlNetwork extends FakeNetwork {
+  decodedBytes: () => number;
+}
+
+export function crawlNetwork(
+  network: Network | undefined,
+  generators: readonly CrawlGenerator[],
+): CrawlNetwork {
+  const base = fakeNetwork(network);
+  const counter = { decoded: 0 };
+  const fetchImpl: typeof fetch = (input, init) => {
+    const url = requestUrl(input);
+    for (const generator of generators) {
+      const response = generated(generator, url, counter);
+      if (response !== undefined) {
+        base.requests.push(url);
+        return Promise.resolve(response);
+      }
+    }
+    return base.fetchImpl(input, init);
+  };
+  return { ...base, fetchImpl, decodedBytes: () => counter.decoded };
 }

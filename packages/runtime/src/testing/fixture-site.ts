@@ -61,28 +61,28 @@ export const FIXTURE_PAGES: Record<string, () => Response> = {
     html(
       page(
         "Pricing",
-        "<h1>Pricing</h1><p>Robots are leased from 1,900 EUR per robot per month.</p>",
+        "<h1>Pricing</h1><p>Robots are leased from 1,900 EUR per robot per month.</p><p>Leases include maintenance, software updates and a replacement robot within 48 hours.</p>",
       ),
     ),
   [`${FIXTURE_ORIGIN}/customers`]: () =>
     html(
       page(
         "Customers",
-        "<h1>Customers</h1><p>Northwind Logistics cut picking time by 40 percent with Acme.</p>",
+        "<h1>Customers</h1><p>Northwind Logistics cut picking time by 40 percent with Acme.</p><p>Contoso Retail runs 120 Acme robots across three distribution centres.</p>",
       ),
     ),
   [`${FIXTURE_ORIGIN}/careers`]: () =>
     html(
       page(
         "Careers",
-        "<h1>Careers</h1><p>We are hiring robotics engineers in Berlin and Austin.</p>",
+        "<h1>Careers</h1><p>We are hiring robotics engineers in Berlin and Austin.</p><p>Open roles include perception, motion planning and field service engineering.</p>",
       ),
     ),
   [`${FIXTURE_ORIGIN}/vs/robocorp`]: () =>
     html(
       page(
         "Acme vs RoboCorp",
-        "<h1>Acme vs RoboCorp</h1><p>Unlike RoboCorp, Acme robots need no fixed rails.</p>",
+        "<h1>Acme vs RoboCorp</h1><p>Unlike RoboCorp, Acme robots need no fixed rails.</p><p>Acme fleets can be moved to a new aisle layout in one afternoon.</p>",
       ),
     ),
   [`${FIXTURE_ORIGIN}/blog/feed.xml`]: () =>

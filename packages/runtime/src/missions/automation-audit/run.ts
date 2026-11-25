@@ -26,6 +26,7 @@ import {
 import { NoModelAvailableError } from "../../router";
 import { ModelStreamError, withQualityNote, type ModelCallResult } from "../../agent/model-call";
 import { type PromptFile } from "../../prompts";
+import { AUDIT_PROFILE } from "../../crawl/priority";
 import { type Fetcher } from "../../tools/fetch";
 import { NEXT_ACTIONS_KIND, type NextActions } from "../next-actions";
 import {
@@ -77,6 +78,8 @@ export interface AutomationAuditDependencies {
 
 export const AUDIT_LIMITS = {
   crawlPages: 12,
+  crawlBudgetPages: 60,
+  crawlBudgetMs: 20_000,
   targetMs: 150_000,
   gapFillEndsAtMs: 70_000,
   analystFacts: 90,
@@ -380,6 +383,11 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
     readerPrompt: prompts.reader,
     researcherPrompt: prompts.researcher,
     crawlPages: AUDIT_LIMITS.crawlPages,
+    crawl: {
+      profile: AUDIT_PROFILE,
+      maxPages: AUDIT_LIMITS.crawlBudgetPages,
+      maxDurationMs: AUDIT_LIMITS.crawlBudgetMs,
+    },
     clock,
     gapTopics: (facts) => {
       const topics = new Set(facts.map((fact) => fact.topic));

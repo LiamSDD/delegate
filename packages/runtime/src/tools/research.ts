@@ -1,15 +1,19 @@
 import { CAPABILITIES } from "@delegate/policy";
 import { z } from "zod";
 
+import { crawl, type CrawlProgress } from "../crawl/engine";
+import { extractPage, pageSourceText, type ExtractedPage } from "../crawl/extract";
+import { COMPANY_PROFILE, type CrawlProfile } from "../crawl/priority";
+import { normaliseUrl, urlKey } from "../crawl/url";
 import { FetchBlockedError, type FetchedDocument, type Fetcher } from "./fetch";
-import { htmlToText, type HtmlDocument } from "./html";
+import { type HtmlDocument } from "./html";
 import { defineTool, type RegisteredTool, type ToolExecution, type ToolOutcome } from "./registry";
 import { SourceStore, snapshotContent, type SourceDocument, type SourceKind } from "./sources";
-import { parseFeed, parseSitemap } from "./xml";
+import { parseFeed } from "./xml";
 
 export const RESEARCH_LIMITS = {
   defaultCrawlPages: 8,
-  maxCrawlPages: 15,
+  maxCrawlPages: 20,
   maxSitemapFetches: 2,
   maxNameLookups: 2,
   maxFeedItems: 10,
@@ -29,8 +33,32 @@ export interface Discoveries {
   unfetched: string[];
 }
 
+export interface ResearchCrawlSettings {
+  profile: CrawlProfile;
+  maxPages: number;
+  maxDurationMs: number;
+  concurrency?: number;
+}
+
+export const RESEARCH_CRAWL_DEFAULTS: ResearchCrawlSettings = {
+  profile: COMPANY_PROFILE,
+  maxPages: 60,
+  maxDurationMs: 20_000,
+};
+
+export interface CrawledSource {
+  document: FetchedDocument;
+  page: ExtractedPage;
+  score: number;
+  topic?: string;
+  depth: number;
+}
+
 export interface ResearchEnvironment {
   fetcher: Fetcher;
+  crawl: ResearchCrawlSettings;
+  crawled: Map<string, CrawledSource>;
+  onCrawlProgress?: (progress: CrawlProgress) => Promise<void>;
   sources: SourceStore;
   scope: SiteScope;
   siteUrl: string;
@@ -66,9 +94,12 @@ export function createResearchEnvironment(options: {
   siteUrl: string;
   digest: ResearchEnvironment["digest"];
   signal?: AbortSignal;
+  crawl?: Partial<ResearchCrawlSettings>;
 }): ResearchEnvironment {
   return {
     fetcher: options.fetcher,
+    crawl: { ...RESEARCH_CRAWL_DEFAULTS, ...options.crawl },
+    crawled: new Map(),
     sources: new SourceStore(),
     scope: siteScope(options.siteUrl),
     siteUrl: options.siteUrl,
@@ -76,117 +107,6 @@ export function createResearchEnvironment(options: {
     digest: options.digest,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   };
-}
-
-const CATEGORIES: readonly { name: string; keywords: readonly string[] }[] = [
-  {
-    name: "about",
-    keywords: [
-      "about",
-      "about-us",
-      "company",
-      "who-we-are",
-      "our-story",
-      "team",
-      "leadership",
-      "mission",
-    ],
-  },
-  { name: "pricing", keywords: ["pricing", "plans", "price"] },
-  {
-    name: "customers",
-    keywords: [
-      "customers",
-      "customer",
-      "case-studies",
-      "case-study",
-      "success-stories",
-      "testimonials",
-      "clients",
-    ],
-  },
-  {
-    name: "product",
-    keywords: [
-      "product",
-      "products",
-      "platform",
-      "features",
-      "solutions",
-      "services",
-      "how-it-works",
-    ],
-  },
-  { name: "comparisons", keywords: ["vs", "compare", "comparison", "alternatives", "alternative"] },
-  {
-    name: "news",
-    keywords: ["news", "blog", "press", "newsroom", "media", "updates", "changelog"],
-  },
-  { name: "careers", keywords: ["careers", "jobs", "join-us", "hiring", "work-with-us"] },
-];
-const EXCLUDED_SEGMENTS =
-  /^(legal|imprint|impressum|privacy|terms|cookies?|login|signin|sign-in|signup|sign-up|register|cart|checkout|account|search|tag|tags|author|wp-admin|wp-content|cdn-cgi)$/;
-const ASSET_EXTENSION =
-  /\.(png|jpe?g|gif|svg|webp|ico|pdf|zip|gz|mp4|mp3|css|js|json|xml|txt|woff2?)$/i;
-const LOCALE_SEGMENT = /^[a-z]{2}([-_][a-z]{2})?$/i;
-const MAX_CATEGORY_DEPTH = 2;
-
-interface RankedCandidate {
-  url: string;
-  category: number;
-  score: number;
-}
-
-function rankCandidate(url: string): RankedCandidate | undefined {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return undefined;
-  }
-  if (ASSET_EXTENSION.test(parsed.pathname)) return undefined;
-  const segments = parsed.pathname
-    .split("/")
-    .filter((segment) => segment !== "")
-    .map((segment) => segment.toLowerCase());
-  if (segments.some((segment) => EXCLUDED_SEGMENTS.test(segment))) return undefined;
-  const localised =
-    segments[0] !== undefined && LOCALE_SEGMENT.test(segments[0]) && segments[0] !== "vs";
-  const content = localised ? segments.slice(1) : segments;
-  const category =
-    content.length > MAX_CATEGORY_DEPTH
-      ? -1
-      : CATEGORIES.findIndex((candidate) =>
-          content.some((segment) =>
-            candidate.keywords.some(
-              (keyword) => segment === keyword || segment.startsWith(`${keyword}-`),
-            ),
-          ),
-        );
-  const score = 100 - content.length * 5 - (localised ? 30 : 0) - (parsed.search === "" ? 0 : 10);
-  return { url: parsed.href, category, score };
-}
-
-export function rankCandidates(urls: readonly string[], limit: number): string[] {
-  const ranked = [...new Set(urls)]
-    .map(rankCandidate)
-    .filter((candidate): candidate is RankedCandidate => candidate !== undefined)
-    .sort((a, b) => b.score - a.score);
-  const picked: string[] = [];
-  for (let category = 0; category < CATEGORIES.length && picked.length < limit; category += 1) {
-    const best = ranked.find((candidate) => candidate.category === category);
-    if (best !== undefined) picked.push(best.url);
-  }
-  const rest = ranked.filter((candidate) => !picked.includes(candidate.url));
-  const fill = [
-    ...rest.filter((candidate) => candidate.category !== -1),
-    ...rest.filter((candidate) => candidate.category === -1 && candidate.score >= 95),
-  ];
-  for (const candidate of fill) {
-    if (picked.length >= limit) break;
-    picked.push(candidate.url);
-  }
-  return picked;
 }
 
 function fetchError(error: unknown): Error {
@@ -215,10 +135,21 @@ function isHtml(document: FetchedDocument): boolean {
   return document.contentType === "text/html" || document.contentType === "application/xhtml+xml";
 }
 
-function pageText(page: HtmlDocument): string {
-  return [page.description === undefined ? "" : `Description: ${page.description}`, page.text]
-    .filter((part) => part !== "")
-    .join("\n\n");
+function storeExtracted(
+  env: ResearchEnvironment,
+  document: FetchedDocument,
+  page: ExtractedPage,
+  kind: SourceKind,
+): { source: SourceDocument; created: boolean; page: ExtractedPage } {
+  const { document: source, created } = env.sources.add({
+    url: document.finalUrl,
+    title: page.title,
+    kind,
+    fetchedAt: document.fetchedAt,
+    text: pageSourceText(page),
+    hiddenText: page.hiddenText,
+  });
+  return { source, created, page };
 }
 
 function storePage(
@@ -236,16 +167,7 @@ function storePage(
     });
     return { source, created };
   }
-  const page = htmlToText(document.text, document.finalUrl);
-  const { document: source, created } = env.sources.add({
-    url: document.finalUrl,
-    title: page.title,
-    kind,
-    fetchedAt: document.fetchedAt,
-    text: pageText(page),
-    hiddenText: page.hiddenText,
-  });
-  return { source, created, page };
+  return storeExtracted(env, document, extractPage(document.text, document.finalUrl), kind);
 }
 
 const GITHUB_RESERVED = new Set([
@@ -318,87 +240,108 @@ async function outcomeFor(
   };
 }
 
-async function sitemapCandidates(
-  env: ResearchEnvironment,
-  hints: readonly string[],
-): Promise<string[]> {
-  const fromRobots = await env.fetcher.sitemapsFor(env.siteUrl).catch(() => []);
-  const queue = [...new Set([...fromRobots, ...hints, `${env.scope.origin}/sitemap.xml`])].filter(
-    (url) => env.scope.contains(url),
-  );
-  const urls: string[] = [];
-  for (
-    let fetches = 0;
-    fetches < RESEARCH_LIMITS.maxSitemapFetches && queue.length > 0;
-    fetches += 1
-  ) {
-    const next = queue.shift();
-    if (next === undefined) break;
-    try {
-      const document = await fetchDocument(env, next, { accept: "application/xml,text/xml" });
-      const entries = parseSitemap(document.text);
-      urls.push(...entries.urls);
-      const children = entries.sitemaps.filter((url) => env.scope.contains(url));
-      const preferred =
-        children.find((url) => /page|main|site|default|en/i.test(new URL(url).pathname)) ??
-        children[0];
-      if (preferred !== undefined) queue.unshift(preferred);
-      if (entries.urls.length > 0) break;
-    } catch {
-      continue;
-    }
+function readingValue(source: CrawledSource): number {
+  const textBonus = Math.min(20, source.page.mainText.length / 150);
+  const structuredBonus = source.page.structuredLines.length > 0 ? 10 : 0;
+  return source.score + textBonus + structuredBonus;
+}
+
+export function pickForReading(
+  sources: readonly (CrawledSource & { key: string })[],
+  topics: readonly string[],
+  limit: number,
+): (CrawledSource & { key: string })[] {
+  const ranked = [...sources].sort((a, b) => readingValue(b) - readingValue(a));
+  const picked: (CrawledSource & { key: string })[] = [];
+  const take = (source: CrawledSource & { key: string }) => {
+    if (picked.length < limit && !picked.includes(source)) picked.push(source);
+  };
+  const home = ranked.find((source) => source.depth === 0);
+  if (home !== undefined) take(home);
+  for (const topic of topics) {
+    const best = ranked.find((source) => source.topic === topic && !picked.includes(source));
+    if (best !== undefined) take(best);
   }
-  return urls;
+  for (const source of ranked) take(source);
+  return picked;
 }
 
 function crawlSite(env: ResearchEnvironment): RegisteredTool {
   return defineTool({
     name: "crawl_site",
     description:
-      "Crawl the company's own website politely (robots.txt honoured, same site only): homepage, sitemap and the most informative pages such as about, pricing, customers, product, comparisons, news and careers. Returns quarantined facts, never raw page text.",
+      "Crawl the company's own website politely (robots.txt and Crawl-delay honoured, per-host rate limits, same site only): sitemaps, feeds and links, ranked by relevance (about, pricing, product, customers, careers, docs, news, security, legal), then keep the most informative pages for reading. Returns quarantined facts, never raw page text.",
     capability: CAPABILITIES.webFetch,
     inputSchema: z.object({
       maxPages: z.number().int().min(1).max(RESEARCH_LIMITS.maxCrawlPages).optional(),
     }),
     targetDomain: () => hostOf(env.siteUrl),
     summariseArgs: (input) =>
-      `crawl ${env.scope.root} (up to ${input.maxPages ?? RESEARCH_LIMITS.defaultCrawlPages} pages)`,
+      `crawl ${env.scope.root} (up to ${env.crawl.maxPages} pages, read ${input.maxPages ?? RESEARCH_LIMITS.defaultCrawlPages})`,
     execute: async (input, execution) => {
-      const maxPages = input.maxPages ?? RESEARCH_LIMITS.defaultCrawlPages;
-      const created: SourceDocument[] = [];
-      const skipped: string[] = [];
-      let links: string[] = [];
-      let hints: string[] = [];
-      if (!env.sources.has(env.siteUrl)) {
-        const home = storePage(env, await fetchDocument(env, env.siteUrl), "company_site");
-        if (home.created) created.push(home.source);
-        if (home.page !== undefined) {
-          recordDiscoveries(env, home.page);
-          links = home.page.links.map((link) => link.href);
-          hints = home.page.sitemapHints;
-        }
+      const readPages = input.maxPages ?? RESEARCH_LIMITS.defaultCrawlPages;
+      const result = await crawl({
+        fetcher: env.fetcher,
+        seeds: [env.siteUrl],
+        scope: (url) => env.scope.contains(url),
+        profile: env.crawl.profile,
+        budget: { maxPages: env.crawl.maxPages, maxDurationMs: env.crawl.maxDurationMs },
+        ...(env.crawl.concurrency === undefined ? {} : { concurrency: env.crawl.concurrency }),
+        ...(env.signal === undefined ? {} : { signal: env.signal }),
+        ...(env.onCrawlProgress === undefined ? {} : { onProgress: env.onCrawlProgress }),
+        onPage: (crawled) => {
+          if (crawled.kind !== "fetched") return Promise.resolve(false);
+          env.crawled.set(crawled.entry.key, {
+            document: crawled.document,
+            page: crawled.page,
+            score: crawled.entry.score,
+            depth: crawled.entry.depth,
+            ...(crawled.entry.topic === undefined ? {} : { topic: crawled.entry.topic }),
+          });
+          return Promise.resolve(true);
+        },
+      });
+      const crawled = [...env.crawled.entries()].map(([key, source]) => ({ key, ...source }));
+      if (crawled.length === 0) {
+        const reasons = result.skipped
+          .slice(0, 3)
+          .map((skip) => `${skip.url}: ${skip.reason}`)
+          .join("; ");
+        throw new Error(
+          `No page of ${env.scope.root} could be read (${reasons || result.stopReason})`,
+        );
       }
-      const fromSitemap = await sitemapCandidates(env, hints);
-      const candidates = [...links, ...fromSitemap].filter(
-        (url) => env.scope.contains(url) && !env.sources.has(url),
+      const home = crawled.find((source) => source.depth === 0) ?? crawled[0];
+      if (home !== undefined) recordDiscoveries(env, home.page);
+      for (const source of crawled)
+        for (const feed of source.page.feeds)
+          if (
+            env.scope.contains(feed.href) &&
+            env.discoveries.feeds.length < 3 &&
+            !env.discoveries.feeds.includes(feed.href)
+          )
+            env.discoveries.feeds.push(feed.href);
+      const picked = pickForReading(
+        crawled,
+        env.crawl.profile.topics.map((topic) => topic.name),
+        readPages,
       );
-      const picked = rankCandidates(candidates, Math.max(0, maxPages - 1));
-      env.discoveries.unfetched = rankCandidates(
-        candidates.filter((url) => !picked.includes(url)),
-        RESEARCH_LIMITS.maxUnfetchedHints,
-      );
-      const results = await Promise.allSettled(picked.map((url) => fetchDocument(env, url)));
-      for (const [index, result] of results.entries()) {
-        if (result.status === "rejected") {
-          skipped.push(
-            `${picked[index] ?? ""}: ${result.reason instanceof Error ? result.reason.message : "failed"}`,
-          );
-          continue;
-        }
-        const stored = storePage(env, result.value, "company_site");
+      const created: SourceDocument[] = [];
+      for (const source of picked) {
+        const stored = storeExtracted(env, source.document, source.page, "company_site");
         if (stored.created) created.push(stored.source);
       }
-      const summary = `Fetched ${created.length} page${created.length === 1 ? "" : "s"} from ${env.scope.root}${skipped.length === 0 ? "" : ` (${skipped.length} skipped)`}`;
+      const unread = crawled
+        .filter((source) => !picked.includes(source))
+        .sort((a, b) => readingValue(b) - readingValue(a))
+        .map((source) => source.document.finalUrl);
+      const queued = result.pending.map((entry) => entry.url);
+      env.discoveries.unfetched = [...new Set([...unread, ...queued])].slice(
+        0,
+        RESEARCH_LIMITS.maxUnfetchedHints,
+      );
+      const seconds = (result.stats.durationMs / 1000).toFixed(1);
+      const summary = `Crawled ${crawled.length} page${crawled.length === 1 ? "" : "s"} of ${env.scope.root} in ${seconds} s (${result.stats.skipped} skipped, stop: ${result.stopReason}); kept ${created.length} for reading`;
       return outcomeFor(env, created, execution, summary, `Raw pages from ${env.scope.root}`);
     },
   });
@@ -435,7 +378,12 @@ function fetchPage(env: ResearchEnvironment): RegisteredTool {
           forModel: `${input.url} was already fetched; its facts are in your input.`,
         };
       }
-      const stored = storePage(env, await fetchDocument(env, input.url), kind);
+      const normalised = normaliseUrl(input.url);
+      const cached = normalised === undefined ? undefined : env.crawled.get(urlKey(normalised));
+      const stored =
+        cached === undefined
+          ? storePage(env, await fetchDocument(env, input.url), kind)
+          : storeExtracted(env, cached.document, cached.page, kind);
       if (stored.page !== undefined && kind === "company_site") recordDiscoveries(env, stored.page);
       const documents = stored.created ? [stored.source] : [];
       return outcomeFor(

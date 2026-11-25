@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import type { AppDatabase } from "./db";
 import type { GuestSession } from "./session";
+import { runTarget } from "@/lib/runs/target";
 
 export const GUEST_RUN_BUDGET = { maxTokens: 400_000, maxMicroUsd: 0 } as const;
 export const MAX_RUN_DURATION_MS = 5 * 60_000;
@@ -341,11 +342,10 @@ export async function listRuns(
   );
   return rows.map((run) => {
     const input = inputRecord.safeParse(run.input);
-    const url = input.success && typeof input.data.url === "string" ? input.data.url : null;
     return {
       id: run.id,
       mission: run.mission,
-      target: url === null ? null : new URL(url).hostname.replace(/^www\./, ""),
+      target: input.success ? runTarget(input.data) : null,
       execution: input.success ? executionOf(input.data) : "live",
       status: run.status,
       createdAt: run.createdAt,
@@ -360,7 +360,9 @@ export function isStale(record: RunRecord, now: Date): boolean {
   const age = now.getTime() - record.createdAt.getTime();
   const silence = now.getTime() - (record.lastEventAt ?? record.createdAt).getTime();
   const quietLimit =
-    record.lastEventType === "plan.proposed" ? PLAN_APPROVAL_GRACE_MS : STALE_AFTER_MS;
+    record.lastEventType === "plan.proposed" || record.lastEventType === "ship.approval.requested"
+      ? PLAN_APPROVAL_GRACE_MS
+      : STALE_AFTER_MS;
   return age > MAX_RUN_DURATION_MS && silence > quietLimit;
 }
 

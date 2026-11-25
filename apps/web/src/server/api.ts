@@ -1,9 +1,11 @@
-import { type ForkPlan, MAX_FORK_OBJECTIVE_CHARS } from "@delegate/runtime";
+import type { FindInstallation } from "@delegate/runtime/server";
+import { type ForkPlan, MAX_FORK_OBJECTIVE_CHARS, parseGithubRepoUrl } from "@delegate/runtime";
 import { z } from "zod";
 
 import { RUNNABLE_MISSION_IDS } from "@/lib/m2-contract";
 import { COMPANY_URL_REJECTION_MESSAGES, normaliseCompanyUrl } from "@/lib/runs/company-url";
 import { validatePlanEdit } from "@/lib/runs/plan";
+import { runTarget } from "@/lib/runs/target";
 import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 
 import { authenticateBearer, hasBearer } from "./api-tokens";
@@ -57,9 +59,12 @@ export interface ApiDeps {
     app: AppDatabase,
     session: GuestSession,
   ) => Promise<MissionConnections | undefined>;
+  shipEnabled?: boolean;
+  shipInstallations?: (workspaceId: string) => FindInstallation;
 }
 
 export type ApiErrorCode =
+  | "no_pending_ship"
   | "forbidden_origin"
   | "unsupported_media_type"
   | "payload_too_large"
@@ -81,7 +86,7 @@ export type ApiErrorCode =
 const MAX_BODY_BYTES = 8 * 1024;
 const MAX_PLAN_BODY_BYTES = 64 * 1024;
 
-const NO_STORE = { "Cache-Control": "no-store" };
+export const NO_STORE = { "Cache-Control": "no-store" };
 
 export function apiError(
   status: number,
@@ -103,27 +108,73 @@ export const CreateRunRequestSchema = z
   .strictObject({
     missionId: z.enum(RUNNABLE_MISSION_IDS),
     input: z.strictObject({
-      url: z.string().min(1).max(2048),
+      url: z.string().min(1).max(2048).optional(),
       focus: z.string().trim().min(1).max(500).optional(),
       department: z.string().trim().min(1).max(120).optional(),
       goal: z.string().trim().min(1).max(900).optional(),
       name: z.string().trim().min(1).max(80).optional(),
       opportunityId: z.string().trim().min(1).max(40).optional(),
       fromAuditRunId: z.string().max(100).optional(),
+      ref: z
+        .string()
+        .trim()
+        .regex(/^(?!.*\.\.)(?!\/)[\w./-]{1,200}$/)
+        .optional(),
     }),
     parentRunId: z.uuid().optional(),
   })
   .superRefine((request, ctx) => {
     const buildOnly = ["goal", "name", "opportunityId", "fromAuditRunId"] as const;
-    if (request.missionId === "build-agent") {
+    if (request.missionId !== "custom-goal" && request.input.url === undefined)
+      ctx.addIssue({ code: "custom", path: ["input", "url"], message: "A URL is required" });
+    if (request.missionId === "build-agent" || request.missionId === "custom-goal") {
       if (request.input.goal === undefined)
         ctx.addIssue({ code: "custom", path: ["input", "goal"], message: "A goal is required" });
+      if (request.missionId === "build-agent") return;
+      if (request.input.goal !== undefined && request.input.goal.length < 3)
+        ctx.addIssue({ code: "custom", path: ["input", "goal"], message: "The goal is too short" });
+      for (const key of [
+        "focus",
+        "department",
+        "name",
+        "opportunityId",
+        "fromAuditRunId",
+        "ref",
+      ] as const)
+        if (request.input[key] !== undefined)
+          ctx.addIssue({ code: "custom", path: ["input", key], message: "Not for custom-goal" });
       return;
     }
     for (const key of buildOnly)
       if (request.input[key] !== undefined)
         ctx.addIssue({ code: "custom", path: ["input", key], message: "Only for build-agent" });
+    if (request.missionId !== "repo-xray" && request.input.ref !== undefined)
+      ctx.addIssue({ code: "custom", path: ["input", "ref"], message: "Only for repo-xray" });
+    if (
+      request.missionId === "repo-xray" &&
+      (request.input.focus !== undefined || request.input.department !== undefined)
+    )
+      ctx.addIssue({ code: "custom", path: ["input"], message: "Repo X-ray takes a URL and ref" });
   });
+
+export const GITHUB_URL_REJECTION =
+  "Enter a public GitHub repository, for example github.com/owner/repo.";
+
+function normaliseRunUrl(
+  request: CreateRunRequest,
+): { ok: true; url: string | undefined } | { ok: false; message: string } {
+  if (request.input.url === undefined) return { ok: true, url: undefined };
+  if (request.missionId === "repo-xray") {
+    const repo = parseGithubRepoUrl(request.input.url);
+    return repo === null
+      ? { ok: false, message: GITHUB_URL_REJECTION }
+      : { ok: true, url: `https://github.com/${repo.owner}/${repo.repo}` };
+  }
+  const url = normaliseCompanyUrl(request.input.url);
+  return url.ok
+    ? { ok: true, url: url.url }
+    : { ok: false, message: COMPANY_URL_REJECTION_MESSAGES[url.reason] };
+}
 
 export const PlanDecisionRequestSchema = z.discriminatedUnion("decision", [
   z.strictObject({
@@ -192,11 +243,11 @@ export function serializeSessionCookie(value: string, production: boolean): stri
   ].join("; ");
 }
 
-function retryAfterSeconds(ms: number): string {
+export function retryAfterSeconds(ms: number): string {
   return String(Math.max(1, Math.ceil(ms / 1000)));
 }
 
-async function readJson(
+export async function readJson(
   request: Request,
   maxBytes = MAX_BODY_BYTES,
 ): Promise<{ ok: true; value: unknown } | Response> {
@@ -235,14 +286,9 @@ export async function startRunForSession(
   options: { autoApprovePlan: boolean; headers?: Record<string, string> },
 ): Promise<StartRunResult> {
   const headers = options.headers ?? {};
-  const url = normaliseCompanyUrl(request.input.url);
+  const url = normaliseRunUrl(request);
   if (!url.ok)
-    return {
-      ok: false,
-      response: apiError(400, "invalid_url", COMPANY_URL_REJECTION_MESSAGES[url.reason], {
-        headers,
-      }),
-    };
+    return { ok: false, response: apiError(400, "invalid_url", url.message, { headers }) };
   const quota = deps.guestLimiter.take(session.userId);
   if (!quota.ok) {
     return {
@@ -302,12 +348,6 @@ export async function startRunForSession(
   return { ok: true, runId };
 }
 
-function invalidRequest(error: z.ZodError, message: string): Response {
-  return apiError(400, "invalid_request", message, {
-    issues: error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`),
-  });
-}
-
 export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<Response> {
   if (!allowedOrigin(request)) {
     return apiError(403, "forbidden_origin", "Cross-origin requests cannot start runs.");
@@ -315,9 +355,15 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
   const body = await readJson(request);
   if (body instanceof Response) return body;
   const parsed = CreateRunRequestSchema.safeParse(body.value);
-  if (!parsed.success) return invalidRequest(parsed.error, "The run request is not valid.");
-  const url = normaliseCompanyUrl(parsed.data.input.url);
-  if (!url.ok) return apiError(400, "invalid_url", COMPANY_URL_REJECTION_MESSAGES[url.reason]);
+  if (!parsed.success) {
+    return apiError(400, "invalid_request", "The run request is not valid.", {
+      issues: parsed.error.issues.map(
+        (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
+      ),
+    });
+  }
+  const url = normaliseRunUrl(parsed.data);
+  if (!url.ok) return apiError(400, "invalid_url", url.message);
 
   const ipQuota = deps.ipLimiter.take(clientIp(request));
   if (!ipQuota.ok) {
@@ -363,10 +409,17 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
 
 export function missionInput(
   request: CreateRunRequest,
-  url: string,
+  url: string | undefined,
   parentRunId: string | undefined,
 ): Record<string, unknown> {
-  const { focus, department, goal, name, opportunityId } = request.input;
+  const { focus, department, goal, name, opportunityId, ref } = request.input;
+  if (request.missionId === "custom-goal") return { goal, ...(url === undefined ? {} : { url }) };
+  if (request.missionId === "repo-xray") {
+    const tree =
+      request.input.url === undefined ? undefined : parseGithubRepoUrl(request.input.url)?.ref;
+    const chosen = ref ?? tree;
+    return { url, ...(chosen === undefined ? {} : { ref: chosen }) };
+  }
   if (request.missionId === "build-agent") {
     return {
       url,
@@ -396,7 +449,14 @@ export async function callerFor(
   return session === null ? notFound() : { app, session, bearer: false };
 }
 
-const guestFor = callerFor;
+export async function guestFor(
+  request: Request,
+  deps: ApiDeps,
+): Promise<{ app: AppDatabase; session: GuestSession } | null> {
+  const app = await deps.app();
+  const session = await readGuest(app, readCookie(request, SESSION_COOKIE), deps.secret());
+  return session === null ? null : { app, session };
+}
 
 async function freshRecord(
   app: AppDatabase,
@@ -411,11 +471,10 @@ async function freshRecord(
 
 export function runSummary(record: RunRecord) {
   const input = missionInputOf(record.input);
-  const url = typeof input.url === "string" ? input.url : null;
   return {
     id: record.id,
     mission: record.mission,
-    target: url === null ? null : new URL(url).hostname.replace(/^www\./, ""),
+    target: runTarget(input),
     input,
     execution: record.execution,
     status: record.status,
@@ -435,7 +494,7 @@ export async function handleGetRun(
   runId: string,
   deps: ApiDeps,
 ): Promise<Response> {
-  const guest = await guestFor(request, deps);
+  const guest = await callerFor(request, deps);
   if (guest instanceof Response) return guest;
   const record = await freshRecord(guest.app, guest.session, runId, deps);
   if (record === null) return notFound();
@@ -474,7 +533,7 @@ export async function handleRunEvents(
   runId: string,
   deps: ApiDeps,
 ): Promise<Response> {
-  const guest = await guestFor(request, deps);
+  const guest = await callerFor(request, deps);
   if (guest instanceof Response) return guest;
   const { app, session } = guest;
   const record = await freshRecord(app, session, runId, deps);
@@ -512,7 +571,7 @@ export async function handleCancelRun(
   if (!allowedOrigin(request)) {
     return apiError(403, "forbidden_origin", "Cross-origin requests cannot stop runs.");
   }
-  const guest = await guestFor(request, deps);
+  const guest = await callerFor(request, deps);
   if (guest instanceof Response) return guest;
   const record = await getRunRecord(guest.app, guest.session.userId, runId);
   if (record === null) return notFound();
@@ -541,7 +600,7 @@ export async function handleGetArtifact(
   artifactId: string,
   deps: ApiDeps,
 ): Promise<Response> {
-  const guest = await guestFor(request, deps);
+  const guest = await callerFor(request, deps);
   if (guest instanceof Response) return guest;
   if (artifactId.length > 200) return notFound();
   const artifact = await artifactContent(guest.app, guest.session.userId, runId, artifactId);
@@ -557,7 +616,7 @@ export async function handlePlanDecision(
   if (!allowedOrigin(request)) {
     return apiError(403, "forbidden_origin", "Cross-origin requests cannot decide plans.");
   }
-  const guest = await guestFor(request, deps);
+  const guest = await callerFor(request, deps);
   if (guest instanceof Response) return guest;
   const record = await getRunRecord(guest.app, guest.session.userId, runId);
   if (record === null) return notFound();
@@ -658,7 +717,7 @@ export async function handleForkRun(
     });
   }
   try {
-    const guest = await guestFor(request, deps);
+    const guest = await callerFor(request, deps);
     if (guest instanceof Response) return guest;
     const { app, session } = guest;
     const parent = await getRunRecord(app, session.userId, runId);

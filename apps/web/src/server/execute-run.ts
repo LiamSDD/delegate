@@ -1,12 +1,13 @@
-import { holdLease, type RunLease } from "@delegate/runtime/server";
-import { redactPii, type RunEvent } from "@delegate/runtime";
+import { type FindInstallation, holdLease, type RunLease } from "@delegate/runtime/server";
+import { type AwaitShipApproval, redactPii, type RunEvent } from "@delegate/runtime";
 
 import type { AppDatabase } from "./db";
-import type { RunnableMissionId } from "@/lib/m2-contract";
+import { type ExecutableMissionId, SHIP_MISSION_ID } from "@/lib/m2-contract";
 
 import type { MissionConnections, MissionRunner } from "./mission-runner";
 import { type AwaitPlanApproval, createPlanApprovalWaiter } from "./plan-approval";
 import type { RunRegistry } from "./run-registry";
+import { createShipApprovalWaiter } from "./ship-approval";
 import {
   appendEvent,
   type EventDraft,
@@ -28,12 +29,14 @@ function publicError(error: unknown): { message: string; redactions: number } {
 export interface ExecuteRunOptions {
   app: AppDatabase;
   ctx: RunContext;
-  missionId: RunnableMissionId;
+  missionId: ExecutableMissionId;
   input: Record<string, unknown>;
   runner: MissionRunner;
   registry: RunRegistry;
   autoApprovePlan?: boolean;
   awaitPlanApproval?: AwaitPlanApproval;
+  awaitShipApproval?: AwaitShipApproval;
+  findInstallation?: FindInstallation;
   lease?: RunLease;
   resumeFrom?: readonly RunEvent[];
   connections?: MissionConnections;
@@ -86,6 +89,7 @@ async function executeHeld(
       input: options.input,
       emit,
       signal,
+      scope: { workspaceId: ctx.workspaceId, userId: ctx.userId },
       ...(options.resumeFrom === undefined ? {} : { resumeFrom: options.resumeFrom }),
       ...(options.connections === undefined ? {} : { connections: options.connections }),
       planApprover:
@@ -95,6 +99,12 @@ async function executeHeld(
       awaitPlanApproval:
         options.awaitPlanApproval ??
         createPlanApprovalWaiter({ app, ctx, autoApprove: options.autoApprovePlan ?? false }),
+      ...(options.missionId === SHIP_MISSION_ID
+        ? { awaitShipApproval: options.awaitShipApproval ?? createShipApprovalWaiter({ app, ctx }) }
+        : {}),
+      ...(options.findInstallation === undefined
+        ? {}
+        : { findInstallation: options.findInstallation }),
     });
     if (!progress.terminal && !signal.aborted) {
       await finish(

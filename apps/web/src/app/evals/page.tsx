@@ -390,7 +390,7 @@ function Redteam({ state }: { state: RedteamState }) {
         <p>
           {state.status === "absent"
             ? "No attack success rate is shown until there is a recorded run. "
-            : "packages/evals/results/redteam.json does not match the red-team result schema. "}
+            : "packages/evals/results/redteam.json does not match the red-team report schema. "}
           Run <Code>pnpm redteam</Code> to write <Code>packages/evals/results/redteam.json</Code>.
         </p>
       </Empty>
