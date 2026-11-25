@@ -39,6 +39,7 @@ import {
 import { runBuildAgent } from "./missions/build-agent/run";
 import { createMemoryAssistantStore, type AssistantStore } from "./missions/build-agent/schema";
 import { runCompanyXray } from "./missions/company-xray/run";
+import { runCustomGoal } from "./missions/custom-goal/run";
 import { type AwaitPlanApproval } from "./plan-approval";
 import { parsePromptFile, type PromptFile } from "./prompts";
 import { createAnthropicProvider } from "./providers/anthropic";
@@ -91,6 +92,7 @@ export const RUNTIME_PROMPT_FILES = {
   gaps: "build-agent.gaps.v1.md",
   answer: "assistant.answer.v1.md",
   rerank: "retrieval.rerank.v1.md",
+  goalSynthesis: "custom-goal.synthesis.v1.md",
 } as const;
 
 export const BUILD_AGENT_FETCH_PAGES = 80;
@@ -320,6 +322,9 @@ async function executeMission(
       ...(restorable && resume !== undefined ? { existingArtifacts: resume.artifacts } : {}),
       run,
     });
+  } else if (mission.id === "custom-goal") {
+    const input = MISSIONS["custom-goal"].inputSchema.parse(parsed.data);
+    status = await runCustomGoal({ ctx, input, fetcher, prompts, run });
   } else {
     const input = MISSIONS["company-xray"].inputSchema.parse(parsed.data);
     status = await runCompanyXray({ ctx, input, fetcher, prompts, run });

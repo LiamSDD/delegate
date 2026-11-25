@@ -7,6 +7,8 @@ import { ASSISTANT_KIND, AssistantArtifactSchema } from "./build-agent/schema";
 import { CompanyXrayBriefSchema } from "./company-xray/brief";
 import { CompanyXrayInputSchema } from "./company-xray/input";
 import { XRAY_PLAN } from "./company-xray/plan";
+import { CustomGoalInputSchema } from "./custom-goal/input";
+import { GOAL_BRIEF_KIND, GoalBriefSchema } from "./custom-goal/schema";
 
 export const MISSIONS = {
   "company-xray": {
@@ -39,6 +41,16 @@ export const MISSIONS = {
     deliverableKind: ASSISTANT_KIND,
     capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
   },
+  "custom-goal": {
+    id: "custom-goal",
+    title: "Custom goal",
+    description:
+      "Any goal in plain language. The planner composes a 3–8 step plan from the existing research, reading, synthesis and critic steps; a company or domain named in the goal is resolved (typed domain, else Wikidata). Deliverable: a cited goal brief with findings by workstream, a ranked action plan mapped to follow-up missions, and risks.",
+    inputSchema: CustomGoalInputSchema,
+    deliverableSchema: GoalBriefSchema,
+    deliverableKind: GOAL_BRIEF_KIND,
+    capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
+  },
 } as const;
 
 export type MissionId = keyof typeof MISSIONS;
@@ -48,3 +60,4 @@ export * from "./company-xray";
 export * from "./automation-audit";
 export * from "./next-actions";
 export * from "./build-agent";
+export * from "./custom-goal";
