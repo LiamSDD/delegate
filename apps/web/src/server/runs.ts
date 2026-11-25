@@ -12,7 +12,7 @@ import {
   type TenantTx,
   withTenant,
 } from "@delegate/db";
-import type { RunEvent, RunEventType, RunStatus } from "@delegate/runtime";
+import type { AutopilotLink, RunEvent, RunEventType, RunStatus } from "@delegate/runtime";
 import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -90,6 +90,8 @@ export async function createRunRecord(
     input: Record<string, unknown>;
     execution: Execution;
     parentRunId?: string;
+    runId?: string;
+    autopilot?: AutopilotLink;
   },
 ): Promise<{ runId: string; event: RunEvent }> {
   const storedInput =
@@ -100,6 +102,7 @@ export async function createRunRecord(
     const [run] = await tx
       .insert(runs)
       .values({
+        ...(request.runId === undefined ? {} : { id: request.runId }),
         workspaceId: session.workspaceId,
         mission: request.missionId,
         input: storedInput,
@@ -121,6 +124,7 @@ export async function createRunRecord(
             : { ...storedInput, parentRunId: request.parentRunId },
         actor: { type: "guest", id: session.userId },
         budget: { ...GUEST_RUN_BUDGET },
+        ...(request.autopilot === undefined ? {} : { autopilot: request.autopilot }),
       },
     });
     return { runId: run.id, event: runEventFromRow(row) };
@@ -133,6 +137,7 @@ const STATUS_AFTER: Partial<Record<RunEventType, RunStatus>> = {
   "step.started": "running",
   "approval.requested": "awaiting_approval",
   "approval.resolved": "running",
+  "child.started": "running",
   "run.completed": "completed",
   "run.failed": "failed",
 };

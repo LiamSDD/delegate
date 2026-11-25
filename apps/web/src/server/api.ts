@@ -1,5 +1,10 @@
 import type { FindInstallation } from "@delegate/runtime/server";
-import { type ForkPlan, MAX_FORK_OBJECTIVE_CHARS, parseGithubRepoUrl } from "@delegate/runtime";
+import {
+  AUTOPILOT_MISSION_ID,
+  type ForkPlan,
+  MAX_FORK_OBJECTIVE_CHARS,
+  parseGithubRepoUrl,
+} from "@delegate/runtime";
 import { z } from "zod";
 
 import { RUNNABLE_MISSION_IDS } from "@/lib/m2-contract";
@@ -9,6 +14,7 @@ import { runTarget } from "@/lib/runs/target";
 import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 
 import { authenticateBearer, hasBearer } from "./api-tokens";
+import { autopilotGraph, cancelAutopilotChildren, createAutopilotRun } from "./autopilot";
 import type { AppDatabase } from "./db";
 import { reviveOrSweep } from "./durable";
 import { executeRun } from "./execute-run";
@@ -105,7 +111,7 @@ function notFound(): Response {
 
 export const CreateRunRequestSchema = z
   .strictObject({
-    missionId: z.enum(RUNNABLE_MISSION_IDS),
+    missionId: z.enum([...RUNNABLE_MISSION_IDS, AUTOPILOT_MISSION_ID]),
     input: z.strictObject({
       url: z.string().min(1).max(2048).optional(),
       focus: z.string().trim().min(1).max(500).optional(),
@@ -124,9 +130,17 @@ export const CreateRunRequestSchema = z
   })
   .superRefine((request, ctx) => {
     const buildOnly = ["goal", "name", "opportunityId", "fromAuditRunId"] as const;
-    if (request.missionId !== "custom-goal" && request.input.url === undefined)
+    const goalLed =
+      request.missionId === "custom-goal" || request.missionId === AUTOPILOT_MISSION_ID;
+    if (request.missionId === AUTOPILOT_MISSION_ID && request.parentRunId !== undefined)
+      ctx.addIssue({
+        code: "custom",
+        path: ["parentRunId"],
+        message: "Autopilot runs cannot be children (maximum depth 1)",
+      });
+    if (!goalLed && request.input.url === undefined)
       ctx.addIssue({ code: "custom", path: ["input", "url"], message: "A URL is required" });
-    if (request.missionId === "build-agent" || request.missionId === "custom-goal") {
+    if (request.missionId === "build-agent" || goalLed) {
       if (request.input.goal === undefined)
         ctx.addIssue({ code: "custom", path: ["input", "goal"], message: "A goal is required" });
       if (request.missionId === "build-agent") return;
@@ -141,7 +155,11 @@ export const CreateRunRequestSchema = z
         "ref",
       ] as const)
         if (request.input[key] !== undefined)
-          ctx.addIssue({ code: "custom", path: ["input", key], message: "Not for custom-goal" });
+          ctx.addIssue({
+            code: "custom",
+            path: ["input", key],
+            message: `Not for ${request.missionId}`,
+          });
       return;
     }
     for (const key of buildOnly)
@@ -288,6 +306,22 @@ export async function startRunForSession(
   const url = normaliseRunUrl(request);
   if (!url.ok)
     return { ok: false, response: apiError(400, "invalid_url", url.message, { headers }) };
+  if (request.missionId === AUTOPILOT_MISSION_ID) {
+    const { goal } = request.input;
+    if (goal === undefined)
+      return {
+        ok: false,
+        response: apiError(400, "invalid_request", "A goal is required.", { headers }),
+      };
+    const runId = await createAutopilotRun(
+      app,
+      session,
+      { goal, ...(url.url === undefined ? {} : { url: url.url }) },
+      deps,
+    );
+    return { ok: true, runId };
+  }
+  const missionId = request.missionId;
   const quota = deps.guestLimiter.take(session.userId);
   if (!quota.ok) {
     return {
@@ -335,7 +369,7 @@ export async function startRunForSession(
     executeRun({
       app,
       ctx,
-      missionId: request.missionId,
+      missionId,
       input,
       runner: runner.run,
       registry: deps.registry,
@@ -412,7 +446,8 @@ export function missionInput(
   parentRunId: string | undefined,
 ): Record<string, unknown> {
   const { focus, department, goal, name, opportunityId, ref } = request.input;
-  if (request.missionId === "custom-goal") return { goal, ...(url === undefined ? {} : { url }) };
+  if (request.missionId === "custom-goal" || request.missionId === AUTOPILOT_MISSION_ID)
+    return { goal, ...(url === undefined ? {} : { url }) };
   if (request.missionId === "repo-xray") {
     const tree =
       request.input.url === undefined ? undefined : parseGithubRepoUrl(request.input.url)?.ref;
@@ -562,6 +597,24 @@ export async function handleRunEvents(
   return new Response(stream, { status: 200, headers: SSE_HEADERS });
 }
 
+export async function handleRunChildren(
+  request: Request,
+  runId: string,
+  deps: ApiDeps,
+): Promise<Response> {
+  const guest = await callerFor(request, deps);
+  if (guest instanceof Response) return guest;
+  const record = await freshRecord(guest.app, guest.session, runId, deps);
+  if (record === null) return notFound();
+  if (record.mission !== AUTOPILOT_MISSION_ID)
+    return Response.json({ children: [] }, { headers: NO_STORE });
+  const events = await readAllEvents(guest.app, guest.session.userId, runId);
+  return Response.json(
+    { children: await autopilotGraph(guest.app, guest.session.userId, events) },
+    { headers: NO_STORE },
+  );
+}
+
 export async function handleCancelRun(
   request: Request,
   runId: string,
@@ -590,6 +643,8 @@ export async function handleCancelRun(
     throw error;
   }
   const aborted = deps.registry.abort(runId, "cancelled by user");
+  if (record.mission === AUTOPILOT_MISSION_ID)
+    await cancelAutopilotChildren(guest.app, guest.session.userId, runId, deps);
   return Response.json({ cancelled: true, aborted }, { headers: NO_STORE });
 }
 
