@@ -2,6 +2,12 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { EvolutionLogSchema, type EvolutionLog } from "@delegate/evals/evolution";
+import { LearnedRoutingSchema, type LearnedRouting } from "@delegate/evals/routing";
+import {
+  MISSION_TARGETS,
+  TrainingRecordSchema,
+  type TrainingRecord,
+} from "@delegate/evals/training";
 import {
   CalibrationFileSchema,
   EVAL_MISSIONS,
@@ -16,6 +22,8 @@ import {
   type ResultMetric,
   type ResultScoreboard,
 } from "@delegate/evals/results";
+import { housePlaybookKeyOfFile, parseHousePlaybook, parsePromptFile } from "@delegate/runtime";
+import { RUNTIME_PROMPT_FILES } from "@delegate/runtime/server";
 import { z } from "zod";
 
 import { resolveRepoRoot } from "./db";
@@ -48,7 +56,12 @@ export type RedteamReport = z.infer<typeof RedteamReportSchema>;
 export type RedteamState =
   { status: "absent" } | { status: "invalid" } | { status: "ok"; report: RedteamReport };
 
-const NON_MISSION_DIRS: ReadonlySet<string> = new Set(["evolution", "calibration", "runs"]);
+const NON_MISSION_DIRS: ReadonlySet<string> = new Set([
+  "evolution",
+  "calibration",
+  "runs",
+  "training",
+]);
 
 export interface LoadedResults {
   files: EvalResultFile[];
@@ -308,5 +321,354 @@ export function buildDashboard(loaded: LoadedResults): EvalsDashboard {
     ),
     evolution: evolutionRows(loaded.evolution),
     invalid: [...loaded.invalid, ...unknown.map((mission) => `${mission}/ (unknown mission)`)],
+  };
+}
+
+export interface LoadedTraining {
+  records: TrainingRecord[];
+  invalid: string[];
+}
+
+export function loadTraining(trainingDir: string): LoadedTraining {
+  const loaded: LoadedTraining = { records: [], invalid: [] };
+  for (const entry of jsonFiles(trainingDir)) {
+    const record = readJson(path.join(trainingDir, entry), TrainingRecordSchema);
+    if (record !== undefined && entry === `${record.id}.json`) loaded.records.push(record);
+    else loaded.invalid.push(`training/${entry}`);
+  }
+  loaded.records.sort(
+    (a, b) => b.finishedAt.localeCompare(a.finishedAt) || b.id.localeCompare(a.id),
+  );
+  return loaded;
+}
+
+export interface TrainingArmView {
+  source: TrainingRecord["arms"]["baseline"]["source"];
+  mean: number | null;
+  lower: number | null;
+  upper: number | null;
+  n: number;
+  errored: number;
+}
+
+export interface TrainingDelta {
+  kind: "paired" | "pooled";
+  value: number;
+  lower: number | null;
+  upper: number | null;
+  pValue: number;
+  units: string;
+}
+
+export interface TrainingRow {
+  id: string;
+  mission: EvalMission;
+  title: string;
+  round: number;
+  kind: TrainingRecord["kind"];
+  finishedAt: string;
+  status: TrainingRecord["decision"]["status"];
+  change: string;
+  baseline: TrainingArmView;
+  candidate: TrainingArmView | null;
+  delta: TrainingDelta | null;
+  alpha: number;
+  comparisons: number;
+  reasons: string[];
+  promotedFile: string | null;
+  apply: string | null;
+  tokens: number;
+  wallMs: number;
+  models: string[];
+  redteam: string | null;
+}
+
+function armView(arm: TrainingRecord["arms"]["baseline"]): TrainingArmView {
+  return {
+    source: arm.source,
+    mean: arm.score.mean,
+    lower: arm.score.lower,
+    upper: arm.score.upper,
+    n: arm.score.n,
+    errored: arm.errored,
+  };
+}
+
+function changeLabel(record: TrainingRecord): string {
+  const { prompt, playbook } = record.change;
+  if (prompt !== null) return `${prompt.name} v${prompt.from} → v${prompt.to}`;
+  if (playbook !== null)
+    return `house playbook ${playbook.key} v${playbook.from} → v${playbook.to} (${playbook.entries} ${playbook.entries === 1 ? "entry" : "entries"})`;
+  return record.kind === "prompt" ? "no prompt candidate" : "no playbook candidate";
+}
+
+function deltaOf(record: TrainingRecord): TrainingDelta | null {
+  const { paired, welch } = record.comparison;
+  if (paired !== null)
+    return {
+      kind: "paired",
+      value: paired.delta,
+      lower: paired.lower,
+      upper: paired.upper,
+      pValue: paired.pValue,
+      units: `${paired.cases} cases`,
+    };
+  if (welch !== null)
+    return {
+      kind: "pooled",
+      value: welch.delta,
+      lower: null,
+      upper: null,
+      pValue: welch.pValue,
+      units: "pooled trials",
+    };
+  return null;
+}
+
+export function trainingRows(records: readonly TrainingRecord[]): TrainingRow[] {
+  return [...records]
+    .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt) || b.id.localeCompare(a.id))
+    .map((record) => ({
+      id: record.id,
+      mission: record.mission,
+      title: EVAL_MISSION_INFO[record.mission].title,
+      round: record.round,
+      kind: record.kind,
+      finishedAt: record.finishedAt,
+      status: record.decision.status,
+      change: changeLabel(record),
+      baseline: armView(record.arms.baseline),
+      candidate: record.arms.candidate === null ? null : armView(record.arms.candidate),
+      delta: deltaOf(record),
+      alpha: record.comparison.alpha,
+      comparisons: record.comparison.comparisons,
+      reasons: record.decision.reasons,
+      promotedFile: record.promotion?.file ?? null,
+      apply: record.promotion?.apply ?? null,
+      tokens: record.tokens,
+      wallMs: record.wallMs,
+      models: record.models.map(
+        (entry) => `${entry.role} ${entry.provider}/${entry.model} ×${entry.calls}`,
+      ),
+      redteam:
+        record.redteam === null
+          ? null
+          : `${record.redteam.successes}/${record.redteam.attacks} attacks succeeded`,
+    }));
+}
+
+export interface LineageStep {
+  from: number;
+  to: number;
+  recordId: string;
+  finishedAt: string;
+}
+
+export interface MissionLineage {
+  mission: EvalMission;
+  title: string;
+  steps: number;
+  promoted: number;
+  prompts: { name: string; steps: LineageStep[] }[];
+  playbooks: { key: string; steps: LineageStep[] }[];
+}
+
+export function trainingLineage(records: readonly TrainingRecord[]): MissionLineage[] {
+  return EVAL_MISSIONS.map((mission) => {
+    const own = records
+      .filter((record) => record.mission === mission)
+      .sort((a, b) => a.finishedAt.localeCompare(b.finishedAt) || a.id.localeCompare(b.id));
+    const promoted = own.filter((record) => record.decision.status === "promoted");
+    const prompts = new Map<string, LineageStep[]>();
+    const playbooks = new Map<string, LineageStep[]>();
+    for (const record of promoted) {
+      const step = { recordId: record.id, finishedAt: record.finishedAt };
+      const { prompt, playbook } = record.change;
+      if (prompt !== null)
+        prompts.set(prompt.name, [
+          ...(prompts.get(prompt.name) ?? []),
+          { from: prompt.from, to: prompt.to, ...step },
+        ]);
+      if (playbook !== null)
+        playbooks.set(playbook.key, [
+          ...(playbooks.get(playbook.key) ?? []),
+          { from: playbook.from, to: playbook.to, ...step },
+        ]);
+    }
+    return {
+      mission,
+      title: EVAL_MISSION_INFO[mission].title,
+      steps: own.length,
+      promoted: promoted.length,
+      prompts: [...prompts.entries()].map(([name, steps]) => ({ name, steps })),
+      playbooks: [...playbooks.entries()].map(([key, steps]) => ({ key, steps })),
+    };
+  });
+}
+
+export interface PromptCatalogEntry {
+  name: string;
+  version: number;
+  status: string;
+}
+
+export function loadPromptCatalog(promptsDir: string): PromptCatalogEntry[] {
+  if (!existsSync(promptsDir)) return [];
+  return readdirSync(promptsDir)
+    .filter((entry) => /\.v\d+\.md$/.test(entry))
+    .sort()
+    .flatMap((entry) => {
+      try {
+        const prompt = parsePromptFile(entry, readFileSync(path.join(promptsDir, entry), "utf8"));
+        return [{ name: prompt.name, version: prompt.version, status: prompt.status }];
+      } catch {
+        return [];
+      }
+    });
+}
+
+export interface HousePlaybookEntry {
+  key: string;
+  version: number;
+  entries: number;
+  runs: number;
+}
+
+export function loadHousePlaybooks(playbooksDir: string): HousePlaybookEntry[] {
+  if (!existsSync(playbooksDir)) return [];
+  return readdirSync(playbooksDir)
+    .sort()
+    .flatMap((entry) => {
+      const key = housePlaybookKeyOfFile(entry);
+      if (key === undefined) return [];
+      try {
+        const playbook = parseHousePlaybook(
+          key,
+          readFileSync(path.join(playbooksDir, entry), "utf8"),
+        );
+        return playbook === null
+          ? []
+          : [
+              {
+                key,
+                version: playbook.version,
+                entries: playbook.entries.length,
+                runs: playbook.runs,
+              },
+            ];
+      } catch {
+        return [];
+      }
+    });
+}
+
+export interface LivePrompt {
+  key: string;
+  name: string;
+  file: string;
+  liveVersion: number | null;
+  onDisk: number[];
+  trainable: boolean;
+  awaitingPointer: number | null;
+}
+
+export interface MissionPrompts {
+  mission: EvalMission;
+  title: string;
+  prompts: LivePrompt[];
+  playbooks: HousePlaybookEntry[];
+}
+
+const PROMPT_FILE_NAME = /^(.+)\.v(\d+)\.md$/;
+
+export function livePromptVersions(input: {
+  catalog: readonly PromptCatalogEntry[];
+  records: readonly TrainingRecord[];
+  playbooks: readonly HousePlaybookEntry[];
+  promptFiles?: Readonly<Record<string, string>>;
+}): MissionPrompts[] {
+  const files: Readonly<Partial<Record<string, string>>> =
+    input.promptFiles ?? RUNTIME_PROMPT_FILES;
+  return EVAL_MISSIONS.map((mission) => {
+    const targets = MISSION_TARGETS[mission];
+    const trainable = new Set<string>(targets.prompts);
+    const prompts = targets.runtimePrompts.flatMap((key): LivePrompt[] => {
+      const file = files[key];
+      const match = file === undefined ? null : PROMPT_FILE_NAME.exec(file);
+      if (file === undefined || match?.[1] === undefined) return [];
+      const name = match[1];
+      const pointed = Number(match[2]);
+      const onDisk = input.catalog
+        .filter((entry) => entry.name === name)
+        .map((entry) => entry.version)
+        .sort((a, b) => a - b);
+      const promoted = input.records
+        .flatMap((record) =>
+          record.mission === mission &&
+          record.decision.status === "promoted" &&
+          record.change.prompt?.name === name
+            ? [record.change.prompt.to]
+            : [],
+        )
+        .filter((version) => version > pointed && onDisk.includes(version));
+      return [
+        {
+          key,
+          name,
+          file,
+          liveVersion: onDisk.includes(pointed) ? pointed : null,
+          onDisk,
+          trainable: trainable.has(key),
+          awaitingPointer: promoted.length === 0 ? null : Math.max(...promoted),
+        },
+      ];
+    });
+    return {
+      mission,
+      title: EVAL_MISSION_INFO[mission].title,
+      prompts,
+      playbooks: input.playbooks.filter(
+        (entry) => entry.key.split(":")[0] === targets.runtimeMissionId,
+      ),
+    };
+  });
+}
+
+export type RoutingState =
+  { status: "absent" } | { status: "invalid" } | { status: "ok"; routing: LearnedRouting };
+
+export function loadLearnedRouting(file: string): RoutingState {
+  if (!existsSync(file)) return { status: "absent" };
+  try {
+    const parsed = LearnedRoutingSchema.safeParse(
+      JSON.parse(readFileSync(file, "utf8")) as unknown,
+    );
+    return parsed.success ? { status: "ok", routing: parsed.data } : { status: "invalid" };
+  } catch {
+    return { status: "invalid" };
+  }
+}
+
+export interface EvalsLearning {
+  training: { rows: TrainingRow[]; lineage: MissionLineage[]; invalid: string[] };
+  prompts: MissionPrompts[];
+  routing: RoutingState;
+}
+
+export function loadEvalsLearning(repoRoot: string = resolveRepoRoot()): EvalsLearning {
+  const training = loadTraining(path.join(repoRoot, "packages", "evals", "results", "training"));
+  const playbooks = loadHousePlaybooks(path.join(repoRoot, "packages", "runtime", "playbooks"));
+  return {
+    training: {
+      rows: trainingRows(training.records),
+      lineage: trainingLineage(training.records),
+      invalid: training.invalid,
+    },
+    prompts: livePromptVersions({
+      catalog: loadPromptCatalog(path.join(repoRoot, "packages", "runtime", "prompts")),
+      records: training.records,
+      playbooks,
+    }),
+    routing: loadLearnedRouting(path.join(repoRoot, "config", "routing.learned.json")),
   };
 }
