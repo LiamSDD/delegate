@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-export const SOURCE_KINDS = ["company_site", "wikipedia", "wikidata", "github", "feed"] as const;
+export const SOURCE_KINDS = [
+  "company_site",
+  "wikipedia",
+  "wikidata",
+  "github",
+  "feed",
+  "connector",
+] as const;
 export const SourceKindSchema = z.enum(SOURCE_KINDS);
 export type SourceKind = z.infer<typeof SourceKindSchema>;
 

@@ -1,7 +1,10 @@
+import { z } from "zod";
 import { CAPABILITIES } from "@delegate/policy";
 
 import { type RunContext } from "../../agent/context";
 import { formatAccuracy, runCriticSafely, unverifiedOutcome } from "../../agent/critic";
+import { runAgentLoop } from "../../agent/loop";
+import { CONNECTOR_OUTPUT_KIND } from "../../connectors/tools";
 import {
   runPlannedMission,
   stepFailure,
@@ -20,7 +23,7 @@ import {
 } from "../../agent/subagent";
 import { callStructured } from "../../agent/structured";
 import { type PromptFile } from "../../prompts";
-import { READER_DEFAULTS, readUntrusted } from "../../quarantine/reader";
+import { READER_DEFAULTS, quoteAppearsIn, readUntrusted } from "../../quarantine/reader";
 import { NoModelAvailableError } from "../../router";
 import { COMPANY_PROFILE } from "../../crawl/priority";
 import { type Fetcher } from "../../tools/fetch";
@@ -41,7 +44,13 @@ import {
   type TopicFact,
 } from "../shared/research";
 import { type CustomGoalInput } from "./input";
-import { GOAL_PLANNING_HINTS, GOAL_STEP_IDS, GOAL_STEP_LIMITS, defaultGoalPlan } from "./plan";
+import {
+  GOAL_CONNECTOR_HINTS,
+  GOAL_PLANNING_HINTS,
+  GOAL_STEP_IDS,
+  GOAL_STEP_LIMITS,
+  defaultGoalPlan,
+} from "./plan";
 import {
   FOLLOW_UP_MISSIONS,
   GOAL_BRIEF_KIND,
@@ -68,6 +77,7 @@ export interface CustomGoalPrompts {
   planner: PromptFile;
   critic: PromptFile;
   editor: PromptFile;
+  goalConnectors?: PromptFile;
 }
 
 export interface CustomGoalDependencies {
@@ -86,7 +96,28 @@ export const GOAL_LIMITS = {
   synthesisMaxTokens: 6_000,
   synthesisFacts: 120,
   quotesPerSource: 12,
+  connectorIterations: 7,
+  connectorToolCalls: 6,
+  connectorMaxTokens: 2_000,
 } as const;
+
+const ConnectorOutputSchema = z.object({
+  host: z.string().min(1),
+  server: z.string(),
+  tool: z.string(),
+  text: z.string(),
+  extraction: z.object({
+    facts: z.array(z.object({ claim: z.string(), quote: z.string() })),
+  }),
+});
+
+export function connectorSourceUrl(host: string, server: string, tool: string, call: string) {
+  const url = new URL(`https://${host}/`);
+  url.searchParams.set("connector", server);
+  url.searchParams.set("tool", tool);
+  url.searchParams.set("call", call);
+  return url.href;
+}
 
 const MISSION_ID = "custom-goal";
 
@@ -413,6 +444,80 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     },
   };
 
+  const connectorTools = ctx.connectorTools ?? [];
+  const connectorStep: StepExecutor = {
+    id: GOAL_STEP_IDS.connectors,
+    role: "researcher",
+    modelRole: "worker",
+    capabilities: [CAPABILITIES.connectorRead, CAPABILITIES.connectorWrite],
+    description:
+      "Call the workspace's own MCP connector tools that help the goal. Results reach the agent only as quarantined facts; side-effecting tools wait for human approval or a workspace pre-approval.",
+    run: async (task) => {
+      const prompt = prompts.goalConnectors;
+      if (connectorTools.length === 0 || prompt === undefined)
+        return skipped("No MCP connectors are connected to this workspace.", 0.5);
+      const loop = await runAgentLoop({
+        run: ctx,
+        step: task.grant,
+        agentId: task.agent.agentId,
+        role: "worker",
+        system: prompt.body,
+        tools: connectorTools,
+        messages: [
+          {
+            role: "user",
+            content: `Goal: ${JSON.stringify(input.goal)}\nUse only the connector tools that help this goal.`,
+          },
+        ],
+        maxIterations: GOAL_LIMITS.connectorIterations,
+        maxToolCalls: GOAL_LIMITS.connectorToolCalls,
+        maxTokens: GOAL_LIMITS.connectorMaxTokens,
+      });
+      const facts: TopicFact[] = [];
+      const documents: SourceDocument[] = [];
+      for (const call of loop.toolCalls) {
+        const artifact = call.outcome?.artifact;
+        if (!call.ok || artifact?.kind !== CONNECTOR_OUTPUT_KIND) continue;
+        const parsed = ConnectorOutputSchema.safeParse(artifact.content);
+        if (!parsed.success) continue;
+        const { document } = store.add({
+          url: connectorSourceUrl(
+            parsed.data.host,
+            parsed.data.server,
+            parsed.data.tool,
+            call.toolCallId,
+          ),
+          title: `${parsed.data.server} · ${parsed.data.tool}`,
+          kind: "connector",
+          fetchedAt: ctx.now().toISOString(),
+          text: parsed.data.text,
+        });
+        documents.push(document);
+        for (const fact of parsed.data.extraction.facts)
+          if (quoteAppearsIn(fact.quote, document.text))
+            facts.push({
+              claim: fact.claim,
+              quote: fact.quote,
+              topic: "other",
+              sourceId: document.record.sourceId,
+              trust: "untrusted",
+            });
+      }
+      const denied = loop.toolCalls.filter((call) => !call.ok).length;
+      await task.agent.say(
+        `Called ${plural(loop.toolCalls.length, "connector tool")}: kept ${plural(facts.length, "quarantined fact")}${denied === 0 ? "" : `; ${denied} not run (denied, rejected or failed)`}.`,
+      );
+      return {
+        summary: `${plural(documents.length, "connector result")}, ${plural(facts.length, "fact")}`,
+        findings: facts.map(factToFinding),
+        sources: documents.map((document) => document.record),
+        confidence: facts.length > 0 ? 0.75 : 0.4,
+        artifacts: artifactsOf(loop.toolCalls),
+      };
+    },
+  };
+  const hasConnectors = connectorTools.length > 0 && prompts.goalConnectors !== undefined;
+
   const base = (state: BriefState) => {
     const documents = store.all();
     const cited = goalCitedSources(state.sections);
@@ -620,12 +725,27 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         brandCandidates: target.brands,
         topicQueries: target.queries,
       },
-      planningHints: GOAL_PLANNING_HINTS,
-      executors: [resolve, site, topic, external, readSite, synthesise, critic],
-      allowedCapabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
+      planningHints: hasConnectors
+        ? `${GOAL_PLANNING_HINTS}${GOAL_CONNECTOR_HINTS}`
+        : GOAL_PLANNING_HINTS,
+      executors: [
+        resolve,
+        site,
+        topic,
+        external,
+        readSite,
+        ...(hasConnectors ? [connectorStep] : []),
+        synthesise,
+        critic,
+      ],
+      allowedCapabilities: [
+        CAPABILITIES.webFetch,
+        CAPABILITIES.artifactWrite,
+        ...(hasConnectors ? [CAPABILITIES.connectorRead, CAPABILITIES.connectorWrite] : []),
+      ],
       stepLimits: GOAL_STEP_LIMITS,
     },
-    defaultPlan: defaultGoalPlan(target.domain !== null || target.brands.length > 0),
+    defaultPlan: defaultGoalPlan(target.domain !== null || target.brands.length > 0, hasConnectors),
     clock,
     finish: async (outcome) => {
       const state = brief;

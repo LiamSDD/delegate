@@ -154,6 +154,7 @@ function connectorTool(source: ConnectorToolSource, tool: ScreenedTool, readerPr
                 title: `${source.name} · ${tool.name}`,
                 content: {
                   connectorId: source.connectorId,
+                  host: source.host,
                   server: source.name,
                   tool: tool.name,
                   bytes: result.bytes,

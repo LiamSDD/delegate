@@ -243,10 +243,9 @@ export const BriefSourceSchema = SourceRecordSchema.extend({ quotes: z.array(z.s
 export type BriefSource = z.infer<typeof BriefSourceSchema>;
 
 export const SourceMixSchema = z.object(
-  Object.fromEntries(SOURCE_KINDS.map((kind) => [kind, z.number().int().nonnegative()])) as Record<
-    (typeof SOURCE_KINDS)[number],
-    z.ZodNumber
-  >,
+  Object.fromEntries(
+    SOURCE_KINDS.map((kind) => [kind, z.number().int().nonnegative().default(0)]),
+  ) as Record<(typeof SOURCE_KINDS)[number], z.ZodDefault<z.ZodNumber>>,
 );
 
 type SectionsInput = { [K in SectionKey]?: CompanyXraySections[K] | undefined };

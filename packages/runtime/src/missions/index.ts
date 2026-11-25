@@ -65,7 +65,12 @@ export const MISSIONS = {
     inputSchema: CustomGoalInputSchema,
     deliverableSchema: GoalBriefSchema,
     deliverableKind: GOAL_BRIEF_KIND,
-    capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
+    capabilities: [
+      CAPABILITIES.webFetch,
+      CAPABILITIES.artifactWrite,
+      CAPABILITIES.connectorRead,
+      CAPABILITIES.connectorWrite,
+    ],
   },
   "repo-xray": {
     id: "repo-xray",

@@ -11,6 +11,7 @@ export const GOAL_STEP_IDS = {
   topic: "research_topic",
   synthesise: "synthesise",
   critic: "critic",
+  connectors: "use_connectors",
 } as const;
 
 export const GOAL_STEP_LIMITS = { min: 3, max: 8 } as const;
@@ -103,7 +104,36 @@ const critic: PlanStep = {
   budgetShare: 0.13,
 };
 
-export function defaultGoalPlan(hasCompany: boolean): PlanStep[] {
+const connectors: PlanStep = {
+  id: GOAL_STEP_IDS.connectors,
+  role: "researcher",
+  objective:
+    "Use the workspace's own MCP connector tools that help the goal; their results come back only as quarantined facts, and side-effecting tools wait for human approval.",
+  inputs: [],
+  capabilities: [CAPABILITIES.connectorRead, CAPABILITIES.connectorWrite],
+  acceptance: [
+    "Only connector tools relevant to the goal are called",
+    "Every fact carries a verbatim quote from the connector output",
+  ],
+  budgetShare: 0.1,
+};
+
+export const GOAL_CONNECTOR_HINTS =
+  " The workspace has MCP connectors: include use_connectors when the goal concerns the workspace's own systems, data or tickets; synthesise then takes it as an input.";
+
+export function defaultGoalPlan(hasCompany: boolean, hasConnectors = false): PlanStep[] {
+  const plan = basePlan(hasCompany);
+  if (!hasConnectors) return plan;
+  return plan.flatMap((step) => {
+    if (step.id === GOAL_STEP_IDS.topic)
+      return [{ ...step, budgetShare: Math.max(0.05, step.budgetShare - connectors.budgetShare) }];
+    if (step.id === GOAL_STEP_IDS.synthesise)
+      return [connectors, { ...step, inputs: [...step.inputs, GOAL_STEP_IDS.connectors] }];
+    return [step];
+  });
+}
+
+function basePlan(hasCompany: boolean): PlanStep[] {
   if (!hasCompany)
     return [
       resolve,
