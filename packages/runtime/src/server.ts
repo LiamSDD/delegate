@@ -147,7 +147,7 @@ export const RUNTIME_PROMPT_FILES = {
   planner: "planner.v2.md",
   critic: "critic.v2.md",
   editor: "editor.v2.md",
-  analyst: "automation-audit.analyst.v1.md",
+  analyst: "automation-audit.analyst.v2.md",
   auditEditor: "automation-audit.editor.v1.md",
   designer: "build-agent.designer.v1.md",
   evalgen: "build-agent.evalgen.v1.md",
