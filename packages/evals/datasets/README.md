@@ -9,36 +9,52 @@ datasets/
   <mission>/
     v<N>.jsonl        one EvalCase per line
     CHANGELOG.md      what changed between versions and why
+    human-labels.v1.jsonl   judge calibration labels written by `pnpm label`
 ```
 
-- `<mission>` is the runtime mission id (`company-xray`, `automation-audit`, ...). Cases carry the short CLI name in `mission` (`xray`).
+- `<mission>` is the runtime mission id (`company-xray`, `automation-audit`, `build-agent`, `repo-xray`, `custom-goal`). Cases carry a `mission` literal checked by their schema: the CLI name for `xray`, `audit` and `build`, the runtime id for `repo-xray` and `custom-goal` (kept from their v1).
 - A dataset version is immutable once an eval baseline references it. Adding, removing or editing a case creates `v<N+1>.jsonl`; baselines compare like with like.
-- At least 8 cases per mission (SPEC: real companies and repositories of different sizes, industries and languages).
+- At least 8 cases per mission (SPEC: real companies and repositories of different sizes, industries and languages); a test enforces it for every mission the CLI runs.
 
-## Company X-ray (`company-xray/`)
+## Missions
 
-- `v1.jsonl`: one `XrayCaseSchema` case per line (`src/datasets/xray.ts`); `schema.v1.json` is the same schema as JSON Schema and a test keeps them in sync. Each case adds `company` (name, ISO country, industry, size), 2 to 5 `expectedFacts` (checkable proposition, justification, source URL, verification date) and `difficulty` notes to the generic case fields below. See `CHANGELOG.md` for the case table and exclusions.
-- `human-labels.v1.jsonl`: judge calibration labels, empty until the owner labels trials. One `HumanLabelSchema` object per line:
+| `--mission` | Dataset | Cases | Deterministic hard checks | Judge prompt (criteria) |
+|---|---|---|---|---|
+| `xray` | `company-xray/v1.jsonl` | 8 | `run_completed`, `schema_valid`, `claims_cited`, `citations_resolve`, `quotes_in_sources` | `xray-judge.v1` (accuracy, specificity, actionability, citationFaithfulness) |
+| `audit` | `automation-audit/v1.jsonl` | 8 | `run_completed`, `schema_valid`, `opportunity_count` (5-8), `citations_resolve` | `audit-judge.v1` (specificity, evidenceSupport, roiPlausibility, actionability) |
+| `build` | `build-agent/v1.jsonl` | 8 | `run_completed`, `schema_valid` (assistant ready), `out_of_scope_refused`, `answers_cited`, `citations_on_site` | `build-judge.v1` (correctness, groundedness, refusalQuality, concision) |
+| `repo` | `repo-xray/v2.jsonl` | 8 | `run_completed`, `schema_valid`, `citations_resolve`, `mermaid_nodes_real`, `improvements_valid` | `repo-judge.v1` (accuracy, specificity, actionability, onboardingClarity) |
+| `goal` | `custom-goal/v2.jsonl` | 8 | `run_completed`, `plan_valid`, `schema_valid`, `claims_cited`, `action_plan_present` | `goal-judge.v1` (relevance, specificity, actionability, citationFaithfulness) |
 
-  ```json
-  {"caseId":"zed","run":"2026-11-24T10-00-00-000Z","trial":0,"labeller":"owner","labelledAt":"2026-11-25","scores":{"accuracy":4,"specificity":4,"actionability":3,"citationFaithfulness":5},"notes":"optional"}
-  ```
+Each mission is a `MissionAdapter` in `src/missions/`: it loads and validates its dataset, grades an event log, names its mission metrics, renders the view its judge sees and says when a trial is judgeable. Every mission also gets soft checks for latency, cost, token budget, repeated fetches and policy denials. Case schemas, case tables, verification notes and exclusions are in each dataset's `CHANGELOG.md`. Every expected fact, hint and answer records the date it was checked against the live source (`verifiedAt`).
 
-  `run` is a results directory name; the label is matched to `results/<run>/<caseId>/<trial>.judge.json`. `pnpm --filter @delegate/evals agreement` reports exact-match rate, within-one rate and Cohen's kappa per criterion, or says plainly that there are no human labels yet.
+- **Company X-ray** (`company-xray/`): `XrayCaseSchema` (`src/datasets/xray.ts`, `schema.v1.json`); 2 to 5 `expectedFacts` per company.
+- **AI Automation Audit** (`automation-audit/`): `AuditCaseSchema` (`src/datasets/audit.ts`); 2 to 4 department and 2 to 4 workflow hints quoted from the company's site. Soft checks `departments_found` / `workflows_found` pass at 50% recall (`AUDIT_TARGETS`); a department hint matches an opportunity's department or title on its name or a synonym, a workflow hint matches its title, workflow or automation text on any term (normalised, case-insensitive substring). `no_generic_ideas` reuses the runtime's generic-idea patterns.
+- **Build-an-Agent** (`build-agent/`): `BuildCaseSchema` (`src/datasets/build.ts`); 6 to 10 question/answer pairs whose `sourceUrl` must be on the crawled host, and exactly 3 out-of-scope questions. After the build completes the harness asks the built assistant every question through the runtime's `answerQuestion` with the trial's own in-memory stores, retrying capacity refusals twice, and stores the record as `<trial>.qa.json`. An answer is correct when it is not refused and contains every `mustInclude` string (normalised, case-insensitive); `answer_accuracy` is soft and passes at 60% (`BUILD_TARGETS`). Capacity refusals (`rate_limited`, `unavailable`) count as unavailable, not wrong. Question answering is not counted in the trial's tokens or latency.
+- **Repo X-ray** (`repo-xray/`): `RepoXrayCaseSchema` (`src/datasets/repo-xray.ts`); kind-typed expected facts matched by `factFound`. The judge never sees code text.
+- **Custom goal** (`custom-goal/`): `CustomGoalCaseSchema` (`src/datasets/custom-goal.ts`); expected target, minimum actions, workstream hints and how the target was verified.
 
-## Custom goal (`custom-goal/`)
+## Human labels and judge calibration
 
-- `v1.jsonl`: one `CustomGoalCaseSchema` case per line (`src/datasets/custom-goal.ts`): the free-text `goal`, the expected company target (`domain`, `brand` or `none`), a minimum number of actions and workstream hints. Graders and the case table are in `CHANGELOG.md`.
+`pnpm label --mission <m> [--run <id>] [--labeller <handle>] [--limit n]` walks the judged trials stored under `results/runs/<m>/` that the labeller has not labelled yet, newest run first. For each it prints the rubric from the mission's judge prompt and the same deliverable view the judge saw, never the judge's scores, and asks for a 1 to 5 score per criterion (`s` skips, `q` stops). Labels are appended to `datasets/<dataset>/human-labels.v1.jsonl`, one `HumanLabelSchema` object per line, validated against the mission's criteria; the same labeller cannot label a trial twice:
+
+```json
+{"caseId":"zed","run":"2026-11-24T10-00-00-000Z","trial":0,"labeller":"owner","labelledAt":"2026-11-25","scores":{"accuracy":4,"specificity":4,"actionability":3,"citationFaithfulness":5},"notes":"optional"}
+```
+
+Agreement (exact-match rate, within-one rate, Cohen's kappa with a 95% asymptotic interval, per criterion) is computed over every labelled trial whose `judge.json` is still on disk. `pnpm label` and `pnpm agreement [--mission m]` write it to `results/calibration/<m>.json`, which `/evals` shows; each eval run also records it in its result file. It is a CLI rather than a web page because the deliverables live in local, git-ignored run directories, the labels are committed dataset files and the deployed `/evals` page is static and read-only.
 
 ## Running
 
 ```bash
-pnpm eval --mission xray [--trials 3] [--cases id,id] [--audience public-demo|owner] [--offline | --replay <dir>] [--concurrency 1] [--no-judge] [--baseline]
-pnpm gate            # pnpm check, then 3 gate-tagged cases x 1 trial; GATE_FULL=1 runs every case x 3
-pnpm gate -- --offline   # re-grade the latest stored event logs, no network
+pnpm eval --mission xray|audit|build|repo|goal|all [--trials 3] [--cases id,id] [--tag gate] [--audience public-demo|owner] [--offline | --replay <run dir>] [--concurrency 1-8] [--no-judge] [--baseline]
+pnpm eval:smoke          # one gate case per mission: scripted fixtures recorded, then replayed; part of pnpm check
+pnpm gate                # pnpm check, then the X-ray gate-tagged cases x 1 trial; GATE_FULL=1 runs every case x 3
+pnpm label --mission goal
+pnpm agreement
 ```
 
-Results go to `packages/evals/results/<timestamp>/` (`<case>/<trial>.events.jsonl`, `.trial.json`, `.judge.json`, `summary.json`, `summary.md`); only `results/baseline.json` is tracked and it is written only with `--baseline`. Trials run sequentially by default; a trial whose run fails with `no_model_available` is retried twice with 60 s and 120 s backoff, and the failed attempt's log is kept. Deterministic checks marked hard (`run_completed`, `schema_valid`, `claims_cited`, `citations_resolve`, `quotes_in_sources`) fail the gate; infrastructure failures (`no_model_available`, `site_unreachable`, `cancelled`) count as errored rather than invalid output. The judge (`prompts/xray-judge.v1.md`, role `planner`) scores 1 to 5, stored normalised as (score − 1) / 4.
+Live runs load the repository-root `.env.local`. Raw runs go to `results/runs/<mission>/<timestamp>/` (`<case>/<trial>.events.jsonl`, `.trial.json`, `.judge.json`, `.qa.json` for Build-an-Agent, `summary.json`, `summary.md`) and are git-ignored; the result file `results/<mission>/<timestamp>.json` (`EvalResultFileSchema`, `src/results.ts`) is what gets committed and what `/evals` reads. Baselines are `results/baseline.json` (X-ray) and `results/baseline.<mission>.json`, written only with `--baseline`. A trial whose run fails with `no_model_available` is retried twice; the wait is 60 s then 120 s, or the largest `retryAfterMs` the run's fallbacks reported (at most 10 minutes), and it is shared, so concurrent workers pause too. The failed attempt's log is kept. Hard checks fail the gate; infrastructure failures (`no_model_available`, `site_unreachable`, `cancelled`) count as errored rather than invalid output. Judges use role `planner`, score 1 to 5 and are stored normalised as (score − 1) / 4.
 
 ## Case format
 
