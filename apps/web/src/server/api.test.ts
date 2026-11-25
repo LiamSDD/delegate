@@ -207,6 +207,48 @@ describe("POST /api/runs", () => {
     expect(stray.status).toBe(400);
   });
 
+  it("starts a live custom-goal run from free text, the path /runs/new takes", async () => {
+    let scheduled: { missionId: string; input: Record<string, unknown> } | undefined;
+    const runner: MissionRunner = (args) => {
+      scheduled = { missionId: args.missionId, input: args.input };
+      return Promise.resolve({ status: "completed" });
+    };
+    const d = deps({ runner: () => ({ execution: "live", run: runner }) });
+    const goal = "I want to achieve nike's marketing and agentic work";
+    const response = await handleCreateRun(post({ missionId: "custom-goal", input: { goal } }), d);
+    expect(response.status).toBe(201);
+    const { runId } = (await response.json()) as { runId: string };
+    const cookie = cookieFrom(response);
+    const summary = await handleGetRun(get(`/api/runs/${runId}`, cookie), runId, d);
+    expect(await summary.json()).toMatchObject({
+      run: { mission: "custom-goal", input: { goal }, target: goal },
+    });
+    expect(d.tasks).toHaveLength(1);
+    await d.tasks[0]?.();
+    expect(scheduled).toEqual({ missionId: "custom-goal", input: { goal } });
+  });
+
+  it("validates custom-goal requests", async () => {
+    const d = deps();
+    const cases: [unknown, number, string][] = [
+      [{ missionId: "custom-goal", input: {} }, 400, "invalid_request"],
+      [{ missionId: "custom-goal", input: { goal: "hi" } }, 400, "invalid_request"],
+      [{ missionId: "custom-goal", input: { goal: "Grow", focus: "x" } }, 400, "invalid_request"],
+      [{ missionId: "custom-goal", input: { goal: "Grow", url: "localhost" } }, 400, "invalid_url"],
+      [{ missionId: "company-xray", input: {} }, 400, "invalid_request"],
+    ];
+    for (const [body, status, code] of cases) {
+      const response = await handleCreateRun(post(body), d);
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ error: { code } });
+    }
+    const withUrl = await handleCreateRun(
+      post({ missionId: "custom-goal", input: { goal: "Grow EU sales", url: "acme.com" } }),
+      d,
+    );
+    expect(withUrl.status).toBe(201);
+  });
+
   it("rate limits run creation per guest", async () => {
     const d = deps({ guestLimiter: createRateLimiter({ limit: 2, windowMs: 3_600_000 }) });
     const first = await handleCreateRun(post(validBody), d);

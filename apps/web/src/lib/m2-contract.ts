@@ -7,6 +7,11 @@ export {
   AutomationAuditSchema,
   DIFFICULTIES,
   estimateRoi,
+  GOAL_BRIEF_KIND,
+  type GoalAction,
+  type GoalBrief,
+  type GoalBriefDraft,
+  GoalBriefDraftSchema,
   NEXT_ACTIONS_KIND,
   type NextAction,
   NextActionSchema,
@@ -21,7 +26,12 @@ export {
 
 import type { RoiInputs } from "@delegate/runtime";
 
-export const RUNNABLE_MISSION_IDS = ["company-xray", "automation-audit", "build-agent"] as const;
+export const RUNNABLE_MISSION_IDS = [
+  "company-xray",
+  "automation-audit",
+  "build-agent",
+  "custom-goal",
+] as const;
 export type RunnableMissionId = (typeof RUNNABLE_MISSION_IDS)[number];
 
 export const ROI_INPUT_KEYS = [
@@ -38,6 +48,7 @@ export const MISSION_LABELS: Record<string, string> = {
   "company-xray": "Company X-ray",
   "automation-audit": "Automation Audit",
   "build-agent": "Build-an-Agent",
+  "custom-goal": "Custom goal",
 };
 
 export function missionLabel(id: string): string {

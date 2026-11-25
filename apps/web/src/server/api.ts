@@ -4,6 +4,7 @@ import { z } from "zod";
 import { RUNNABLE_MISSION_IDS } from "@/lib/m2-contract";
 import { COMPANY_URL_REJECTION_MESSAGES, normaliseCompanyUrl } from "@/lib/runs/company-url";
 import { validatePlanEdit } from "@/lib/runs/plan";
+import { runTarget } from "@/lib/runs/target";
 import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 
 import type { AppDatabase } from "./db";
@@ -94,7 +95,7 @@ export const CreateRunRequestSchema = z
   .strictObject({
     missionId: z.enum(RUNNABLE_MISSION_IDS),
     input: z.strictObject({
-      url: z.string().min(1).max(2048),
+      url: z.string().min(1).max(2048).optional(),
       focus: z.string().trim().min(1).max(500).optional(),
       department: z.string().trim().min(1).max(120).optional(),
       goal: z.string().trim().min(1).max(900).optional(),
@@ -106,9 +107,17 @@ export const CreateRunRequestSchema = z
   })
   .superRefine((request, ctx) => {
     const buildOnly = ["goal", "name", "opportunityId", "fromAuditRunId"] as const;
-    if (request.missionId === "build-agent") {
+    if (request.missionId !== "custom-goal" && request.input.url === undefined)
+      ctx.addIssue({ code: "custom", path: ["input", "url"], message: "A URL is required" });
+    if (request.missionId === "build-agent" || request.missionId === "custom-goal") {
       if (request.input.goal === undefined)
         ctx.addIssue({ code: "custom", path: ["input", "goal"], message: "A goal is required" });
+      if (request.missionId === "build-agent") return;
+      if (request.input.goal !== undefined && request.input.goal.length < 3)
+        ctx.addIssue({ code: "custom", path: ["input", "goal"], message: "The goal is too short" });
+      for (const key of ["focus", "department", "name", "opportunityId", "fromAuditRunId"] as const)
+        if (request.input[key] !== undefined)
+          ctx.addIssue({ code: "custom", path: ["input", key], message: "Not for custom-goal" });
       return;
     }
     for (const key of buildOnly)
@@ -220,8 +229,10 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
       ),
     });
   }
-  const url = normaliseCompanyUrl(parsed.data.input.url);
-  if (!url.ok) return apiError(400, "invalid_url", COMPANY_URL_REJECTION_MESSAGES[url.reason]);
+  const rawUrl = parsed.data.input.url;
+  const url = rawUrl === undefined ? undefined : normaliseCompanyUrl(rawUrl);
+  if (url !== undefined && !url.ok)
+    return apiError(400, "invalid_url", COMPANY_URL_REJECTION_MESSAGES[url.reason]);
 
   const ipQuota = deps.ipLimiter.take(clientIp(request));
   if (!ipQuota.ok) {
@@ -257,7 +268,7 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
         headers: cookieHeaders,
       });
     }
-    const input = missionInput(parsed.data, url.url, parentRunId);
+    const input = missionInput(parsed.data, url?.url, parentRunId);
     const runner = deps.runner();
     const { runId } = await createRunRecord(app, session, {
       missionId: parsed.data.missionId,
@@ -288,10 +299,11 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
 
 export function missionInput(
   request: CreateRunRequest,
-  url: string,
+  url: string | undefined,
   parentRunId: string | undefined,
 ): Record<string, unknown> {
   const { focus, department, goal, name, opportunityId } = request.input;
+  if (request.missionId === "custom-goal") return { goal, ...(url === undefined ? {} : { url }) };
   if (request.missionId === "build-agent") {
     return {
       url,
@@ -330,11 +342,10 @@ async function freshRecord(
 
 export function runSummary(record: RunRecord) {
   const input = missionInputOf(record.input);
-  const url = typeof input.url === "string" ? input.url : null;
   return {
     id: record.id,
     mission: record.mission,
-    target: url === null ? null : new URL(url).hostname.replace(/^www\./, ""),
+    target: runTarget(input),
     input,
     execution: record.execution,
     status: record.status,

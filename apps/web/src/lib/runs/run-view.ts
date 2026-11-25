@@ -1,5 +1,6 @@
 import {
   AUTOMATION_AUDIT_KIND,
+  GOAL_BRIEF_KIND,
   NEXT_ACTIONS_KIND,
   type NextAction,
   NextActionsSchema,
@@ -9,6 +10,7 @@ import { auditCitationCheck, parseAudit } from "./audit";
 import { briefStats, parseBrief } from "./brief";
 import { buildLanes, type Lane } from "./lanes";
 import { type PlanVersion, planVersions } from "./plan";
+import { runTarget } from "./target";
 
 import {
   type AgentRole,
@@ -173,6 +175,7 @@ export type RunView =
       outcome: Outcome | null;
       brief: BriefArtifact | null;
       audit: BriefArtifact | null;
+      goal: BriefArtifact | null;
       nextActions: NextAction[];
       planVersions: PlanVersion[];
       pendingPlan: { version: number; steps: PlanStep[] } | null;
@@ -404,7 +407,7 @@ function latestBrief(events: readonly RunEvent[], state: RunState): BriefArtifac
   return latestArtifact(
     events,
     state,
-    (kind) => /brief|xray/i.test(kind) && kind !== "source-snapshot",
+    (kind) => /brief|xray/i.test(kind) && kind !== "source-snapshot" && kind !== GOAL_BRIEF_KIND,
   );
 }
 
@@ -509,14 +512,7 @@ export function buildRunView(events: readonly RunEvent[]): RunView {
   if (created?.type !== "run.created") return { ok: false, error: "Missing run.created" };
   const input = created.payload.input;
   const url = typeof input.url === "string" ? input.url : null;
-  let target: string | null = null;
-  if (url !== null) {
-    try {
-      target = new URL(url).hostname.replace(/^www\./, "");
-    } catch {
-      target = null;
-    }
-  }
+  const target = runTarget(input);
   const objectives = new Map((state.plan?.steps ?? []).map((step) => [step.id, step]));
   const steps = state.steps.map((step): StepView => {
     const planned = objectives.get(step.id);
@@ -549,6 +545,7 @@ export function buildRunView(events: readonly RunEvent[]): RunView {
     };
   }
   const audit = latestArtifact(events, state, (kind) => kind === AUTOMATION_AUDIT_KIND);
+  const goal = latestArtifact(events, state, (kind) => kind === GOAL_BRIEF_KIND);
   const brief = audit === null ? latestBrief(events, state) : null;
   const providers = events.flatMap((event) =>
     event.type === "usage.updated" ? [{ provider: event.payload.provider }] : [],
@@ -578,6 +575,7 @@ export function buildRunView(events: readonly RunEvent[]): RunView {
     outcome,
     brief,
     audit,
+    goal,
     nextActions: nextActionsOf(events, state),
     planVersions: planVersions(events),
     pendingPlan:

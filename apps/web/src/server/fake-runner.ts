@@ -335,6 +335,19 @@ export function resumedScript(
 export function createFakeRunner(options: { delayMs?: number } = {}): MissionRunner {
   const delayMs = options.delayMs ?? 450;
   return async ({ runId, missionId, input, emit, signal, awaitPlanApproval, resumeFrom }) => {
+    if (missionId === "custom-goal") {
+      await emit({
+        type: "run.failed",
+        payload: {
+          error: {
+            code: "simulated_unsupported",
+            message:
+              "The simulated dev runner has no script for custom goals. Turn the fake runner off to run this goal live.",
+          },
+        },
+      });
+      return { status: "failed" };
+    }
     const { url } = inputSchema.parse(input);
     const play = async (drafts: readonly EventDraft[]) => {
       for (const draft of drafts) {

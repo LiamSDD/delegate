@@ -145,8 +145,9 @@ export const MISSIONS: readonly Mission[] = [
     id: "custom-goal",
     group: null,
     name: "Custom goal",
-    outcome: "Free text; the planner composes the tools and agents.",
-    inputs: "A goal in plain language",
+    outcome:
+      "Free text; the planner composes research and critic agents into a cited, ranked action plan.",
+    inputs: "A goal in plain language, optionally naming a company",
     durationTarget: null,
     arrives: "M2",
     hero: false,
