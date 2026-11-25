@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { EVAL_MISSIONS } from "../results";
+
 export const EVOLUTION_LOG_VERSION = 1;
 
 const nullableUnit = z.number().min(0).max(1).nullable();
@@ -59,7 +61,7 @@ export type EvolutionKind = z.infer<typeof EvolutionKindSchema>;
 export const EvolutionLogSchema = z.strictObject({
   version: z.literal(EVOLUTION_LOG_VERSION),
   id: z.string().min(1),
-  mission: z.literal("xray"),
+  mission: z.enum(EVAL_MISSIONS),
   kind: EvolutionKindSchema,
   startedAt: z.iso.datetime({ offset: true }),
   finishedAt: z.iso.datetime({ offset: true }),

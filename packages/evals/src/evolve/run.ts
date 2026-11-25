@@ -3,13 +3,17 @@ import { dirname, join } from "node:path";
 
 import {
   emptyPlaybook,
+  housePlaybookFileName,
   type Playbook,
   type PlaybookStore,
   type PromptFile,
 } from "@delegate/runtime";
+import { type RuntimePrompts } from "@delegate/runtime/server";
 
+import { type EvalMission } from "../results";
 import { type EvalSummary, type TrialRecord } from "../runner";
-import { decideEvolution, type ArmTrial } from "./gate";
+import { armTrialsOf, digestRows, readOnlyHouseStore, rowFromTrial, type Houses } from "./arm";
+import { decideEvolution } from "./gate";
 import {
   EVOLUTION_LOG_VERSION,
   EvolutionLogSchema,
@@ -22,14 +26,15 @@ import {
   candidatePrompt,
   renderPromptFile,
   type Proposal,
+  type ProposalInput,
 } from "./propose";
-
-export const PLAYBOOK_KEY = "company-xray";
+import { type PromptKey } from "./targets";
 
 export interface ArmSpec {
   label: "baseline" | "candidate";
-  planner: PromptFile;
-  house: Playbook | null;
+  mission: EvalMission;
+  prompts: Partial<RuntimePrompts>;
+  houses: Houses;
   store: PlaybookStore;
 }
 
@@ -41,23 +46,22 @@ export interface ArmResult {
 export interface EvolutionDeps {
   now: () => Date;
   runArm: (arm: ArmSpec) => Promise<ArmResult>;
-  propose: (input: {
-    kind: EvolutionKind;
-    planner: PromptFile;
-    summary: EvalSummary;
-    pool: Playbook | null;
-  }) => Promise<Proposal>;
+  propose: (input: Omit<ProposalInput, "prompt">) => Promise<Proposal>;
   redteam: () => Promise<{ suite: string; attacks: number; successes: number; asr: number }>;
   createStore: (seed: readonly Playbook[]) => PlaybookStore & { all(scope: "house"): Playbook[] };
   log: (line: string) => void;
 }
 
 export interface EvolutionOptions {
+  mission: EvalMission;
+  title: string;
   kind: EvolutionKind;
   trials: number;
   threshold: number;
-  planner: PromptFile;
+  targetKey: PromptKey;
+  target: PromptFile;
   nextPromptVersion: number;
+  playbookKey: string;
   house: Playbook | null;
   evolutionDir: string;
   promptsDir: string;
@@ -73,25 +77,9 @@ function stamp(date: Date): string {
   return date.toISOString().replace(/[:.]/g, "-");
 }
 
-function armTrials(trials: readonly TrialRecord[]): ArmTrial[] {
-  return trials.map((trial) => ({
-    caseId: trial.caseId,
-    score: trial.score,
-    passed: trial.passed,
-    hardFailures: trial.hardFailures.length,
-  }));
-}
-
-function fixedStore(house: Playbook | null, sink: PlaybookStore | null): PlaybookStore {
+function playbookRef(key: string, playbook: Playbook | null) {
   return {
-    read: () => Promise.resolve({ workspace: null, house }),
-    record: (run) => (sink === null ? Promise.resolve() : sink.record(run, { house: true })),
-  };
-}
-
-function playbookRef(playbook: Playbook | null) {
-  return {
-    key: playbook?.key ?? PLAYBOOK_KEY,
+    key,
     version: playbook?.version ?? 0,
     entries: playbook?.entries.length ?? 0,
   };
@@ -107,30 +95,34 @@ export async function runEvolution(
   deps: EvolutionDeps,
 ): Promise<EvolutionOutcome> {
   const startedAt = deps.now();
-  const id = `${stamp(startedAt)}-${options.kind}`;
-  const parentPrompt = { name: options.planner.name, version: options.planner.version };
+  const id = `${stamp(startedAt)}-${options.mission}-${options.kind}`;
+  const key = options.playbookKey;
+  const parentPrompt = { name: options.target.name, version: options.target.version };
   const parentHouse = options.house;
   const pool = deps.createStore(parentHouse === null ? [] : [parentHouse]);
+  const parentHouses: Houses = { [key]: parentHouse };
 
   deps.log(`Evolution ${id}: baseline arm with ${parentPrompt.name}@${parentPrompt.version}`);
   const baseline = await deps.runArm({
     label: "baseline",
-    planner: options.planner,
-    house: parentHouse,
-    store: fixedStore(parentHouse, pool),
+    mission: options.mission,
+    prompts: { [options.targetKey]: options.target },
+    houses: parentHouses,
+    store: readOnlyHouseStore(parentHouses, pool),
   });
   const pooled =
-    pool.all("house").find((playbook) => playbook.key === PLAYBOOK_KEY) ??
-    emptyPlaybook(PLAYBOOK_KEY, "house", startedAt.toISOString());
+    pool.all("house").find((playbook) => playbook.key === key) ??
+    emptyPlaybook(key, "house", startedAt.toISOString());
 
   let proposal: Proposal | undefined;
   let proposalError: string | undefined;
   try {
     proposal = await deps.propose({
       kind: options.kind,
-      planner: options.planner,
-      summary: baseline.summary,
-      pool: pooled,
+      mission: { id: options.mission, title: options.title },
+      targets: [options.target],
+      digest: digestRows(baseline.trials.map(rowFromTrial)),
+      pools: [pooled],
     });
   } catch (error) {
     if (!(error instanceof ProposalError)) throw error;
@@ -139,8 +131,8 @@ export async function runEvolution(
 
   const childPrompt =
     proposal?.kind === "prompt"
-      ? candidatePrompt(options.planner, proposal, id, options.nextPromptVersion)
-      : options.planner;
+      ? candidatePrompt(options.target, proposal, `evolution ${id}`, options.nextPromptVersion)
+      : options.target;
   const childHouse =
     proposal?.kind === "playbook"
       ? candidatePlaybook(pooled, proposal.keep, parentHouse)
@@ -149,19 +141,21 @@ export async function runEvolution(
   let candidate: ArmResult | undefined;
   if (proposal !== undefined) {
     deps.log(
-      `Evolution ${id}: candidate arm with ${childPrompt.name}@${childPrompt.version}, house playbook v${childHouse?.version ?? 0}`,
+      `Evolution ${id}: candidate arm with ${childPrompt.name}@${childPrompt.version}, house playbook ${key} v${childHouse?.version ?? 0}`,
     );
+    const childHouses: Houses = { [key]: childHouse };
     candidate = await deps.runArm({
       label: "candidate",
-      planner: childPrompt,
-      house: childHouse,
-      store: fixedStore(childHouse, null),
+      mission: options.mission,
+      prompts: { [options.targetKey]: childPrompt },
+      houses: childHouses,
+      store: readOnlyHouseStore(childHouses),
     });
   }
   const redteam = await deps.redteam();
   const decision = decideEvolution({
-    baseline: armTrials(baseline.trials),
-    candidate: armTrials(candidate?.trials ?? []),
+    baseline: armTrialsOf(baseline.trials.map(rowFromTrial)),
+    candidate: armTrialsOf((candidate?.trials ?? []).map(rowFromTrial)),
     redteam,
     threshold: options.threshold,
     ...(proposalError === undefined
@@ -176,10 +170,10 @@ export async function runEvolution(
       write(file, renderPromptFile(childPrompt));
       promotion = {
         file,
-        apply: `Point RUNTIME_PROMPT_FILES.planner at ${childPrompt.name}.v${childPrompt.version}.md in a reviewed commit.`,
+        apply: `Point RUNTIME_PROMPT_FILES.${options.targetKey} at ${childPrompt.name}.v${childPrompt.version}.md in a reviewed commit.`,
       };
     } else if (childHouse !== null) {
-      const file = join(options.playbooksDir, `${PLAYBOOK_KEY}.house.json`);
+      const file = join(options.playbooksDir, housePlaybookFileName(key));
       write(file, `${JSON.stringify(childHouse, null, 2)}\n`);
       promotion = { file };
     }
@@ -188,16 +182,16 @@ export async function runEvolution(
   const log = EvolutionLogSchema.parse({
     version: EVOLUTION_LOG_VERSION,
     id,
-    mission: "xray",
+    mission: options.mission,
     kind: options.kind,
     startedAt: startedAt.toISOString(),
     finishedAt: deps.now().toISOString(),
     trialsPerCase: options.trials,
     cases: baseline.summary.cases.map((row) => row.caseId),
-    parent: { prompt: parentPrompt, playbook: playbookRef(parentHouse) },
+    parent: { prompt: parentPrompt, playbook: playbookRef(key, parentHouse) },
     child: {
       prompt: { name: childPrompt.name, version: childPrompt.version },
-      playbook: playbookRef(childHouse),
+      playbook: playbookRef(key, childHouse),
     },
     proposal: {
       rationale: proposal?.rationale ?? "",

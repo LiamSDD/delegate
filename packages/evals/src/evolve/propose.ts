@@ -14,10 +14,10 @@ import { detectInjection } from "@delegate/runtime/security";
 import { z } from "zod";
 
 import { type JudgeCompleter } from "../judge/xray-judge";
-import { type EvalSummary } from "../runner";
+import { type EvalDigest } from "./arm";
 import { type EvolutionKind } from "./log";
 
-export const PROPOSER_PROMPT_FILE = "evolve.proposer.v1.md";
+export const PROPOSER_PROMPT_FILE = "evolve.proposer.v2.md";
 export const PROPOSER_LIMITS = { addendumChars: 1_200, lines: 8, maxTokens: 1_500 } as const;
 
 export function loadProposerPrompt(): PromptFile {
@@ -29,41 +29,66 @@ export function loadProposerPrompt(): PromptFile {
 
 const rationale = z.string().trim().min(1).max(600);
 
-export const PromptProposalSchema = z.object({
-  rationale,
-  addendum: z
-    .string()
-    .trim()
-    .min(1)
-    .max(PROPOSER_LIMITS.addendumChars)
-    .superRefine((text, ctx) => {
-      const lines = text.split("\n").filter((line) => line.trim() !== "");
-      if (lines.length > PROPOSER_LIMITS.lines)
-        ctx.addIssue({ code: "custom", message: `At most ${PROPOSER_LIMITS.lines} lines` });
-      if (lines.some((line) => !line.trim().startsWith("- ")))
-        ctx.addIssue({ code: "custom", message: "Every line must be a bullet starting with '- '" });
-      if (/https?:\/\/|www\./i.test(text))
-        ctx.addIssue({ code: "custom", message: "The addendum must not contain URLs" });
-      if (detectInjection(text) !== undefined)
-        ctx.addIssue({ code: "custom", message: "The addendum reads like an injection" });
-      if (redactPii(text).count > 0)
-        ctx.addIssue({ code: "custom", message: "The addendum must not contain personal data" });
-    }),
-});
-export type PromptProposal = z.infer<typeof PromptProposalSchema>;
+const addendum = z
+  .string()
+  .trim()
+  .min(1)
+  .max(PROPOSER_LIMITS.addendumChars)
+  .superRefine((text, ctx) => {
+    const lines = text.split("\n").filter((line) => line.trim() !== "");
+    if (lines.length > PROPOSER_LIMITS.lines)
+      ctx.addIssue({ code: "custom", message: `At most ${PROPOSER_LIMITS.lines} lines` });
+    if (lines.some((line) => !line.trim().startsWith("- ")))
+      ctx.addIssue({ code: "custom", message: "Every line must be a bullet starting with '- '" });
+    if (/https?:\/\/|www\./i.test(text))
+      ctx.addIssue({ code: "custom", message: "The addendum must not contain URLs" });
+    if (detectInjection(text) !== undefined)
+      ctx.addIssue({ code: "custom", message: "The addendum reads like an injection" });
+    if (redactPii(text).count > 0)
+      ctx.addIssue({ code: "custom", message: "The addendum must not contain personal data" });
+  });
 
-export function playbookProposalSchema(pool: Playbook) {
-  const ids = new Set(pool.entries.map((entry) => entry.id));
+export function promptProposalSchema(targets: readonly PromptFile[]) {
+  const names = new Set(targets.map((target) => target.name));
+  const only = targets.length === 1 ? targets[0]?.name : undefined;
   return z.object({
     rationale,
-    keep: z
-      .array(z.string().refine((id) => ids.has(id), { error: "Unknown playbook entry id" }))
-      .min(1)
-      .max(PLAYBOOK_LIMITS.entries),
+    target: (only === undefined ? z.string() : z.string().default(only)).refine(
+      (name) => names.has(name),
+      { error: `target must be one of ${[...names].join(", ")}` },
+    ),
+    addendum,
   });
+}
+export interface PromptProposal {
+  rationale: string;
+  target: string;
+  addendum: string;
+}
+
+export function playbookProposalSchema(pools: readonly Playbook[]) {
+  const keys = new Set(pools.map((pool) => pool.key));
+  const only = pools.length === 1 ? pools[0]?.key : undefined;
+  return z
+    .object({
+      rationale,
+      key: (only === undefined ? z.string() : z.string().default(only)).refine(
+        (key) => keys.has(key),
+        { error: `key must be one of ${[...keys].join(", ")}` },
+      ),
+      keep: z.array(z.string()).min(1).max(PLAYBOOK_LIMITS.entries),
+    })
+    .superRefine((value, ctx) => {
+      const ids = new Set(
+        pools.find((pool) => pool.key === value.key)?.entries.map((entry) => entry.id) ?? [],
+      );
+      if (value.keep.some((id) => !ids.has(id)))
+        ctx.addIssue({ code: "custom", message: "Unknown playbook entry id", path: ["keep"] });
+    });
 }
 export interface PlaybookProposal {
   rationale: string;
+  key: string;
   keep: string[];
 }
 
@@ -71,35 +96,38 @@ export type Proposal =
   | ({ kind: "prompt"; proposer: { provider: string; model: string } } & PromptProposal)
   | ({ kind: "playbook"; proposer: { provider: string; model: string } } & PlaybookProposal);
 
+export const StoredProposalSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("prompt"),
+    proposer: z.strictObject({ provider: z.string(), model: z.string() }),
+    rationale: z.string(),
+    target: z.string().min(1),
+    addendum: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("playbook"),
+    proposer: z.strictObject({ provider: z.string(), model: z.string() }),
+    rationale: z.string(),
+    key: z.string().min(1),
+    keep: z.array(z.string().min(1)).min(1),
+  }),
+]);
+
 export class ProposalError extends Error {
   override readonly name = "ProposalError";
 }
 
-export function evalDigest(summary: EvalSummary): unknown {
+function digestPlaybook(pool: Playbook): unknown {
   return {
-    passRate: summary.overall.passRate,
-    score: summary.overall.score,
-    hardFailures: summary.overall.hardFailures,
-    errored: summary.overall.errored,
-    checkPassRates: summary.overall.checkPassRates,
-    cases: summary.cases.map((row) => ({
-      caseId: row.caseId,
-      passRate: row.passRate.rate,
-      score: row.score.mean,
-      hardFailures: row.hardFailures,
-      failureCodes: row.failureCodes,
+    key: pool.key,
+    entries: pool.entries.map((entry) => ({
+      id: entry.id,
+      polarity: entry.polarity,
+      text: entry.text,
+      evidence: entry.evidence,
+      score: Math.round(entryScore(entry).mean * 1000) / 1000,
     })),
   };
-}
-
-function digestPlaybook(pool: Playbook | null): unknown[] {
-  return (pool?.entries ?? []).map((entry) => ({
-    id: entry.id,
-    polarity: entry.polarity,
-    text: entry.text,
-    evidence: entry.evidence,
-    score: Math.round(entryScore(entry).mean * 1000) / 1000,
-  }));
 }
 
 function extractJson(text: string): unknown {
@@ -114,28 +142,36 @@ function extractJson(text: string): unknown {
   }
 }
 
+export interface ProposalInput {
+  kind: EvolutionKind;
+  prompt: PromptFile;
+  mission: { id: string; title: string };
+  targets: readonly PromptFile[];
+  digest: EvalDigest;
+  pools: readonly Playbook[];
+}
+
 export async function proposeRevision(
   completer: JudgeCompleter,
-  input: {
-    kind: EvolutionKind;
-    prompt: PromptFile;
-    planner: PromptFile;
-    summary: EvalSummary;
-    pool: Playbook | null;
-  },
+  input: ProposalInput,
 ): Promise<Proposal> {
-  if (input.kind === "playbook" && (input.pool === null || input.pool.entries.length === 0))
-    throw new ProposalError("The eval runs produced no playbook entries to choose from");
+  const pools = input.pools.filter((pool) => pool.entries.length > 0);
+  if (input.kind === "playbook" && pools.length === 0)
+    throw new ProposalError("The baseline runs produced no playbook entries to choose from");
+  if (input.kind === "prompt" && input.targets.length === 0)
+    throw new ProposalError("This mission has no prompt a candidate may change");
   const user = JSON.stringify({
     kind: input.kind,
-    plannerPrompt: input.planner.body,
-    eval: evalDigest(input.summary),
-    playbook: digestPlaybook(input.pool),
+    mission: input.mission,
+    prompts: input.targets.map((target) => ({
+      name: target.name,
+      version: target.version,
+      intent: target.intent,
+      body: target.body,
+    })),
+    eval: input.digest,
+    playbooks: pools.map(digestPlaybook),
   });
-  const schema =
-    input.kind === "prompt" || input.pool === null
-      ? PromptProposalSchema
-      : playbookProposalSchema(input.pool);
   const messages: { role: "user" | "assistant"; content: string }[] = [
     { role: "user", content: user },
   ];
@@ -146,14 +182,17 @@ export async function proposeRevision(
       messages,
       maxTokens: PROPOSER_LIMITS.maxTokens,
     });
-    const parsed = schema.safeParse(extractJson(reply.text));
     const proposer = { provider: reply.provider, model: reply.model };
-    if (parsed.success) {
-      return "addendum" in parsed.data
-        ? { kind: "prompt", proposer, ...parsed.data }
-        : { kind: "playbook", proposer, ...parsed.data };
+    const json = extractJson(reply.text);
+    if (input.kind === "prompt") {
+      const parsed = promptProposalSchema(input.targets).safeParse(json);
+      if (parsed.success) return { kind: "prompt", proposer, ...parsed.data };
+      lastIssues = parsed.error.issues.map((issue) => issue.message).join("; ");
+    } else {
+      const parsed = playbookProposalSchema(pools).safeParse(json);
+      if (parsed.success) return { kind: "playbook", proposer, ...parsed.data };
+      lastIssues = parsed.error.issues.map((issue) => issue.message).join("; ");
     }
-    lastIssues = parsed.error.issues.map((issue) => issue.message).join("; ");
     messages.push(
       { role: "assistant", content: reply.text.slice(0, 4_000) },
       {
@@ -174,6 +213,7 @@ export function renderPromptFile(prompt: PromptFile): string {
     `intent: ${prompt.intent}`,
     `inputs: [${prompt.inputs.join(", ")}]`,
     `output: ${prompt.output}`,
+    ...(prompt.changes === undefined ? [] : [`changes: ${prompt.changes}`]),
     "---",
     prompt.body,
   ].join("\n");
@@ -181,19 +221,25 @@ export function renderPromptFile(prompt: PromptFile): string {
 
 export function candidatePrompt(
   parent: PromptFile,
-  proposal: PromptProposal,
-  evolutionId: string,
+  proposal: Pick<PromptProposal, "addendum">,
+  lineageId: string,
   version: number,
 ): PromptFile {
   const body = [
     parent.body.trimEnd(),
     "",
-    `## Learned planning rules (evolution ${evolutionId}, from ${parent.name}@${parent.version})`,
+    `## Learned rules (${lineageId}, from ${parent.name}@${parent.version})`,
     "",
     proposal.addendum.trim(),
     "",
   ].join("\n");
-  const draft: PromptFile = { ...parent, version, status: "active", body };
+  const draft: PromptFile = {
+    ...parent,
+    version,
+    status: "active",
+    changes: `Eval-gated addendum ${lineageId} on top of v${parent.version}.`,
+    body,
+  };
   const fileName = `${parent.name}.v${version}.md`;
   return parsePromptFile(fileName, renderPromptFile(draft));
 }

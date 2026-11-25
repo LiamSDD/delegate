@@ -1,47 +1,36 @@
-import { readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { createMemoryPlaybookStore } from "@delegate/runtime";
-import {
-  RUNTIME_PROMPT_FILES,
-  loadPrompt,
-  loadShippedPlaybook,
-  runMission,
-} from "@delegate/runtime/server";
+import { createMemoryPlaybookStore, housePlaybookKeys } from "@delegate/runtime";
+import { loadRuntimePrompts } from "@delegate/runtime/server";
 import { z } from "zod";
 
 import { RESULTS_DIR, liveDeps } from "../cli";
 import { createRouterCompleter } from "../judge/router-completer";
+import { EVAL_MISSIONS, missionAdapter } from "../missions";
 import { loadRedteamDataset, summariseRedteam } from "../redteam/report";
 import { runSuite } from "../redteam/runner";
-import { runEval, type RunEvalOptions, type TrialRecord } from "../runner";
+import { type RunEvalOptions } from "../runner";
+import { createLiveArmRunner } from "./arm";
+import { PLAYBOOKS_DIR, PROMPTS_DIR, nextPromptVersion, readHousePlaybook } from "./files";
 import { EvolutionKindSchema } from "./log";
 import { loadProposerPrompt, proposeRevision } from "./propose";
-import { PLAYBOOK_KEY, runEvolution } from "./run";
-
-const PROMPTS_DIR = fileURLToPath(new URL("../../../runtime/prompts", import.meta.url));
-const PLAYBOOKS_DIR = fileURLToPath(new URL("../../../runtime/playbooks", import.meta.url));
+import { runEvolution } from "./run";
+import { missionTargets } from "./targets";
 
 const ArgsSchema = z.object({
-  mission: z.literal("xray", { error: "Only --mission xray is available" }),
+  mission: z.enum(EVAL_MISSIONS, {
+    error: `--mission must be one of ${EVAL_MISSIONS.join(", ")}`,
+  }),
   kind: EvolutionKindSchema,
+  target: z.string().optional(),
+  key: z.string().optional(),
   trials: z.coerce.number().int().min(2).max(20),
   cases: z.string().optional(),
   audience: z.enum(["public-demo", "owner"]),
   concurrency: z.coerce.number().int().min(1).max(4),
-  threshold: z.coerce.number().min(0).max(1),
+  threshold: z.coerce.number().min(0).max(1).optional(),
   judge: z.boolean(),
 });
-
-function nextVersion(name: string): number {
-  const pattern = new RegExp(`^${name.replace(/\./g, "\\.")}\\.v(\\d+)\\.md$`);
-  const versions = readdirSync(PROMPTS_DIR).flatMap((file) => {
-    const match = pattern.exec(file);
-    return match?.[1] === undefined ? [] : [Number(match[1])];
-  });
-  return Math.max(0, ...versions) + 1;
-}
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
@@ -49,22 +38,41 @@ async function main(): Promise<void> {
     options: {
       mission: { type: "string", default: "xray" },
       kind: { type: "string", default: "prompt" },
+      target: { type: "string" },
+      key: { type: "string" },
       trials: { type: "string", default: "3" },
       cases: { type: "string" },
       audience: { type: "string", default: "public-demo" },
       concurrency: { type: "string", default: "1" },
-      threshold: { type: "string", default: "0.05" },
+      threshold: { type: "string" },
       judge: { type: "boolean", default: false },
     },
     strict: true,
   });
   const args = ArgsSchema.parse(values);
+  const adapter = missionAdapter(args.mission);
+  const targets = missionTargets(args.mission);
   const caseIds = args.cases
     ?.split(",")
     .map((id) => id.trim())
     .filter((id) => id !== "");
-  const planner = loadPrompt(RUNTIME_PROMPT_FILES.planner);
+  const targetKey = targets.prompts.find((key) => key === (args.target ?? targets.prompts[0]));
+  if (targetKey === undefined)
+    throw new Error(
+      `--target must be one of ${targets.prompts.join(", ")} for --mission ${args.mission}`,
+    );
+  const selected = adapter.loadCases().filter((c) => caseIds?.includes(c.id) ?? true);
+  const keys = housePlaybookKeys(
+    targets.runtimeMissionId,
+    selected.map((c) => adapter.input(c)),
+  );
+  const playbookKey = args.key ?? keys[0];
+  if (playbookKey === undefined || !keys.includes(playbookKey))
+    throw new Error(`--key must be one of ${keys.join(", ")} for the selected cases`);
+  const threshold = args.threshold ?? targets.regression.threshold;
+  const target = loadRuntimePrompts()[targetKey];
   const evalOptions = (resultsDir: string): RunEvalOptions => ({
+    mission: args.mission,
     trials: args.trials,
     ...(caseIds === undefined ? {} : { caseIds }),
     audience: args.audience,
@@ -73,21 +81,26 @@ async function main(): Promise<void> {
     baseline: false,
     judge: args.judge,
     resultsDir,
-    threshold: args.threshold,
+    threshold,
   });
   const deps = liveDeps(evalOptions(RESULTS_DIR));
   const evolutionDir = `${RESULTS_DIR}/evolution`;
   const proposerPrompt = loadProposerPrompt();
   const completer = createRouterCompleter({ env: deps.env, audience: args.audience });
+  const runArm = createLiveArmRunner(deps, (_mission, resultsDir) => evalOptions(resultsDir));
 
   const { log, logPath } = await runEvolution(
     {
+      mission: args.mission,
+      title: adapter.title,
       kind: args.kind,
       trials: args.trials,
-      threshold: args.threshold,
-      planner,
-      nextPromptVersion: nextVersion(planner.name),
-      house: loadShippedPlaybook(PLAYBOOK_KEY),
+      threshold,
+      targetKey,
+      target,
+      nextPromptVersion: nextPromptVersion([PROMPTS_DIR], target.name),
+      playbookKey,
+      house: readHousePlaybook(PLAYBOOKS_DIR, playbookKey),
       evolutionDir,
       promptsDir: PROMPTS_DIR,
       playbooksDir: PLAYBOOKS_DIR,
@@ -96,22 +109,14 @@ async function main(): Promise<void> {
       now: () => new Date(),
       log: deps.log,
       createStore: (seed) => createMemoryPlaybookStore(seed),
-      runArm: async (arm) => {
-        const trials: TrialRecord[] = [];
-        const summary = await runEval(evalOptions(`${evolutionDir}/runs/${arm.label}`), {
-          ...deps,
-          runMission: (options) =>
-            runMission({
-              ...options,
-              prompts: { ...options.prompts, planner: arm.planner },
-              playbooks: arm.store,
-              houseLearning: true,
-              shippedHouse: () => arm.house,
-            }),
-          onTrial: (record) => trials.push(record),
-        });
-        return { summary, trials };
-      },
+      runArm: (arm) =>
+        runArm({
+          mission: arm.mission,
+          prompts: arm.prompts,
+          houses: arm.houses,
+          store: arm.store,
+          resultsDir: `${evolutionDir}/runs/${arm.label}`,
+        }),
       propose: (input) => proposeRevision(completer, { ...input, prompt: proposerPrompt }),
       redteam: async () => {
         const result = summariseRedteam(await runSuite(loadRedteamDataset()), new Date());
