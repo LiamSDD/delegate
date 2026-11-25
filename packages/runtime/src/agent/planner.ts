@@ -24,6 +24,7 @@ export interface PlannerMission {
   executors: readonly StepExecutor[];
   allowedCapabilities: readonly string[];
   memory?: readonly string[];
+  stepLimits?: { min: number; max: number };
 }
 
 export type StepStatusView = "pending" | "running" | "succeeded" | "failed";
@@ -58,6 +59,11 @@ export function validatePlan(steps: readonly PlanStep[], mission: PlannerMission
     issues.push(
       `The plan has ${steps.length} steps; at most ${PLANNER_LIMITS.maxSteps} are allowed`,
     );
+  const limits = mission.stepLimits;
+  if (limits !== undefined && steps.length > 0 && steps.length < limits.min)
+    issues.push(`The plan has ${steps.length} steps; this mission needs at least ${limits.min}`);
+  if (limits !== undefined && steps.length > limits.max && steps.length <= PLANNER_LIMITS.maxSteps)
+    issues.push(`The plan has ${steps.length} steps; this mission allows at most ${limits.max}`);
   const allowed = new Set(mission.allowedCapabilities);
   const used = new Map<string, number>();
   for (const step of steps) {
