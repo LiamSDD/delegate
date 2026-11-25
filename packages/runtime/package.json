@@ -16,6 +16,14 @@
     "./server": {
       "types": "./src/server.ts",
       "default": "./src/server.ts"
+    },
+    "./security": {
+      "types": "./src/security.ts",
+      "default": "./src/security.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/fakes.ts",
+      "default": "./src/testing/fakes.ts"
     }
   },
   "scripts": {

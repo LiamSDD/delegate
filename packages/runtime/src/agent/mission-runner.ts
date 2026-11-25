@@ -1,5 +1,5 @@
 import { BudgetExceededError } from "../budget";
-import { PlanStepsSchema, diffPlans, type Actor, type PlanStep } from "../events";
+import { diffPlans, type Actor, type PlanStep } from "../events";
 import { PlanApprovalDecisionSchema, type AwaitPlanApproval } from "../plan-approval";
 import { type PromptFile } from "../prompts";
 import { NoModelAvailableError } from "../router";
@@ -11,7 +11,7 @@ import {
   type OrchestratorResume,
 } from "./orchestrator";
 import { chainHead, projectedCallMs, type MissionClock } from "./pacing";
-import { proposePlan, revisePlan, validatePlan, type PlannerMission } from "./planner";
+import { checkPlanSteps, proposePlan, revisePlan, type PlannerMission } from "./planner";
 import { StructuredOutputError } from "./structured";
 import { FatalStepError } from "./subagent";
 
@@ -177,16 +177,13 @@ export async function runPlannedMission(
           message: redact(decision.reason ?? "The plan was rejected by the reviewer"),
         });
       if (decision.steps !== undefined) {
-        const parsed = PlanStepsSchema.safeParse(decision.steps);
-        const issues = parsed.success
-          ? validatePlan(parsed.data, mission.planner)
-          : parsed.error.issues.map((issue) => issue.message);
-        if (!parsed.success || issues.length > 0)
-          return await fail({ code: "invalid_plan", message: redact(issues.join("; ")) });
-        const diff = diffPlans(steps, parsed.data);
+        const checked = checkPlanSteps(decision.steps, mission.planner);
+        if (!checked.ok)
+          return await fail({ code: "invalid_plan", message: redact(checked.issues.join("; ")) });
+        const diff = diffPlans(steps, checked.steps);
         if (diff.added.length + diff.removed.length + diff.changed.length > 0) {
           version += 1;
-          steps = parsed.data;
+          steps = checked.steps;
           await emit({
             runId,
             type: "plan.revised",

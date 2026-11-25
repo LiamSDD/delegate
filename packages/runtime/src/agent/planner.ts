@@ -99,6 +99,16 @@ export function validatePlan(steps: readonly PlanStep[], mission: PlannerMission
   return issues;
 }
 
+export type CheckedPlan = { ok: true; steps: PlanStep[] } | { ok: false; issues: string[] };
+
+export function checkPlanSteps(raw: unknown, mission: PlannerMission): CheckedPlan {
+  const parsed = PlanStepsSchema.safeParse(raw);
+  if (!parsed.success)
+    return { ok: false, issues: parsed.error.issues.map((issue) => issue.message) };
+  const issues = validatePlan(parsed.data, mission);
+  return issues.length > 0 ? { ok: false, issues } : { ok: true, steps: parsed.data };
+}
+
 function scaleShares(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
   const shares = value.map((step: unknown) =>
