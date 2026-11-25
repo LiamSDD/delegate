@@ -16,6 +16,7 @@ import {
   appRole,
   currentUserId,
   definerPolicies,
+  definerRole,
   hasWorkspaceRole,
   operators,
   readers,
@@ -60,5 +61,10 @@ export const playbooks = pgTable(
       withCheck: sql`${t.workspaceId} is not null and ${t.scope} = 'workspace' and ${hasWorkspaceRole(t.workspaceId, operators)}`,
     }),
     ...definerPolicies("playbooks", ["select", "insert"]),
+    pgPolicy("playbooks_definer_delete", {
+      for: "delete",
+      to: definerRole,
+      using: sql`${t.workspaceId} is not null`,
+    }),
   ],
 ).enableRLS();

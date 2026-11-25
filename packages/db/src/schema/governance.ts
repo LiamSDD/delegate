@@ -40,7 +40,7 @@ export const policies = pgTable(
       update: admins,
       delete: admins,
     }),
-    ...definerPolicies("policies", ["select"]),
+    ...definerPolicies("policies", ["select", "delete"]),
   ],
 ).enableRLS();
 
