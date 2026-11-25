@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@delegate/runtime", "@delegate/db"],
   serverExternalPackages: ["@electric-sql/pglite", "@electric-sql/pglite-pgvector"],
   outputFileTracingRoot: monorepoRoot,
+  outputFileTracingIncludes: {
+    "/**": ["../../pnpm-workspace.yaml", "../../packages/runtime/prompts/**/*"],
+  },
   turbopack: {
     root: monorepoRoot,
   },
