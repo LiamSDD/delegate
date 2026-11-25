@@ -43,7 +43,7 @@ export function isSafeRepoPath(relative: string): boolean {
 
 function absolute(relative: string): string {
   if (!isSafeRepoPath(relative)) throw new Error(`Not a repository-relative path: ${relative}`);
-  return path.join(docsRepoRoot(), ...relative.split("/"));
+  return path.join(/*turbopackIgnore: true*/ docsRepoRoot(), ...relative.split("/"));
 }
 
 export function repoFileExists(relative: string): boolean {
