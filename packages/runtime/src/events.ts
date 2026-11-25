@@ -303,6 +303,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       confidence: z.number().min(0).max(1).optional(),
       artifactIds: z.array(id),
       critic: CriticReportSchema.optional(),
+      checkpoint: z.unknown().optional(),
     }),
   ),
   event("run.completed", z.object({ summary: z.string() })),

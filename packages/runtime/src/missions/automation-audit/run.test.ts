@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
 import { runMission } from "../../server";
 import { FIXTURE_ORIGIN, fixtureDns, fixtureFetch } from "../../testing/fixture-site";
+import { BuildAgentInputSchema } from "../build-agent/input";
 import { NextActionsSchema } from "../next-actions";
 import { matchGeneric } from "./genericity";
 import { estimateRoi } from "./roi";
@@ -305,8 +306,17 @@ describe("runMission automation-audit end to end (fixture site, fake provider ov
     );
     expect(actions.actions).toHaveLength(audit.opportunities.length);
     expect(
-      actions.actions.every((action) => action.missionId === "build-agent" && !action.available),
+      actions.actions.every((action) => action.missionId === "build-agent" && action.available),
     ).toBe(true);
+    for (const [index, action] of actions.actions.entries()) {
+      const opportunity = audit.opportunities[index];
+      expect(BuildAgentInputSchema.parse(action.input)).toMatchObject({
+        url: expect.stringContaining("acme.example") as unknown,
+        goal: opportunity?.automation,
+        opportunityId: opportunity?.id,
+        fromAuditRunId: "run_audit",
+      });
+    }
 
     const readers = bodies.filter((body) =>
       body.messages[0]?.content?.includes("quarantined reader"),

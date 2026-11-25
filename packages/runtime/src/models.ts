@@ -39,8 +39,10 @@ export const ProviderConfigSchema = z.strictObject({
   limits: z
     .strictObject({
       requestsPerMinute: z.number().positive().optional(),
+      modelRequestsPerMinute: z.number().positive().optional(),
       tokensPerMinute: z.number().positive().optional(),
       maxConcurrent: z.number().int().positive().optional(),
+      scope: z.enum(["run", "process"]).optional(),
     })
     .optional(),
   pricing: z.record(z.string(), ModelPriceSchema).optional(),
@@ -56,6 +58,7 @@ export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 export const RoleEntrySchema = z.strictObject({
   provider: z.string().min(1),
   model: z.string().min(1),
+  displayName: z.string().min(1).max(60).optional(),
   contextWindow: z.number().int().positive(),
   supportsTools: z.boolean(),
   quirks: z.array(z.string().min(1)).optional(),
@@ -65,6 +68,25 @@ export const RoleEntrySchema = z.strictObject({
   unverified: z.boolean().optional(),
 });
 export type RoleEntry = z.infer<typeof RoleEntrySchema>;
+
+export const EMBEDDING_QUIRKS = ["input-type", "dimensions-param", "truncate-end"] as const;
+
+export const EmbeddingEntrySchema = z.strictObject({
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  dimensions: z.number().int().positive(),
+  maxBatch: z.number().int().positive().max(256),
+  quirks: z.array(z.enum(EMBEDDING_QUIRKS)).optional(),
+  unverified: z.boolean().optional(),
+  notes: z.string().optional(),
+});
+export type EmbeddingEntry = z.infer<typeof EmbeddingEntrySchema>;
+
+export const EmbeddingsConfigSchema = z.strictObject({
+  dimensions: z.number().int().positive(),
+  chain: z.array(EmbeddingEntrySchema),
+});
+export type EmbeddingsConfig = z.infer<typeof EmbeddingsConfigSchema>;
 
 export const ModelsConfigSchema = z
   .strictObject({
@@ -76,6 +98,7 @@ export const ModelsConfigSchema = z
       worker: z.array(RoleEntrySchema),
       fast: z.array(RoleEntrySchema),
     }),
+    embeddings: EmbeddingsConfigSchema.optional(),
   })
   .superRefine((config, ctx) => {
     const providers = new Map<string, ProviderConfig>();
@@ -122,6 +145,18 @@ export const ModelsConfigSchema = z
         }
       }
     }
+    for (const entry of config.embeddings?.chain ?? []) {
+      if (!providers.has(entry.provider))
+        ctx.addIssue({
+          code: "custom",
+          message: `Embeddings reference unknown provider ${entry.provider}`,
+        });
+      if (entry.dimensions !== config.embeddings?.dimensions)
+        ctx.addIssue({
+          code: "custom",
+          message: `Embedding model ${entry.provider}/${entry.model} has ${entry.dimensions} dimensions; the store expects ${config.embeddings?.dimensions}`,
+        });
+    }
   });
 export type ModelsConfig = z.infer<typeof ModelsConfigSchema>;
 
@@ -148,6 +183,7 @@ export interface ChainEntry {
   role: ModelRole;
   provider: ProviderConfig;
   model: string;
+  displayName?: string;
   contextWindow: number;
   supportsTools: boolean;
   quirks: string[];
@@ -223,6 +259,7 @@ export function resolveChain(role: ModelRole, env: Env, context: ChainContext): 
       role,
       provider,
       model: entry.model,
+      ...(entry.displayName === undefined ? {} : { displayName: entry.displayName }),
       contextWindow: entry.contextWindow,
       supportsTools: entry.supportsTools,
       quirks: entry.quirks ?? [],

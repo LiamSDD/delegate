@@ -3,10 +3,23 @@ import { lookup } from "node:dns/promises";
 
 import { defaultPolicy, ownerDefaultPolicy } from "@delegate/policy";
 
-import { createRunContext, type Audience } from "./agent/context";
+import {
+  createRunContext,
+  resolveQuality,
+  type Audience,
+  type QualityMode,
+  type QualityTimeouts,
+} from "./agent/context";
 import { createRunEmitter } from "./agent/emitter";
+import { type ResumePoint } from "./agent/mission-runner";
+import { analyseForResume, type ExistingArtifact } from "./durable/checkpoints";
+import { LeaseLostError, holdLease, type RunLease } from "./durable/lease";
+import { type EmbeddingProvider, resolveEmbeddings } from "./knowledge/embeddings";
+import { createMemoryKnowledgeStore } from "./knowledge/memory-store";
+import { type KnowledgeStore, type MemoryStore } from "./knowledge/types";
+import { memoryNotes, recordRunMemory } from "./knowledge/workspace-memory";
 import { Budget, type RunBudgetLimits } from "./budget";
-import { type Actor, type RunEventDraft } from "./events";
+import { type Actor, type RunEvent, type RunEventDraft } from "./events";
 import {
   parseModelsConfig,
   resolveBaseUrl,
@@ -17,6 +30,14 @@ import {
 } from "./models";
 import { MISSIONS, type MissionId } from "./missions";
 import { runAutomationAudit } from "./missions/automation-audit/run";
+import { type AnswerEvent } from "./missions/build-agent/answer";
+import {
+  answerWithAssistant,
+  type AnswerQuestionInput,
+  type RateLimitHook,
+} from "./missions/build-agent/chat";
+import { runBuildAgent } from "./missions/build-agent/run";
+import { createMemoryAssistantStore, type AssistantStore } from "./missions/build-agent/schema";
 import { runCompanyXray } from "./missions/company-xray/run";
 import { type AwaitPlanApproval } from "./plan-approval";
 import { parsePromptFile, type PromptFile } from "./prompts";
@@ -44,9 +65,15 @@ export interface RunMissionOptions {
   modelsConfig?: unknown;
   prompts?: Partial<RuntimePrompts>;
   latency?: LatencyMode;
+  quality?: QualityMode;
+  qualityTimeouts?: Partial<QualityTimeouts>;
   awaitPlanApproval?: AwaitPlanApproval;
   planApprover?: Actor;
   concurrency?: number;
+  knowledge?: KnowledgeStore;
+  assistants?: AssistantStore;
+  memory?: MemoryStore;
+  embeddings?: EmbeddingProvider | null;
 }
 
 export const RUNTIME_PROMPT_FILES = {
@@ -58,7 +85,26 @@ export const RUNTIME_PROMPT_FILES = {
   editor: "editor.v1.md",
   analyst: "automation-audit.analyst.v1.md",
   auditEditor: "automation-audit.editor.v1.md",
+  designer: "build-agent.designer.v1.md",
+  evalgen: "build-agent.evalgen.v1.md",
+  grader: "build-agent.grader.v1.md",
+  gaps: "build-agent.gaps.v1.md",
+  answer: "assistant.answer.v1.md",
+  rerank: "retrieval.rerank.v1.md",
 } as const;
+
+export const BUILD_AGENT_FETCH_PAGES = 80;
+
+const inProcess = {
+  knowledge: createMemoryKnowledgeStore(),
+  assistants: createMemoryAssistantStore(),
+};
+
+export function inProcessStores(): { knowledge: KnowledgeStore; assistants: AssistantStore } {
+  return inProcess;
+}
+
+const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set(["build-agent"]);
 
 export type RuntimePrompts = Record<keyof typeof RUNTIME_PROMPT_FILES, PromptFile>;
 
@@ -147,7 +193,19 @@ function invalid(
   }));
 }
 
-export async function runMission(options: RunMissionOptions): Promise<RunMissionResult> {
+interface MissionResume {
+  point?: ResumePoint;
+  artifacts: readonly ExistingArtifact[];
+}
+
+export function runMission(options: RunMissionOptions): Promise<RunMissionResult> {
+  return executeMission(options);
+}
+
+async function executeMission(
+  options: RunMissionOptions,
+  resume?: MissionResume,
+): Promise<RunMissionResult> {
   const mission = (MISSIONS as Partial<Record<string, (typeof MISSIONS)[MissionId]>>)[
     options.missionId
   ];
@@ -168,19 +226,42 @@ export async function runMission(options: RunMissionOptions): Promise<RunMission
   const audience = options.context.audience;
   const now = options.now ?? (() => new Date());
   const resolveDns = options.resolveDns ?? systemResolveDns;
+  const produced: { kind: string; content: unknown; artifactId: string }[] = [];
+  const emit = async (event: RunEventDraft) => {
+    if (event.type === "artifact.created")
+      produced.push({
+        artifactId: event.payload.artifactId,
+        kind: event.payload.kind,
+        content: event.payload.content,
+      });
+    if (event.type === "artifact.updated") {
+      const known = produced.find((entry) => entry.artifactId === event.payload.artifactId);
+      if (known !== undefined && event.payload.content !== undefined)
+        known.content = event.payload.content;
+    }
+    await options.emit(event);
+  };
+  for (const artifact of resume?.artifacts ?? [])
+    produced.push({
+      artifactId: artifact.artifactId,
+      kind: artifact.kind,
+      content: artifact.content,
+    });
+  const config = loadModelsConfig(options.modelsConfig);
   const ctx = createRunContext({
     runId: options.runId,
     workspaceId: options.workspaceId ?? "unscoped",
     audience,
     classification: options.context.classification,
-    config: loadModelsConfig(options.modelsConfig),
+    config,
     env: options.env,
-    emitter: createRunEmitter(options.emit),
+    emitter: createRunEmitter(emit),
     budget: new Budget({ run: RUN_BUDGETS[audience] }),
     policies: [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy],
     createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
     environment: "server",
     ...(options.latency === undefined ? {} : { latency: options.latency }),
+    quality: resolveQuality(audience, options.quality, options.qualityTimeouts),
     now,
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -189,20 +270,213 @@ export async function runMission(options: RunMissionOptions): Promise<RunMission
     fetchImpl: options.fetchImpl ?? createPinnedFetch(resolveDns),
     resolveDns,
     now,
+    ...(mission.id === "build-agent" ? { maxPages: BUILD_AGENT_FETCH_PAGES } : {}),
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
   });
   const prompts = loadRuntimePrompts(options.prompts);
+  const restorable = RESTORABLE_MISSIONS.has(mission.id);
+  const point =
+    resume?.point === undefined
+      ? undefined
+      : restorable
+        ? resume.point
+        : { ...resume.point, completed: new Map(), failed: new Set<string>() };
   const run = {
     ...(options.awaitPlanApproval === undefined
       ? {}
       : { awaitPlanApproval: options.awaitPlanApproval }),
     ...(options.planApprover === undefined ? {} : { approver: options.planApprover }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+    ...(point === undefined ? {} : { resume: point }),
   };
+  const notes =
+    options.memory === undefined ? [] : memoryNotes(await options.memory.read().catch(() => []));
+  let status: "completed" | "failed";
   if (mission.id === "automation-audit") {
     const input = MISSIONS["automation-audit"].inputSchema.parse(parsed.data);
-    return { status: await runAutomationAudit({ ctx, input, fetcher, prompts, run }) };
+    status = await runAutomationAudit({ ctx, input, fetcher, prompts, run });
+  } else if (mission.id === "build-agent") {
+    const input = MISSIONS["build-agent"].inputSchema.parse(parsed.data);
+    const embeddings =
+      options.embeddings === null
+        ? undefined
+        : (options.embeddings ??
+          resolveEmbeddings({
+            config,
+            env: options.env,
+            audience,
+            classification: options.context.classification,
+            ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+          }));
+    status = await runBuildAgent({
+      ctx,
+      input,
+      fetcher,
+      prompts,
+      knowledge: options.knowledge ?? inProcess.knowledge,
+      assistants: options.assistants ?? inProcess.assistants,
+      embeddings,
+      memoryNotes: notes,
+      ...(restorable && resume !== undefined ? { existingArtifacts: resume.artifacts } : {}),
+      run,
+    });
+  } else {
+    const input = MISSIONS["company-xray"].inputSchema.parse(parsed.data);
+    status = await runCompanyXray({ ctx, input, fetcher, prompts, run });
   }
-  const input = MISSIONS["company-xray"].inputSchema.parse(parsed.data);
-  return { status: await runCompanyXray({ ctx, input, fetcher, prompts, run }) };
+  if (status === "completed" && options.memory !== undefined)
+    await recordRunMemory(options.memory, {
+      runId: options.runId,
+      missionId: mission.id,
+      input: parsed.data,
+      at: now().toISOString(),
+      artifacts: produced,
+    }).catch(() => undefined);
+  return { status };
 }
+
+export interface ResumeMissionOptions extends Omit<RunMissionOptions, "missionId" | "input"> {
+  events: readonly RunEvent[];
+  lease?: RunLease;
+}
+
+export interface ResumeMissionResult {
+  status: "completed" | "failed" | "busy";
+  resumed: boolean;
+  skippedSteps: string[];
+  rerunSteps: string[];
+}
+
+export async function resumeMission(options: ResumeMissionOptions): Promise<ResumeMissionResult> {
+  const analysis = analyseForResume(options.events);
+  if (analysis.kind === "finished")
+    return { status: analysis.status, resumed: false, skippedSteps: [], rerunSteps: [] };
+  const restorable = RESTORABLE_MISSIONS.has(analysis.missionId);
+  const skippedSteps = restorable ? analysis.completedSteps : [];
+  const rerunSteps = restorable
+    ? analysis.rerunSteps
+    : (analysis.point?.steps.map((step) => step.id) ?? []);
+  const execute = (signal: AbortSignal | undefined, held: () => boolean = () => true) =>
+    executeMission(
+      {
+        ...options,
+        emit: (event) => (held() ? options.emit(event) : Promise.reject(new LeaseLostError())),
+        missionId: analysis.missionId as MissionId,
+        input: analysis.input,
+        workspaceId: options.workspaceId ?? analysis.workspaceId,
+        ...(signal === undefined ? {} : { signal }),
+      },
+      {
+        ...(analysis.point === undefined ? {} : { point: analysis.point }),
+        artifacts: analysis.artifacts,
+      },
+    );
+  if (options.lease === undefined) {
+    const result = await execute(options.signal);
+    return { status: result.status, resumed: true, skippedSteps, rerunSteps };
+  }
+  const held = await holdLease(options.lease, options.signal, execute);
+  if (!held.acquired) return { status: "busy", resumed: false, skippedSteps: [], rerunSteps: [] };
+  return { status: held.value.status, resumed: true, skippedSteps, rerunSteps };
+}
+
+export const CHAT_BUDGETS: Record<Audience, RunBudgetLimits> = {
+  "public-demo": { maxTokens: 40_000, maxMicroUsd: 0 },
+  owner: { maxTokens: 60_000, maxMicroUsd: 200_000 },
+};
+
+export interface AnswerQuestionOptions extends AnswerQuestionInput {
+  env: Record<string, string | undefined>;
+  audience: Audience;
+  assistants?: AssistantStore;
+  knowledge?: KnowledgeStore;
+  embeddings?: EmbeddingProvider | null;
+  modelsConfig?: unknown;
+  prompts?: Partial<RuntimePrompts>;
+  rateLimit?: RateLimitHook;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+  latency?: LatencyMode;
+  now?: () => Date;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export function answerQuestion(options: AnswerQuestionOptions): AsyncGenerator<AnswerEvent> {
+  const config = loadModelsConfig(options.modelsConfig);
+  const prompts = loadRuntimePrompts(options.prompts);
+  const embeddings =
+    options.embeddings === null
+      ? undefined
+      : (options.embeddings ??
+        resolveEmbeddings({
+          config,
+          env: options.env,
+          audience: options.audience,
+          classification: "public",
+          ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        }));
+  return answerWithAssistant(
+    {
+      assistants: options.assistants ?? inProcess.assistants,
+      knowledge: options.knowledge ?? inProcess.knowledge,
+      embeddings,
+      prompts: { answer: prompts.answer, rerank: prompts.rerank },
+      ...(options.rateLimit === undefined ? {} : { rateLimit: options.rateLimit }),
+      context: (assistantId) =>
+        createRunContext({
+          runId: `chat-${assistantId}`,
+          workspaceId: "assistant",
+          audience: options.audience,
+          classification: "public",
+          config,
+          env: options.env,
+          emitter: createRunEmitter(() => Promise.resolve()),
+          budget: new Budget({ run: CHAT_BUDGETS[options.audience] }),
+          policies: [options.audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy],
+          createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
+          environment: "server",
+          ...(options.latency === undefined ? {} : { latency: options.latency }),
+          ...(options.now === undefined ? {} : { now: options.now }),
+          ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+        }),
+    },
+    {
+      assistantId: options.assistantId,
+      question: options.question,
+      ...(options.history === undefined ? {} : { history: options.history }),
+    },
+  );
+}
+
+export { AnswerQuestionInputSchema, type RateLimitHook } from "./missions/build-agent/chat";
+export {
+  MAX_QUALITY_TIMEOUTS,
+  QUALITY_MODES,
+  resolveQuality,
+  type QualityMode,
+  type QualitySettings,
+  type QualityTimeouts,
+} from "./agent/context";
+export {
+  analyseForResume,
+  type ExistingArtifact,
+  type ResumeAnalysis,
+} from "./durable/checkpoints";
+export { LeaseLostError, createMemoryLeases, holdLease } from "./durable/lease";
+export {
+  createOpenAICompatibleEmbeddings,
+  embedAll,
+  EmbeddingError,
+  resolveEmbeddings,
+  type EmbeddingProvider,
+} from "./knowledge/embeddings";
+export { chunkPage, CHUNK_DEFAULTS } from "./knowledge/chunker";
+export {
+  createMemoryKnowledgeStore,
+  createMemoryMemoryStore,
+  lexicalTerms,
+} from "./knowledge/memory-store";
+export { reciprocalRankFusion, retrieve, RETRIEVAL_DEFAULTS } from "./knowledge/retrieve";
+export { memoryNotes, recordRunMemory, MEMORY_KEYS } from "./knowledge/workspace-memory";
+export { assistantIdForRun } from "./missions/build-agent/run";

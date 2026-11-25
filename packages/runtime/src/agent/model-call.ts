@@ -2,14 +2,24 @@ import { costMicroUsd, priceFor } from "../budget";
 import { type ModelRole, type Usage } from "../events";
 import { type ChainEntry } from "../models";
 import { type StopReason, type ToolCall, type TokenUsage } from "../providers/types";
-import { NoModelAvailableError, type RoutedStream, type RouterRequest } from "../router";
+import {
+  NoModelAvailableError,
+  type OpenOptions,
+  type RoutedStream,
+  type RouterRequest,
+} from "../router";
 import { RunAbortedError, type RunContext } from "./context";
 
 export const DEFAULT_RATE_LIMIT_PATIENCE_MS = 45_000;
 const RATE_LIMIT_SLACK_MS = 50;
 
+export interface QualityRequest {
+  say: (text: string) => Promise<void>;
+}
+
 export interface ModelCallOptions {
   role: ModelRole;
+  quality?: QualityRequest | undefined;
   stepId?: string | undefined;
   request: RouterRequest;
   onText?: (text: string) => void;
@@ -49,17 +59,64 @@ function retryableWait(error: NoModelAvailableError, retry: number): number | un
   return waits.length === 0 ? undefined : Math.min(...waits);
 }
 
+export function modelLabel(entry: ChainEntry): string {
+  return entry.displayName ?? entry.model;
+}
+
+export function waitingMessage(entry: ChainEntry): string {
+  return `Waiting for ${modelLabel(entry)} (max quality, can take several minutes)`;
+}
+
+export function qualityNote(calls: readonly ModelCallResult[]): string | undefined {
+  const served = calls.find((call) => !call.entry.interactive);
+  return served === undefined ? undefined : `Max quality: ${modelLabel(served.entry)}`;
+}
+
+export function withQualityNote(summary: string, calls: readonly ModelCallResult[]): string {
+  const note = qualityNote(calls);
+  return note === undefined ? summary : `${summary} · ${note}`;
+}
+
+interface MaxQualityRouting {
+  options: Pick<OpenOptions, "latency" | "offlineTimeouts" | "onAttempt">;
+  announced: () => Promise<void>;
+}
+
+function maxQualityRouting(
+  ctx: RunContext,
+  quality: QualityRequest | undefined,
+): MaxQualityRouting | undefined {
+  const settings = ctx.quality;
+  if (quality === undefined || settings?.mode !== "max") return undefined;
+  let announcement: Promise<void> | undefined;
+  return {
+    options: {
+      latency: "offline",
+      offlineTimeouts: { firstTokenMs: settings.firstTokenMs, totalMs: settings.totalMs },
+      onAttempt: (entry) => {
+        if (entry.interactive || announcement !== undefined) return;
+        announcement = quality.say(waitingMessage(entry)).catch(() => undefined);
+      },
+    },
+    announced: () => announcement ?? Promise.resolve(),
+  };
+}
+
 async function openPatiently(ctx: RunContext, options: ModelCallOptions): Promise<RoutedStream> {
   const patience = options.maxRateLimitWaitMs ?? DEFAULT_RATE_LIMIT_PATIENCE_MS;
+  const max = maxQualityRouting(ctx, options.quality);
   let waited = 0;
   let retries = 0;
   for (;;) {
     if (ctx.signal?.aborted === true) throw new RunAbortedError();
     try {
-      return await ctx.router.open(options.role, options.request, {
+      const routed = await ctx.router.open(options.role, options.request, {
         classification: ctx.classification,
         ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
+        ...max?.options,
       });
+      await max?.announced();
+      return routed;
     } catch (error) {
       if (!(error instanceof NoModelAvailableError)) throw error;
       const wait = retryableWait(error, retries);

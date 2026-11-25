@@ -24,7 +24,7 @@ import {
   type SubAgentResult,
 } from "../../agent/subagent";
 import { NoModelAvailableError } from "../../router";
-import { ModelStreamError } from "../../agent/model-call";
+import { ModelStreamError, withQualityNote, type ModelCallResult } from "../../agent/model-call";
 import { type PromptFile } from "../../prompts";
 import { type Fetcher } from "../../tools/fetch";
 import { NEXT_ACTIONS_KIND, type NextActions } from "../next-actions";
@@ -601,6 +601,7 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
           "No company-specific automation candidates survived the evidence and genericity checks",
         );
       let picked = pool.slice(0, MAX_OPPORTUNITIES);
+      let servedBy: ModelCallResult[] = [];
       let company = companyGuess();
       if (pool.length > MIN_OPPORTUNITIES && clock.fits(["planner", "fast", "worker"])) {
         try {
@@ -626,7 +627,9 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
             schema: EditorOutputSchema,
             maxTokens: AUDIT_LIMITS.editorMaxTokens,
             temperature: 0.1,
+            quality: { say: task.agent.say },
           });
+          servedBy = result.calls;
           const chosen = [...new Set(result.value.picks)]
             .map((id) => pool.find((candidate) => candidate.candidateId === id))
             .filter((candidate): candidate is Candidate => candidate !== undefined);
@@ -673,7 +676,10 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
         ),
       );
       return {
-        summary: `Picked ${plural(opportunities.length, "opportunity", "opportunities")} from ${plural(pool.length, "candidate")}, ranked by estimated €/month`,
+        summary: withQualityNote(
+          `Picked ${plural(opportunities.length, "opportunity", "opportunities")} from ${plural(pool.length, "candidate")}, ranked by estimated €/month`,
+          servedBy,
+        ),
         findings: facts.filter((fact) => cited.has(fact.sourceId)).map(factToFinding),
         sources: sourcesFor(opportunities),
         confidence: Math.min(1, opportunities.length / MIN_OPPORTUNITIES),
@@ -884,12 +890,18 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
           id: `build-${opportunity.id}`,
           label: "Build it",
           description: cut(
-            `Turn "${opportunity.title}" into a running automation (Build-an-Agent arrives in M3).`,
+            `Turn "${opportunity.title}" into a cited assistant trained on the company's own website, with its own eval set and gaps report.`,
             300,
           ),
           missionId: "build-agent",
-          input: { url: input.url, opportunityId: opportunity.id, title: opportunity.title },
-          available: false,
+          input: {
+            url: input.url,
+            goal: opportunity.automation,
+            name: cut(opportunity.title, 80),
+            opportunityId: opportunity.id,
+            fromAuditRunId: runId,
+          },
+          available: true,
           opportunityId: opportunity.id,
         })),
       };

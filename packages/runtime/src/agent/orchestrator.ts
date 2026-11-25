@@ -35,6 +35,16 @@ export interface OrchestrateOptions {
   confidenceThreshold?: number;
   maxRevisions?: number;
   replan?: Replanner;
+  resume?: OrchestratorResume;
+}
+
+export interface OrchestratorResume {
+  completed: ReadonlyMap<string, SubAgentResult>;
+  failed: ReadonlySet<string>;
+}
+
+export class StepFailedBeforeResumeError extends Error {
+  override readonly name = "StepFailedBeforeResumeError";
 }
 
 export interface OrchestrationResult {
@@ -85,6 +95,19 @@ export async function orchestrate(
   const statuses = new Map<string, StepStatusView>(plan.map((step) => [step.id, "pending"]));
   const results = new Map<string, SubAgentResult>();
   const errors = new Map<string, unknown>();
+  for (const step of plan) {
+    const restored = options.resume?.completed.get(step.id);
+    if (restored !== undefined) {
+      statuses.set(step.id, "succeeded");
+      results.set(step.id, restored);
+    } else if (options.resume?.failed.has(step.id) === true) {
+      statuses.set(step.id, "failed");
+      errors.set(
+        step.id,
+        new StepFailedBeforeResumeError(`Step ${step.id} failed before the run was resumed`),
+      );
+    }
+  }
   const running = new Map<string, Promise<void>>();
   const finished: string[] = [];
   let fatal: unknown;
@@ -145,6 +168,7 @@ export async function orchestrate(
           confidence: result.confidence,
           artifactIds: result.artifacts,
           ...(result.critic === undefined ? {} : { critic: result.critic }),
+          checkpoint: result,
         },
       });
     } catch (error) {

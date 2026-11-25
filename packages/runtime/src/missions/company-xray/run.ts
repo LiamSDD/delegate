@@ -15,6 +15,7 @@ import {
   type StepExecutor,
   type SubAgentResult,
 } from "../../agent/subagent";
+import { withQualityNote, type ModelCallResult } from "../../agent/model-call";
 import { callStructured } from "../../agent/structured";
 import { type PromptFile } from "../../prompts";
 import { type Fetcher } from "../../tools/fetch";
@@ -200,6 +201,7 @@ export function createCompanyXrayMission(deps: CompanyXrayDependencies): Planned
       let oneLiner: Claim | null = null;
       let sections: CompanyXraySections;
       let droppedClaims = 0;
+      let servedBy: ModelCallResult[] = [];
       if (facts.length === 0) {
         sections = emptySections("No usable facts could be extracted from the fetched sources.");
       } else {
@@ -225,7 +227,9 @@ export function createCompanyXrayMission(deps: CompanyXrayDependencies): Planned
           schema: CompanyXrayDraftOutputSchema,
           maxTokens: XRAY_LIMITS.synthesisMaxTokens,
           temperature: 0.2,
+          quality: { say: task.agent.say },
         });
+        servedBy = synthesis.calls;
         const normalised = normaliseSynthesis(synthesis.value);
         const check = enforceCitations(normalised.synthesis, evidenceIds);
         companyName = normalised.synthesis.companyName;
@@ -308,7 +312,10 @@ export function createCompanyXrayMission(deps: CompanyXrayDependencies): Planned
       );
       const cited = citedSourceIds(sections, oneLiner);
       return {
-        summary: `${supported.length} of ${SECTION_KEYS.length} sections drafted from evidence`,
+        summary: withQualityNote(
+          `${supported.length} of ${SECTION_KEYS.length} sections drafted from evidence`,
+          servedBy,
+        ),
         findings: facts.filter((fact) => cited.has(fact.sourceId)).map(factToFinding),
         sources: base(state).sources.map(({ quotes: _quotes, ...record }) => record),
         confidence: supported.length / SECTION_KEYS.length,

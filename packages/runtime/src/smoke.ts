@@ -1,7 +1,14 @@
 import { z } from "zod";
 
 import { MODEL_ROLES } from "./events";
-import { isProviderAvailable, resolveChain, type Env, type ModelsConfig } from "./models";
+import { createOpenAICompatibleEmbeddings } from "./knowledge/embeddings";
+import {
+  isProviderAvailable,
+  resolveBaseUrl,
+  resolveChain,
+  type Env,
+  type ModelsConfig,
+} from "./models";
 import { type ToolDefinition } from "./providers/types";
 import { createServerProvider } from "./server";
 
@@ -126,6 +133,60 @@ export async function runSmoke(options: SmokeOptions): Promise<SmokeResult[]> {
           ),
         });
       }
+    }
+  }
+  return results;
+}
+
+export async function runEmbeddingSmoke(options: SmokeOptions): Promise<SmokeResult[]> {
+  const now = options.now ?? Date.now;
+  const context = {
+    audience: "owner" as const,
+    environment: "server" as const,
+    classification: "public" as const,
+  };
+  const results: SmokeResult[] = [];
+  for (const entry of options.config.embeddings?.chain ?? []) {
+    const provider = options.config.providers.find((candidate) => candidate.id === entry.provider);
+    const label = { provider: entry.provider, model: entry.model, toolCall: false };
+    if (
+      provider?.kind !== "openai-compatible" ||
+      !isProviderAvailable(provider, options.env, context)
+    ) {
+      results.push({
+        ...label,
+        status: "skip",
+        detail: "embeddings: not configured on this server",
+      });
+      continue;
+    }
+    const started = now();
+    try {
+      const baseUrl = resolveBaseUrl(provider, options.env) ?? "";
+      const apiKey = provider.apiKeyEnv === undefined ? undefined : options.env[provider.apiKeyEnv];
+      const embedder = createOpenAICompatibleEmbeddings({
+        provider: provider.id,
+        baseUrl,
+        entry,
+        ...(apiKey === undefined ? {} : { apiKey }),
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      });
+      const [vector] = await embedder.embed(["connectivity check"], "query");
+      results.push({
+        ...label,
+        status: vector?.length === entry.dimensions ? "pass" : "fail",
+        latencyMs: now() - started,
+        detail: `embeddings: ${vector?.length ?? 0} dimensions`,
+      });
+    } catch (error) {
+      results.push({
+        ...label,
+        status: "fail",
+        latencyMs: now() - started,
+        detail: redactSecrets(
+          `embeddings: ${error instanceof Error ? error.message : "request failed"}`,
+        ).slice(0, 160),
+      });
     }
   }
   return results;

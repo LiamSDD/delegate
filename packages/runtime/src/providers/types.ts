@@ -64,8 +64,14 @@ export type ModelStreamEvent =
   | { type: "usage"; usage: TokenUsage; estimated?: boolean }
   | { type: "stop"; reason: StopReason; raw?: string };
 
+export interface CallTimeouts {
+  firstTokenMs: number;
+  totalMs: number;
+}
+
 export interface StreamOptions {
   signal?: AbortSignal;
+  timeouts?: CallTimeouts;
 }
 
 export interface ModelProvider {

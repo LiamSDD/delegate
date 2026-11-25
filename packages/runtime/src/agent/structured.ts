@@ -3,7 +3,7 @@ import { type z } from "zod";
 import { type ModelRole } from "../events";
 import { type ChatMessage } from "../providers/types";
 import { type RunContext } from "./context";
-import { callModel, type ModelCallResult } from "./model-call";
+import { callModel, type ModelCallResult, type QualityRequest } from "./model-call";
 
 const MAX_ISSUES_IN_REPAIR = 12;
 const MAX_ECHOED_ANSWER_CHARS = 12_000;
@@ -27,6 +27,7 @@ export interface StructuredCallOptions<T> {
   schema: z.ZodType<T>;
   maxTokens: number;
   temperature?: number;
+  quality?: QualityRequest | undefined;
 }
 
 export interface StructuredResult<T> {
@@ -167,9 +168,10 @@ export async function callStructured<T>(
   options: StructuredCallOptions<T>,
 ): Promise<StructuredResult<T>> {
   const messages: ChatMessage[] = [{ role: "user", content: options.user }];
-  const request = (history: ChatMessage[]) => ({
+  const request = (history: ChatMessage[], quality?: QualityRequest) => ({
     role: options.role,
     stepId: options.stepId,
+    ...(quality === undefined ? {} : { quality }),
     request: {
       system: options.system,
       messages: history,
@@ -177,7 +179,7 @@ export async function callStructured<T>(
       ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
     },
   });
-  const first = await callModel(ctx, request(messages));
+  const first = await callModel(ctx, request(messages, options.quality));
   const firstCheck = validate(options.schema, first);
   if (firstCheck.ok) return { value: firstCheck.value, repaired: false, calls: [first] };
 

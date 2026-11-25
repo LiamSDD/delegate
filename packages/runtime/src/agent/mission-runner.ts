@@ -4,7 +4,12 @@ import { PlanApprovalDecisionSchema, type AwaitPlanApproval } from "../plan-appr
 import { type PromptFile } from "../prompts";
 import { NoModelAvailableError } from "../router";
 import { RunAbortedError, type RunContext } from "./context";
-import { orchestrate, redact, type OrchestrationResult } from "./orchestrator";
+import {
+  orchestrate,
+  redact,
+  type OrchestrationResult,
+  type OrchestratorResume,
+} from "./orchestrator";
 import { chainHead, projectedCallMs, type MissionClock } from "./pacing";
 import { proposePlan, revisePlan, validatePlan, type PlannerMission } from "./planner";
 import { StructuredOutputError } from "./structured";
@@ -32,11 +37,18 @@ export interface PlannedMission {
   finish: (outcome: OrchestrationResult) => Promise<MissionFinish>;
 }
 
+export interface ResumePoint extends OrchestratorResume {
+  steps: PlanStep[];
+  version: number;
+  approved: boolean;
+}
+
 export interface PlannedRunOptions {
   plannerPrompt: PromptFile;
   awaitPlanApproval?: AwaitPlanApproval;
   approver?: Actor;
   concurrency?: number;
+  resume?: ResumePoint;
 }
 
 export function classifyFailure(error: unknown): MissionFailureInfo {
@@ -97,42 +109,60 @@ export async function runPlannedMission(
   };
 
   try {
-    const planner = plannerUsable(ctx);
-    const proposed = await proposePlan(ctx, {
-      mission: mission.planner,
-      defaultPlan: mission.defaultPlan,
-      prompt: options.plannerPrompt,
-      usePlanner: planner.usable,
-      ...(planner.reason === undefined ? {} : { skipReason: planner.reason }),
-    });
     let version = 1;
-    let steps = proposed.steps;
-    const note =
-      proposed.source === "default"
-        ? `Using the mission's default plan. ${proposed.fallbackReason ?? ""}`.trim()
-        : proposed.rationale;
-    await emit({
-      runId,
-      type: "plan.proposed",
-      payload: {
-        version,
-        steps,
-        source: proposed.source,
-        ...(note === undefined ? {} : { rationale: note.slice(0, 2000) }),
-      },
-    });
-    const first = steps[0];
-    if (proposed.source === "default" && first !== undefined && note !== undefined) {
+    let steps: PlanStep[];
+    const resume = options.resume;
+    if (resume === undefined) {
+      const planner = plannerUsable(ctx);
+      const proposed = await proposePlan(ctx, {
+        mission: mission.planner,
+        defaultPlan: mission.defaultPlan,
+        prompt: options.plannerPrompt,
+        usePlanner: planner.usable,
+        ...(planner.reason === undefined ? {} : { skipReason: planner.reason }),
+      });
+      steps = proposed.steps;
+      const note =
+        proposed.source === "default"
+          ? `Using the mission's default plan. ${proposed.fallbackReason ?? ""}`.trim()
+          : proposed.rationale;
       await emit({
         runId,
-        type: "agent.message",
-        stepId: first.id,
-        agentId: "planner",
-        payload: { text: note },
+        type: "plan.proposed",
+        payload: {
+          version,
+          steps,
+          source: proposed.source,
+          ...(note === undefined ? {} : { rationale: note.slice(0, 2000) }),
+        },
       });
+      const first = steps[0];
+      if (proposed.source === "default" && first !== undefined && note !== undefined) {
+        await emit({
+          runId,
+          type: "agent.message",
+          stepId: first.id,
+          agentId: "planner",
+          payload: { text: note },
+        });
+      }
+      const ignored = ctx.quality?.ignoredReason;
+      if (first !== undefined && ignored !== undefined)
+        await emit({
+          runId,
+          type: "agent.message",
+          stepId: first.id,
+          agentId: "planner",
+          payload: { text: ignored },
+        });
+    } else {
+      version = resume.version;
+      steps = resume.steps;
     }
 
-    if (options.awaitPlanApproval === undefined) {
+    if (resume?.approved === true) {
+      steps = resume.steps;
+    } else if (options.awaitPlanApproval === undefined) {
       await emit({
         runId,
         type: "plan.approved",
@@ -183,6 +213,9 @@ export async function runPlannedMission(
       version,
       executors: mission.planner.executors,
       ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+      ...(resume === undefined
+        ? {}
+        : { resume: { completed: resume.completed, failed: resume.failed } }),
       replan: async (state) => {
         if (!plannerUsable(ctx).usable || !mission.clock.fits(["planner"])) return null;
         return revisePlan(ctx, { mission: mission.planner, prompt: options.plannerPrompt, state });

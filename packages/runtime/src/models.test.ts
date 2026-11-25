@@ -131,7 +131,7 @@ describe("config/models.json", () => {
     expect(() => ModelsConfigSchema.parse(rootConfig)).not.toThrow();
   });
 
-  it("orders every role as ADR 0003 Amendment 2: optional evaluation-only owner entries first, then keyless, browser, local, optional keys and BYOK last", () => {
+  it("orders every role as ADR 0003 Amendment 3: ranked keyed free-tier entries first, then keyless, browser, local, optional keys and BYOK last", () => {
     const config = parseModelsConfig(rootConfig);
     const providerOf = (providerId: string) => {
       const provider = config.providers.find((candidate) => candidate.id === providerId);
@@ -149,9 +149,12 @@ describe("config/models.json", () => {
       const entries = config.roles[role];
       const firstKeyless = entries.findIndex((entry) => providerOf(entry.provider).keyless);
       const leading = entries.slice(0, firstKeyless);
-      expect(leading.every((entry) => providerOf(entry.provider).terms === "evaluation-only")).toBe(
-        true,
-      );
+      expect(
+        leading.every((entry) => {
+          const provider = providerOf(entry.provider);
+          return !provider.keyless && provider.terms !== "byok" && provider.kind !== "anthropic";
+        }),
+      ).toBe(true);
       const ranks = entries.slice(firstKeyless).map((entry) => rank(entry.provider));
       expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
       expect(ranks[0]).toBe(0);

@@ -173,10 +173,11 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
     request: ModelRequest,
     streamOptions: StreamOptions | undefined,
   ): Promise<Response> {
+    const headersTimeoutMs = streamOptions?.timeouts?.firstTokenMs ?? timeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
-    }, timeoutMs);
+    }, headersTimeoutMs);
     const signal =
       streamOptions?.signal === undefined
         ? controller.signal
@@ -196,7 +197,7 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
         signal,
       });
     } catch (error) {
-      if (controller.signal.aborted) throw new ProviderTimeoutError(options.id, timeoutMs);
+      if (controller.signal.aborted) throw new ProviderTimeoutError(options.id, headersTimeoutMs);
       if (streamOptions?.signal?.aborted === true) throw error;
       throw new ProviderNetworkError(
         options.id,
@@ -212,6 +213,8 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
     streamOptions?: StreamOptions,
   ): AsyncGenerator<ModelStreamEvent> {
     const startedAt = Date.now();
+    const callIdleMs = Math.max(idleTimeoutMs, streamOptions?.timeouts?.firstTokenMs ?? 0);
+    const callTotalMs = streamOptions?.timeouts?.totalMs ?? totalTimeoutMs;
     const response = await open(request, streamOptions);
     if (response.status === 429) {
       const retryAfterMs = parseRetryAfter(response.headers, now());
@@ -249,8 +252,8 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
     };
 
     const messages = parseSse(response.body, {
-      idleTimeoutMs,
-      totalTimeoutMs: Math.max(1, totalTimeoutMs - (Date.now() - startedAt)),
+      idleTimeoutMs: callIdleMs,
+      totalTimeoutMs: Math.max(1, callTotalMs - (Date.now() - startedAt)),
       ...(options.maxBodyBytes === undefined ? {} : { maxBodyBytes: options.maxBodyBytes }),
     });
     const nextMessage = async () => {
@@ -260,7 +263,7 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
         if (error instanceof SseTimeoutError) {
           throw new ProviderTimeoutError(
             options.id,
-            error.kind === "idle" ? idleTimeoutMs : totalTimeoutMs,
+            error.kind === "idle" ? callIdleMs : callTotalMs,
           );
         }
         if (error instanceof SseLimitError) return "too_large" as const;

@@ -1,0 +1,2219 @@
+{
+  "id": "5ea530e7-11ba-4115-8ced-eebf48763beb",
+  "prevId": "c97c8c63-b047-4b79-b54d-e22480780b34",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.audit_log": {
+      "name": "audit_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_type": {
+          "name": "actor_type",
+          "type": "audit_actor_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target": {
+          "name": "target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision": {
+          "name": "decision",
+          "type": "audit_decision",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "policy_id": {
+          "name": "policy_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approval_id": {
+          "name": "approval_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "details": {
+          "name": "details",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "audit_log_workspace_created_idx": {
+          "name": "audit_log_workspace_created_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "audit_log_workspace_id_workspaces_id_fk": {
+          "name": "audit_log_workspace_id_workspaces_id_fk",
+          "tableFrom": "audit_log",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "audit_log_policy_id_policies_id_fk": {
+          "name": "audit_log_policy_id_policies_id_fk",
+          "tableFrom": "audit_log",
+          "tableTo": "policies",
+          "columnsFrom": [
+            "policy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "audit_log_approval_id_approvals_id_fk": {
+          "name": "audit_log_approval_id_approvals_id_fk",
+          "tableFrom": "audit_log",
+          "tableTo": "approvals",
+          "columnsFrom": [
+            "approval_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "audit_log_select": {
+          "name": "audit_log_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"audit_log\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "audit_log_definer_select": {
+          "name": "audit_log_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "audit_log_definer_insert": {
+          "name": "audit_log_definer_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_definer"
+          ],
+          "withCheck": "true"
+        },
+        "audit_log_definer_delete": {
+          "name": "audit_log_definer_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        }
+      },
+      "checkConstraints": {
+        "audit_log_actor_identified": {
+          "name": "audit_log_actor_identified",
+          "value": "\"audit_log\".\"actor_type\" = 'system' or \"audit_log\".\"actor_id\" is not null"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.policies": {
+      "name": "policies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "definition": {
+          "name": "definition",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "policies_workspace_id_workspaces_id_fk": {
+          "name": "policies_workspace_id_workspaces_id_fk",
+          "tableFrom": "policies",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "policies_workspace_name_version_unique": {
+          "name": "policies_workspace_name_version_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "workspace_id",
+            "name",
+            "version"
+          ]
+        }
+      },
+      "policies": {
+        "policies_select": {
+          "name": "policies_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"policies\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "policies_insert": {
+          "name": "policies_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"policies\".\"workspace_id\") in ('owner', 'admin')"
+        },
+        "policies_update": {
+          "name": "policies_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"policies\".\"workspace_id\") in ('owner', 'admin')",
+          "withCheck": "app_workspace_role(\"policies\".\"workspace_id\") in ('owner', 'admin')"
+        },
+        "policies_delete": {
+          "name": "policies_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"policies\".\"workspace_id\") in ('owner', 'admin')"
+        },
+        "policies_definer_select": {
+          "name": "policies_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        }
+      },
+      "checkConstraints": {
+        "policies_version_positive": {
+          "name": "policies_version_positive",
+          "value": "\"policies\".\"version\" > 0"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.assistants": {
+      "name": "assistants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collection": {
+          "name": "collection",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "config": {
+          "name": "config",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evals": {
+          "name": "evals",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gaps": {
+          "name": "gaps",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "assistants_workspace_idx": {
+          "name": "assistants_workspace_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "assistants_workspace_id_workspaces_id_fk": {
+          "name": "assistants_workspace_id_workspaces_id_fk",
+          "tableFrom": "assistants",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assistants_run_fk": {
+          "name": "assistants_run_fk",
+          "tableFrom": "assistants",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "assistants_select": {
+          "name": "assistants_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"assistants\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "assistants_insert": {
+          "name": "assistants_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"assistants\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "assistants_update": {
+          "name": "assistants_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"assistants\".\"workspace_id\") in ('owner', 'admin', 'operator')",
+          "withCheck": "app_workspace_role(\"assistants\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "assistants_delete": {
+          "name": "assistants_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"assistants\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.chunks": {
+      "name": "chunks",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heading": {
+          "name": "heading",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_count": {
+          "name": "token_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "flagged": {
+          "name": "flagged",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "tsv": {
+          "name": "tsv",
+          "type": "tsvector",
+          "primaryKey": false,
+          "notNull": true,
+          "generated": {
+            "as": "to_tsvector('english', \"text\")",
+            "type": "stored"
+          }
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(1024)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "chunks_embedding_hnsw_idx": {
+          "name": "chunks_embedding_hnsw_idx",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "vector_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "hnsw",
+          "with": {}
+        },
+        "chunks_tsv_gin_idx": {
+          "name": "chunks_tsv_gin_idx",
+          "columns": [
+            {
+              "expression": "tsv",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "chunks_document_fk": {
+          "name": "chunks_document_fk",
+          "tableFrom": "chunks",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "document_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "chunks_document_ordinal_unique": {
+          "name": "chunks_document_ordinal_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "document_id",
+            "ordinal"
+          ]
+        }
+      },
+      "policies": {
+        "chunks_select": {
+          "name": "chunks_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"chunks\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "chunks_insert": {
+          "name": "chunks_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"chunks\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "chunks_update": {
+          "name": "chunks_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"chunks\".\"workspace_id\") in ('owner', 'admin', 'operator')",
+          "withCheck": "app_workspace_role(\"chunks\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "chunks_delete": {
+          "name": "chunks_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"chunks\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.documents": {
+      "name": "documents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_url": {
+          "name": "source_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "collection": {
+          "name": "collection",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "classification": {
+          "name": "classification",
+          "type": "document_classification",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'internal'"
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "documents_workspace_hash_idx": {
+          "name": "documents_workspace_hash_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "content_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "documents_workspace_id_workspaces_id_fk": {
+          "name": "documents_workspace_id_workspaces_id_fk",
+          "tableFrom": "documents",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "documents_id_workspace_unique": {
+          "name": "documents_id_workspace_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "workspace_id"
+          ]
+        },
+        "documents_collection_url_unique": {
+          "name": "documents_collection_url_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "workspace_id",
+            "collection",
+            "source_url"
+          ]
+        }
+      },
+      "policies": {
+        "documents_select": {
+          "name": "documents_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"documents\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "documents_insert": {
+          "name": "documents_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"documents\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "documents_update": {
+          "name": "documents_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"documents\".\"workspace_id\") in ('owner', 'admin', 'operator')",
+          "withCheck": "app_workspace_role(\"documents\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "documents_delete": {
+          "name": "documents_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"documents\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.memories": {
+      "name": "memories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_agent": {
+          "name": "created_by_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "memories_workspace_id_workspaces_id_fk": {
+          "name": "memories_workspace_id_workspaces_id_fk",
+          "tableFrom": "memories",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "memories_run_fk": {
+          "name": "memories_run_fk",
+          "tableFrom": "memories",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "memories_scope_key_unique": {
+          "name": "memories_scope_key_unique",
+          "nullsNotDistinct": true,
+          "columns": [
+            "workspace_id",
+            "run_id",
+            "key"
+          ]
+        }
+      },
+      "policies": {
+        "memories_select": {
+          "name": "memories_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"memories\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "memories_insert": {
+          "name": "memories_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"memories\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "memories_update": {
+          "name": "memories_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"memories\".\"workspace_id\") in ('owner', 'admin', 'operator')",
+          "withCheck": "app_workspace_role(\"memories\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "memories_delete": {
+          "name": "memories_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"memories\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.approvals": {
+      "name": "approvals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "step_id": {
+          "name": "step_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "approval_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by": {
+          "name": "resolved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "approvals_run_idx": {
+          "name": "approvals_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "approvals_workspace_status_idx": {
+          "name": "approvals_workspace_status_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "approvals_resolved_by_users_id_fk": {
+          "name": "approvals_resolved_by_users_id_fk",
+          "tableFrom": "approvals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "resolved_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "approvals_run_fk": {
+          "name": "approvals_run_fk",
+          "tableFrom": "approvals",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "approvals_select": {
+          "name": "approvals_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"approvals\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "approvals_insert": {
+          "name": "approvals_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"approvals\".\"workspace_id\") in ('owner', 'admin', 'operator') and \"approvals\".\"status\" = 'pending' and \"approvals\".\"resolved_at\" is null and \"approvals\".\"resolved_by\" is null"
+        },
+        "approvals_definer_select": {
+          "name": "approvals_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "approvals_definer_update": {
+          "name": "approvals_definer_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true",
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {
+        "approvals_resolution_consistent": {
+          "name": "approvals_resolution_consistent",
+          "value": "(\"approvals\".\"status\" = 'pending') = (\"approvals\".\"resolved_at\" is null)"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.artifacts": {
+      "name": "artifacts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content": {
+          "name": "content",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "artifacts_run_idx": {
+          "name": "artifacts_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "artifacts_run_fk": {
+          "name": "artifacts_run_fk",
+          "tableFrom": "artifacts",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "artifacts_select": {
+          "name": "artifacts_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"artifacts\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "artifacts_insert": {
+          "name": "artifacts_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"artifacts\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "artifacts_update": {
+          "name": "artifacts_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"artifacts\".\"workspace_id\") in ('owner', 'admin', 'operator')",
+          "withCheck": "app_workspace_role(\"artifacts\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        }
+      },
+      "checkConstraints": {
+        "artifacts_version_positive": {
+          "name": "artifacts_version_positive",
+          "value": "\"artifacts\".\"version\" > 0"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.run_events": {
+      "name": "run_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "step_id": {
+          "name": "step_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "run_events_run_seq_idx": {
+          "name": "run_events_run_seq_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "run_events_run_fk": {
+          "name": "run_events_run_fk",
+          "tableFrom": "run_events",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "run_events_run_seq_unique": {
+          "name": "run_events_run_seq_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "run_id",
+            "seq"
+          ]
+        }
+      },
+      "policies": {
+        "run_events_select": {
+          "name": "run_events_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"run_events\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "run_events_insert": {
+          "name": "run_events_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"run_events\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        }
+      },
+      "checkConstraints": {
+        "run_events_seq_positive": {
+          "name": "run_events_seq_positive",
+          "value": "\"run_events\".\"seq\" > 0"
+        },
+        "run_events_type_known": {
+          "name": "run_events_type_known",
+          "value": "\"run_events\".\"type\" in ('run.created', 'plan.proposed', 'plan.approved', 'plan.revised', 'step.started', 'agent.spawned', 'agent.message', 'tool.called', 'tool.result', 'policy.decided', 'artifact.created', 'artifact.updated', 'critic.flagged', 'approval.requested', 'approval.resolved', 'usage.updated', 'step.completed', 'run.completed', 'run.failed', 'model.fallback')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.runs": {
+      "name": "runs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mission": {
+          "name": "mission",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "input": {
+          "name": "input",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "run_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'planning'"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "nullif(current_setting('app.user_id', true), '')::uuid"
+        },
+        "parent_run_id": {
+          "name": "parent_run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "forked_from_seq": {
+          "name": "forked_from_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prompt_versions": {
+          "name": "prompt_versions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "budget": {
+          "name": "budget",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "totals": {
+          "name": "totals",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"costMicroUsd\":0}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "runs_workspace_created_idx": {
+          "name": "runs_workspace_created_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "runs_workspace_id_workspaces_id_fk": {
+          "name": "runs_workspace_id_workspaces_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "runs_created_by_users_id_fk": {
+          "name": "runs_created_by_users_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "runs_parent_run_fk": {
+          "name": "runs_parent_run_fk",
+          "tableFrom": "runs",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "parent_run_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "runs_id_workspace_unique": {
+          "name": "runs_id_workspace_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "workspace_id"
+          ]
+        }
+      },
+      "policies": {
+        "runs_select": {
+          "name": "runs_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"runs\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "runs_insert": {
+          "name": "runs_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"runs\".\"workspace_id\") in ('owner', 'admin', 'operator') and \"runs\".\"created_by\" = nullif(current_setting('app.user_id', true), '')::uuid and \"runs\".\"totals\" = '{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"costMicroUsd\":0}'::jsonb"
+        },
+        "runs_update": {
+          "name": "runs_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"runs\".\"workspace_id\") in ('owner', 'admin', 'operator')",
+          "withCheck": "app_workspace_role(\"runs\".\"workspace_id\") in ('owner', 'admin', 'operator')"
+        },
+        "runs_definer_select": {
+          "name": "runs_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "runs_definer_update": {
+          "name": "runs_definer_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true",
+          "withCheck": "true"
+        },
+        "runs_definer_delete": {
+          "name": "runs_definer_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        }
+      },
+      "checkConstraints": {
+        "runs_forked_from_seq_needs_parent": {
+          "name": "runs_forked_from_seq_needs_parent",
+          "value": "\"runs\".\"forked_from_seq\" is null or (\"runs\".\"parent_run_id\" is not null and \"runs\".\"forked_from_seq\" >= 0)"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.members": {
+      "name": "members",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "member_role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "members_user_idx": {
+          "name": "members_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "members_workspace_id_workspaces_id_fk": {
+          "name": "members_workspace_id_workspaces_id_fk",
+          "tableFrom": "members",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "members_user_id_users_id_fk": {
+          "name": "members_user_id_users_id_fk",
+          "tableFrom": "members",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "members_workspace_user_unique": {
+          "name": "members_workspace_user_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "workspace_id",
+            "user_id"
+          ]
+        }
+      },
+      "policies": {
+        "members_select": {
+          "name": "members_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"members\".\"workspace_id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "members_insert": {
+          "name": "members_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"members\".\"workspace_id\") in ('owner', 'admin') and (\"members\".\"role\" <> 'owner' or app_workspace_role(\"members\".\"workspace_id\") = 'owner')"
+        },
+        "members_update": {
+          "name": "members_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"members\".\"workspace_id\") in ('owner', 'admin') and (\"members\".\"role\" <> 'owner' or app_workspace_role(\"members\".\"workspace_id\") = 'owner')",
+          "withCheck": "app_workspace_role(\"members\".\"workspace_id\") in ('owner', 'admin') and (\"members\".\"role\" <> 'owner' or app_workspace_role(\"members\".\"workspace_id\") = 'owner')"
+        },
+        "members_delete": {
+          "name": "members_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"members\".\"workspace_id\") in ('owner', 'admin') and (\"members\".\"role\" <> 'owner' or app_workspace_role(\"members\".\"workspace_id\") = 'owner')"
+        },
+        "members_definer_select": {
+          "name": "members_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "members_definer_insert": {
+          "name": "members_definer_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_definer"
+          ],
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.orgs": {
+      "name": "orgs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "orgs_slug_unique": {
+          "name": "orgs_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "slug"
+          ]
+        }
+      },
+      "policies": {
+        "orgs_select": {
+          "name": "orgs_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_is_org_member(\"orgs\".\"id\")"
+        },
+        "orgs_definer_select": {
+          "name": "orgs_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "orgs_definer_insert": {
+          "name": "orgs_definer_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_definer"
+          ],
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "user_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'member'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_email_unique": {
+          "name": "users_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {
+        "users_select": {
+          "name": "users_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "\"users\".\"id\" = nullif(current_setting('app.user_id', true), '')::uuid or app_shares_workspace(\"users\".\"id\")"
+        },
+        "users_update_self": {
+          "name": "users_update_self",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "\"users\".\"id\" = nullif(current_setting('app.user_id', true), '')::uuid",
+          "withCheck": "\"users\".\"id\" = nullif(current_setting('app.user_id', true), '')::uuid"
+        },
+        "users_definer_select": {
+          "name": "users_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "users_definer_insert": {
+          "name": "users_definer_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_definer"
+          ],
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.workspaces": {
+      "name": "workspaces",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_demo": {
+          "name": "is_demo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "retention_days": {
+          "name": "retention_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "workspaces_org_id_orgs_id_fk": {
+          "name": "workspaces_org_id_orgs_id_fk",
+          "tableFrom": "workspaces",
+          "tableTo": "orgs",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "workspaces_org_slug_unique": {
+          "name": "workspaces_org_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "org_id",
+            "slug"
+          ]
+        }
+      },
+      "policies": {
+        "workspaces_select": {
+          "name": "workspaces_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"workspaces\".\"id\") in ('owner', 'admin', 'operator', 'viewer')"
+        },
+        "workspaces_update": {
+          "name": "workspaces_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"workspaces\".\"id\") in ('owner', 'admin')",
+          "withCheck": "app_workspace_role(\"workspaces\".\"id\") in ('owner', 'admin')"
+        },
+        "workspaces_definer_select": {
+          "name": "workspaces_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "workspaces_definer_insert": {
+          "name": "workspaces_definer_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_definer"
+          ],
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {
+        "workspaces_retention_days_positive": {
+          "name": "workspaces_retention_days_positive",
+          "value": "\"workspaces\".\"retention_days\" is null or \"workspaces\".\"retention_days\" > 0"
+        },
+        "workspaces_demo_retention_max_7_days": {
+          "name": "workspaces_demo_retention_max_7_days",
+          "value": "not \"workspaces\".\"is_demo\" or (\"workspaces\".\"retention_days\" is not null and \"workspaces\".\"retention_days\" <= 7)"
+        }
+      },
+      "isRLSEnabled": true
+    }
+  },
+  "enums": {
+    "public.approval_status": {
+      "name": "approval_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "approved",
+        "rejected",
+        "expired"
+      ]
+    },
+    "public.audit_actor_type": {
+      "name": "audit_actor_type",
+      "schema": "public",
+      "values": [
+        "user",
+        "agent",
+        "system"
+      ]
+    },
+    "public.audit_decision": {
+      "name": "audit_decision",
+      "schema": "public",
+      "values": [
+        "allow",
+        "deny",
+        "require_approval",
+        "n/a"
+      ]
+    },
+    "public.document_classification": {
+      "name": "document_classification",
+      "schema": "public",
+      "values": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted"
+      ]
+    },
+    "public.member_role": {
+      "name": "member_role",
+      "schema": "public",
+      "values": [
+        "owner",
+        "admin",
+        "operator",
+        "viewer"
+      ]
+    },
+    "public.run_status": {
+      "name": "run_status",
+      "schema": "public",
+      "values": [
+        "planning",
+        "awaiting_plan_approval",
+        "running",
+        "awaiting_approval",
+        "completed",
+        "failed"
+      ]
+    },
+    "public.user_kind": {
+      "name": "user_kind",
+      "schema": "public",
+      "values": [
+        "member",
+        "guest",
+        "agent"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

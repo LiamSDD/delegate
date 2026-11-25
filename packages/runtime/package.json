@@ -26,7 +26,8 @@
     "smoke": "vitest run --config vitest.live.config.ts src/live/smoke.live.test.ts",
     "live:xray": "vitest run --config vitest.live.config.ts src/live/company-xray.live.test.ts",
     "live:nvidia": "vitest run --config vitest.live.config.ts src/live/nvidia-discovery.live.test.ts",
-    "live:audit": "vitest run --config vitest.live.config.ts src/live/automation-audit.live.test.ts"
+    "live:audit": "vitest run --config vitest.live.config.ts src/live/automation-audit.live.test.ts",
+    "live:build-agent": "vitest run --config vitest.live.config.ts src/live/build-agent.live.test.ts"
   },
   "dependencies": {
     "@delegate/policy": "workspace:*",

@@ -2,6 +2,8 @@ import { CAPABILITIES } from "@delegate/policy";
 
 import { AutomationAuditInputSchema } from "./automation-audit/input";
 import { AutomationAuditSchema } from "./automation-audit/schema";
+import { BuildAgentInputSchema } from "./build-agent/input";
+import { ASSISTANT_KIND, AssistantArtifactSchema } from "./build-agent/schema";
 import { CompanyXrayBriefSchema } from "./company-xray/brief";
 import { CompanyXrayInputSchema } from "./company-xray/input";
 import { XRAY_PLAN } from "./company-xray/plan";
@@ -27,6 +29,16 @@ export const MISSIONS = {
     deliverableKind: "automation-audit",
     capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
   },
+  "build-agent": {
+    id: "build-agent",
+    title: "Build-an-Agent",
+    description:
+      "Turns an automation opportunity into a working assistant trained on the company's own public website: polite same-domain crawl, hybrid retrieval (full-text, plus embeddings when available) with reranking, cited answers that refuse when the site is silent, an auto-generated eval set with a self-evaluation score, and a gaps report.",
+    inputSchema: BuildAgentInputSchema,
+    deliverableSchema: AssistantArtifactSchema,
+    deliverableKind: ASSISTANT_KIND,
+    capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
+  },
 } as const;
 
 export type MissionId = keyof typeof MISSIONS;
@@ -35,3 +47,4 @@ export const MISSION_IDS = Object.keys(MISSIONS) as MissionId[];
 export * from "./company-xray";
 export * from "./automation-audit";
 export * from "./next-actions";
+export * from "./build-agent";

@@ -21,3 +21,5 @@ export {
   type SourceKind,
   type SourceRecord,
 } from "./tools/sources";
+export * from "./knowledge/types";
+export type { RunLease } from "./durable/lease";

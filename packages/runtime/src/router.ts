@@ -5,6 +5,7 @@ import {
   type ChainEntry,
   type DataClassification,
   type Env,
+  type LatencyMode,
 } from "./models";
 import {
   ProviderHttpError,
@@ -12,6 +13,7 @@ import {
   ProviderTimeoutError,
   RateLimitedError,
   toJsonSchema,
+  type CallTimeouts,
   type ModelProvider,
   type ModelRequest,
   type ModelStreamEvent,
@@ -30,9 +32,12 @@ export interface RouterOptions {
   cooldownMs?: number;
 }
 
-export interface OpenOptions extends StreamOptions {
+export interface OpenOptions extends Omit<StreamOptions, "timeouts"> {
   estimatedPromptTokens?: number;
   classification?: DataClassification;
+  latency?: LatencyMode;
+  offlineTimeouts?: CallTimeouts;
+  onAttempt?: (entry: ChainEntry) => void;
 }
 
 export interface RoutedStream {
@@ -121,6 +126,23 @@ class TokenBucket {
   take(amount: number): void {
     this.tokens -= amount;
   }
+
+  drain(now: number): void {
+    this.refill(now);
+    this.tokens = Math.min(this.tokens, 0);
+  }
+}
+
+const PROCESS_STATES = new Map<string, ProviderState>();
+
+export function resetProcessRouterState(): void {
+  PROCESS_STATES.clear();
+}
+
+function stateKey(entry: ChainEntry): string {
+  return entry.provider.limits?.modelRequestsPerMinute === undefined
+    ? entry.provider.id
+    : `${entry.provider.id}/${entry.model}`;
 }
 
 interface ProviderState {
@@ -266,6 +288,31 @@ class RoutedEvents implements AsyncIterableIterator<ModelStreamEvent> {
   }
 }
 
+const FIRST_TOKEN_TIMEOUT = Symbol("first-token-timeout");
+
+async function firstWithin(
+  iterator: AsyncIterator<ModelStreamEvent>,
+  ms: number,
+  deadline: AbortController,
+): Promise<IteratorResult<ModelStreamEvent> | typeof FIRST_TOKEN_TIMEOUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<typeof FIRST_TOKEN_TIMEOUT>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(FIRST_TOKEN_TIMEOUT);
+    }, ms);
+  });
+  const pending = iterator.next();
+  try {
+    const winner = await Promise.race([pending, expired]);
+    if (winner !== FIRST_TOKEN_TIMEOUT) return winner;
+    deadline.abort();
+    pending.catch(() => undefined);
+    return FIRST_TOKEN_TIMEOUT;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class ModelRouter {
   private readonly states = new Map<string, ProviderState>();
   private readonly providers = new Map<string, ModelProvider>();
@@ -280,7 +327,7 @@ export class ModelRouter {
   }
 
   health(providerId: string): ProviderHealth {
-    const state = this.states.get(providerId);
+    const state = this.states.get(providerId) ?? PROCESS_STATES.get(providerId);
     if (state === undefined) return { healthy: true, blocked: false, consecutiveFailures: 0 };
     const now = this.now();
     const blocked = state.blockedUntil > now;
@@ -301,6 +348,7 @@ export class ModelRouter {
     const chain = resolveChain(role, this.options.env, {
       ...this.options.context,
       classification: options.classification ?? this.options.context.classification,
+      ...(options.latency === undefined ? {} : { latency: options.latency }),
     });
     const promptTokens = options.estimatedPromptTokens ?? estimatePromptTokens(request);
     const attempts: RouteAttempt[] = [];
@@ -310,6 +358,7 @@ export class ModelRouter {
       if (rejection === undefined) {
         let outcome: RoutedStream | Rejection;
         try {
+          options.onAttempt?.(entry);
           outcome = await this.attempt(entry, request, options, promptTokens);
         } catch (error) {
           const classified = classify(error);
@@ -318,7 +367,7 @@ export class ModelRouter {
         }
         if ("events" in outcome) return outcome;
         rejection = outcome;
-        this.recordFailure(entry.provider.id, rejection);
+        this.recordFailure(entry, rejection);
       }
       attempts.push({
         provider: entry.provider.id,
@@ -336,23 +385,30 @@ export class ModelRouter {
     throw new NoModelAvailableError(role, attempts);
   }
 
+  private statesFor(entry: ChainEntry): Map<string, ProviderState> {
+    return entry.provider.limits?.scope === "process" ? PROCESS_STATES : this.states;
+  }
+
   private state(entry: ChainEntry): ProviderState {
-    const existing = this.states.get(entry.provider.id);
+    const states = this.statesFor(entry);
+    const key = stateKey(entry);
+    const existing = states.get(key);
     if (existing !== undefined) return existing;
     const now = this.now();
     const limits = entry.provider.limits;
+    const requestsPerMinute = limits?.modelRequestsPerMinute ?? limits?.requestsPerMinute;
     const created: ProviderState = {
       consecutiveFailures: 0,
       unhealthyUntil: 0,
       blockedUntil: 0,
-      ...(limits?.requestsPerMinute === undefined
+      ...(requestsPerMinute === undefined
         ? {}
-        : { requests: new TokenBucket(limits.requestsPerMinute, now) }),
+        : { requests: new TokenBucket(requestsPerMinute, now) }),
       ...(limits?.tokensPerMinute === undefined
         ? {}
         : { tokens: new TokenBucket(limits.tokensPerMinute, now) }),
     };
-    this.states.set(entry.provider.id, created);
+    states.set(key, created);
     return created;
   }
 
@@ -396,11 +452,21 @@ export class ModelRouter {
   private async attempt(
     entry: ChainEntry,
     request: RouterRequest,
-    options: StreamOptions,
+    options: OpenOptions,
     promptTokens: number,
   ): Promise<RoutedStream | Rejection> {
-    const streamOptions: StreamOptions =
-      options.signal === undefined ? {} : { signal: options.signal };
+    const timeouts = entry.interactive ? undefined : options.offlineTimeouts;
+    const deadline = timeouts === undefined ? undefined : new AbortController();
+    const signal =
+      deadline === undefined
+        ? options.signal
+        : options.signal === undefined
+          ? deadline.signal
+          : AbortSignal.any([deadline.signal, options.signal]);
+    const streamOptions: StreamOptions = {
+      ...(signal === undefined ? {} : { signal }),
+      ...(timeouts === undefined ? {} : { timeouts }),
+    };
     const stream = this.provider(entry).stream(
       {
         ...request,
@@ -412,31 +478,36 @@ export class ModelRouter {
       streamOptions,
     );
     const iterator = stream[Symbol.asyncIterator]();
-    const first = await iterator.next();
+    const first =
+      timeouts === undefined || deadline === undefined
+        ? await iterator.next()
+        : await firstWithin(iterator, timeouts.firstTokenMs, deadline);
+    if (first === FIRST_TOKEN_TIMEOUT) return { reason: "timeout" };
     if (first.done === true || isInBandError(first.value)) {
       if (first.done !== true) await iterator.return?.();
       return { reason: "server_error" };
     }
-    this.recordSuccess(entry.provider.id);
+    this.recordSuccess(entry);
 
     const events = new RoutedEvents(iterator, first.value, promptTokens, (rejection) => {
-      this.recordFailure(entry.provider.id, rejection);
+      this.recordFailure(entry, rejection);
     });
     return { provider: entry.provider.id, model: entry.model, entry, events };
   }
 
-  private recordSuccess(providerId: string): void {
-    const state = this.states.get(providerId);
+  private recordSuccess(entry: ChainEntry): void {
+    const state = this.statesFor(entry).get(stateKey(entry));
     if (state !== undefined) state.consecutiveFailures = 0;
   }
 
-  private recordFailure(providerId: string, rejection: Rejection): void {
-    const state = this.states.get(providerId);
+  private recordFailure(entry: ChainEntry, rejection: Rejection): void {
+    const state = this.statesFor(entry).get(stateKey(entry));
     if (state === undefined || REASONS_WITHOUT_HEALTH_PENALTY.has(rejection.reason)) return;
     const now = this.now();
     state.consecutiveFailures += 1;
-    if (rejection.reason === "rate_limited" && rejection.retryAfterMs !== undefined) {
-      state.blockedUntil = Math.max(state.blockedUntil, now + rejection.retryAfterMs);
+    if (rejection.reason === "rate_limited") {
+      if (rejection.retryAfterMs === undefined) state.requests?.drain(now);
+      else state.blockedUntil = Math.max(state.blockedUntil, now + rejection.retryAfterMs);
     }
     if (state.consecutiveFailures >= this.failureThreshold) {
       state.unhealthyUntil = now + this.cooldownMs;

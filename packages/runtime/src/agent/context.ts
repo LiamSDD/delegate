@@ -16,6 +16,36 @@ import { type RunEmitter } from "./emitter";
 
 export type Audience = "public-demo" | "owner";
 
+export const QUALITY_MODES = ["standard", "max"] as const;
+export type QualityMode = (typeof QUALITY_MODES)[number];
+
+export interface QualityTimeouts {
+  firstTokenMs: number;
+  totalMs: number;
+}
+
+export interface QualitySettings extends QualityTimeouts {
+  mode: QualityMode;
+  ignoredReason?: string;
+}
+
+export const MAX_QUALITY_TIMEOUTS: QualityTimeouts = { firstTokenMs: 300_000, totalMs: 600_000 };
+
+export const MAX_QUALITY_PUBLIC_DEMO_REASON =
+  "Max quality was requested but ignored: the public demo keeps every step on the fast chain so visitors are not left waiting minutes for a slow model.";
+
+export function resolveQuality(
+  audience: Audience,
+  requested: QualityMode | undefined,
+  timeouts: Partial<QualityTimeouts> = {},
+): QualitySettings {
+  const resolved = { ...MAX_QUALITY_TIMEOUTS, ...timeouts };
+  if (requested !== "max") return { mode: "standard", ...resolved };
+  if (audience === "public-demo")
+    return { mode: "standard", ...resolved, ignoredReason: MAX_QUALITY_PUBLIC_DEMO_REASON };
+  return { mode: "max", ...resolved };
+}
+
 export interface RunContext {
   runId: string;
   workspaceId: string;
@@ -33,6 +63,7 @@ export interface RunContext {
   nextId: (prefix: string) => string;
   attributeTo: (stepId: string | undefined) => void;
   gate: ProviderGate;
+  quality?: QualitySettings;
 }
 
 export interface ProviderGate {
@@ -95,6 +126,7 @@ export interface RunContextOptions {
   environment?: "server" | "browser";
   localOptIn?: boolean;
   latency?: LatencyMode;
+  quality?: QualitySettings;
   signal?: AbortSignal;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
@@ -182,5 +214,6 @@ export function createRunContext(options: RunContextOptions): RunContext {
       attributedStep = stepId;
     },
     gate: createProviderGate((role) => resolveChain(role, options.env, routing)[0]),
+    ...(options.quality === undefined ? {} : { quality: options.quality }),
   };
 }
