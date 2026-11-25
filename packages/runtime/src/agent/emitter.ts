@@ -1,4 +1,5 @@
 import { RunEventSchema, type RunEventDraft } from "../events";
+import { redactEventDraft } from "../privacy/redact";
 
 export type EmitFn = (event: RunEventDraft) => Promise<void>;
 
@@ -10,7 +11,8 @@ export interface RunEmitter {
 
 const VALIDATION_ENVELOPE = { seq: 0, at: "1970-01-01T00:00:00.000Z" };
 
-function validated(event: RunEventDraft): RunEventDraft {
+function validated(input: RunEventDraft): RunEventDraft {
+  const event = redactEventDraft(input);
   RunEventSchema.parse({ ...event, ...VALIDATION_ENVELOPE });
   return event;
 }
