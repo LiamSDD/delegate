@@ -15,8 +15,16 @@ function nextLine(buffer: string, final: boolean): { line: string; rest: string 
   return { line: buffer.slice(0, index), rest: buffer.slice(index + 1) };
 }
 
-export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerator<SseMessage> {
+export async function* parseSse(
+  body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
+): AsyncGenerator<SseMessage> {
   const reader = body.getReader();
+  const stop = () => {
+    reader.cancel().catch(() => undefined);
+  };
+  if (signal?.aborted === true) stop();
+  else signal?.addEventListener("abort", stop, { once: true });
   const decoder = new TextDecoder();
   let buffer = "";
   let id: string | null = null;
@@ -59,6 +67,7 @@ export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerato
     buffer += decoder.decode();
     yield* consume(true);
   } finally {
+    signal?.removeEventListener("abort", stop);
     await reader.cancel().catch(() => undefined);
   }
 }

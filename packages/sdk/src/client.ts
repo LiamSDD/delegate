@@ -442,7 +442,7 @@ export function createDelegateClient(options: DelegateClientOptions): DelegateCl
       let finished = false;
       let progressed = false;
       try {
-        for await (const message of parseSse(response.body)) {
+        for await (const message of parseSse(response.body, options.signal)) {
           if (message.event === "stream.end") {
             finished = true;
             break;
@@ -471,6 +471,7 @@ export function createDelegateClient(options: DelegateClientOptions): DelegateCl
         if (error instanceof DelegateResponseError) throw error;
       }
       if (finished) return;
+      if (isAborted(options.signal)) throw abortReason(options.signal);
       barren = progressed || now() - opened >= HEALTHY_STREAM_MS ? 0 : barren + 1;
       if (barren > MAX_STREAM_RECONNECTS)
         throw new DelegateConnectionError(
@@ -548,7 +549,7 @@ export function createDelegateClient(options: DelegateClientOptions): DelegateCl
         "stream",
       );
       if (response.body === null) return;
-      for await (const message of parseSse(response.body)) {
+      for await (const message of parseSse(response.body, options?.signal)) {
         const event = ChatStreamEventSchema.safeParse(parseJson(message.data));
         if (!event.success)
           throw new DelegateResponseError(
@@ -559,6 +560,7 @@ export function createDelegateClient(options: DelegateClientOptions): DelegateCl
         yield event.data;
         if (event.data.type === "done" || event.data.type === "error") return;
       }
+      if (isAborted(options?.signal)) throw abortReason(options?.signal);
     },
   };
 

@@ -485,6 +485,35 @@ describe("runs.events", () => {
     const { client } = clientFor(() => sse(['id: 1\nevent: run.created\ndata: {"seq":"one"}\n\n']));
     await expect(drain(client.runs.events(RUN_ID))).rejects.toBeInstanceOf(DelegateResponseError);
   });
+
+  it("stops an open stream when the caller aborts, without reconnecting", async () => {
+    let cancelled = false;
+    const { client, calls } = clientFor(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(frame(event(1, "run.created"))));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    );
+    const controller = new AbortController();
+    const seen: number[] = [];
+    const reading = (async () => {
+      for await (const item of client.runs.events(RUN_ID, { signal: controller.signal }))
+        seen.push(item.seq);
+    })();
+    await expect.poll(() => seen).toEqual([1]);
+    controller.abort();
+    await expect(reading).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancelled).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
 });
 
 describe("waitForRun", () => {
