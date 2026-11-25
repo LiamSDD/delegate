@@ -118,8 +118,9 @@ export function missionAgreement(
   resultsDir: string,
   adapter: MissionAdapter,
   extra: readonly JudgedTrial[] = [],
+  labelsFile: string = humanLabelsPath(adapter.dataset),
 ): AgreementReport {
-  const labels = loadHumanLabels(humanLabelsPath(adapter.dataset), adapter.judge.criteria);
+  const labels = loadHumanLabels(labelsFile, adapter.judge.criteria);
   const judged = new Map<string, JudgedTrial>();
   for (const entry of [...storedJudgements(resultsDir, adapter, labels), ...extra])
     judged.set(`${entry.run}/${entry.caseId}/${entry.trial}`, entry);
