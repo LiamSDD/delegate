@@ -21,6 +21,8 @@
     "agreement": "pnpm --filter @delegate/evals agreement",
     "redteam": "pnpm --filter @delegate/evals redteam",
     "evolve": "pnpm --filter @delegate/evals evolve",
+    "train": "pnpm --filter @delegate/evals train",
+    "route:learn": "pnpm --filter @delegate/evals route:learn",
     "smoke": "pnpm --filter @delegate/runtime smoke",
     "db:generate": "pnpm --filter @delegate/db db:generate",
     "db:migrate": "pnpm --filter @delegate/db db:migrate",
