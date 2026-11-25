@@ -98,6 +98,7 @@ function normalise(text: string): string {
 
 const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u;
 const LETTER = /[\p{L}\p{M}]/u;
+const LETTERS_ONLY = /^[\p{L}\p{M}]+$/u;
 const DIGIT = /\p{Nd}/u;
 const NUMBER_SEPARATOR = /[.,]/;
 const UNSPACED_SCRIPT =
@@ -170,7 +171,7 @@ function droppedModifier(text: string, start: number): string {
 function isCompoundModifier(prefix: string): boolean {
   return (
     prefix.length >= MIN_DROPPED_MODIFIER_CHARS &&
-    [...prefix].every((char) => LETTER.test(char)) &&
+    LETTERS_ONLY.test(prefix) &&
     !INVERTING_MODIFIERS.has(prefix)
   );
 }
