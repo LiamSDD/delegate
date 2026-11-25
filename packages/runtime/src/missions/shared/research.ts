@@ -253,6 +253,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
   ): { facts: TopicFact[]; text: string } => {
     const facts = readings.flatMap((reading) => reading.facts);
     const dropped = readings.reduce((sum, reading) => sum + reading.droppedFacts, 0);
+    const withheld = readings.reduce((sum, reading) => sum + reading.withheldFacts, 0);
     const unread = readings
       .filter((reading) => reading.error !== undefined)
       .map((reading) => reading.sourceId);
@@ -261,7 +262,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
       .map((reading) => reading.sourceId);
     return {
       facts,
-      text: `Read ${plural(sources, "source")} in quarantine: kept ${plural(facts.length, "fact")} with verbatim quotes, dropped ${dropped} whose quote did not match the source${suspected.length === 0 ? "" : `; suspected prompt injection in ${suspected.join(", ")}`}${unread.length === 0 ? "" : `; the reader's output for ${unread.join(", ")} failed validation after one repair, so they contributed no facts`}.`,
+      text: `Read ${plural(sources, "source")} in quarantine: kept ${plural(facts.length, "fact")} with verbatim quotes, dropped ${dropped} whose quote did not match the source${withheld === 0 ? "" : `, withheld ${plural(withheld, "fact")} carrying instruction-like text`}${suspected.length === 0 ? "" : `; suspected prompt injection in ${suspected.join(", ")}`}${unread.length === 0 ? "" : `; the reader's output for ${unread.join(", ")} failed validation after one repair, so they contributed no facts`}.`,
     };
   };
 

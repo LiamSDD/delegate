@@ -46,6 +46,7 @@ export interface SourceReading<E extends object> {
   injectionSuspected: boolean;
   suspiciousSpan?: string;
   droppedFacts: number;
+  withheldFacts: number;
   error?: string;
 }
 
@@ -95,13 +96,35 @@ function normalise(text: string): string {
     .toLowerCase();
 }
 
+const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u;
+
+function isWordChar(char: string | undefined): boolean {
+  return char !== undefined && WORD_CHAR.test(char);
+}
+
+function alignsWithWords(haystack: string, needle: string, start: number): boolean {
+  const end = start + needle.length;
+  const startsInsideWord = isWordChar(needle[0]) && isWordChar(haystack[start - 1]);
+  const endsInsideWord = isWordChar(needle.at(-1)) && isWordChar(haystack[end]);
+  return !startsInsideWord && !endsInsideWord;
+}
+
 export function quoteAppearsIn(quote: string, source: string): boolean {
   const needle = normalise(quote);
   if (needle.length < MIN_QUOTE_CHARS || /\.\.\.|…/.test(quote)) return false;
-  return normalise(source).includes(needle);
+  const haystack = normalise(source);
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+    if (alignsWithWords(haystack, needle, at)) return true;
+  }
+  return false;
 }
 
-export function detectInjection(text: string): string | undefined {
+function stripInvisible(text: string): string {
+  return text.normalize("NFKC").replace(/\p{Cf}/gu, "");
+}
+
+export function detectInjection(raw: string): string | undefined {
+  const text = stripInvisible(raw);
   for (const pattern of INJECTION_PATTERNS) {
     const match = pattern.exec(text);
     if (match === null) continue;
@@ -113,6 +136,12 @@ export function detectInjection(text: string): string | undefined {
       .slice(0, MAX_SPAN_CHARS);
   }
   return undefined;
+}
+
+function carriesInstructions(fact: object): boolean {
+  return Object.values(fact).some(
+    (value) => typeof value === "string" && detectInjection(value) !== undefined,
+  );
 }
 
 function neutralise(text: string): string {
@@ -198,10 +227,15 @@ function assemble<E extends object>(
   const facts: UntrustedFact<E>[] = [];
   const seen = new Set<string>();
   let dropped = 0;
+  let withheld = 0;
   for (const raw of reported?.facts ?? []) {
     const parsed = factSchema.safeParse(raw);
     if (!parsed.success || !quoteAppearsIn(parsed.data.quote, source.text)) {
       dropped += 1;
+      continue;
+    }
+    if (carriesInstructions(parsed.data)) {
+      withheld += 1;
       continue;
     }
     const key = normalise(parsed.data.quote);
@@ -225,6 +259,7 @@ function assemble<E extends object>(
     injectionSuspected,
     ...(injectionSuspected && suspiciousSpan !== undefined ? { suspiciousSpan } : {}),
     droppedFacts: dropped,
+    withheldFacts: withheld,
   };
 }
 
