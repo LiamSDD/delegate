@@ -159,6 +159,7 @@ class LocalProcessSandbox implements Sandbox {
       const finish = (exitCode: number | null, extra = "") => {
         if (settled) return;
         settled = true;
+        kill();
         clearTimeout(timer);
         request.signal?.removeEventListener("abort", onAbort);
         const out = stdout.text();
@@ -180,6 +181,9 @@ class LocalProcessSandbox implements Sandbox {
       });
       child.on("error", (error: NodeJS.ErrnoException) => {
         finish(error.code === "ENOENT" ? 127 : 126, `${request.cmd}: ${error.code ?? "failed"}`);
+      });
+      child.on("exit", () => {
+        kill();
       });
       child.on("close", (code) => {
         finish(code);

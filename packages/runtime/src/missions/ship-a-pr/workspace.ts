@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { posix } from "node:path";
 
 import { type RunContext } from "../../agent/context";
@@ -11,7 +12,7 @@ import {
 } from "../../sandbox/paths";
 import { type ExecResult, type Sandbox } from "../../sandbox/types";
 import { PROJECT_MARKER_FILES, type ProjectCommand, type ProjectFiles } from "./detect";
-import { DIFF_LIMITS, type DiffFile, type RepoDiff } from "./schema";
+import { DIFF_LIMITS, type DiffContent, type DiffFile, type RepoDiff } from "./schema";
 
 export { DIFF_LIMITS };
 
@@ -236,6 +237,32 @@ export async function snapshotTree(sandbox: Sandbox): Promise<string> {
   return tree;
 }
 
+function gitBlobId(content: Uint8Array): string {
+  return createHash("sha1").update(`blob ${content.byteLength}\0`).update(content).digest("hex");
+}
+
+export function sha256Hex(content: Uint8Array): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+async function readChangedFile(
+  sandbox: Sandbox,
+  root: string,
+  path: string,
+  blobId: string,
+): Promise<Uint8Array> {
+  const absolute = posix.join(root, path);
+  if ((await sandbox.resolve(absolute)) !== absolute)
+    throw new DiffRejectedError(`${path} is a link`);
+  const content = await sandbox.readFile(absolute, DIFF_LIMITS.maxFileBytes + 1);
+  if (content === null) throw new DiffRejectedError(`${path} is missing`);
+  if (content.byteLength > DIFF_LIMITS.maxFileBytes)
+    throw new DiffRejectedError(`${path} is larger than the file cap`);
+  if (gitBlobId(content) !== blobId)
+    throw new DiffRejectedError(`${path} changed while the diff was being recorded`);
+  return content;
+}
+
 export async function collectDiff(
   ctx: RunContext,
   sandbox: Sandbox,
@@ -245,10 +272,20 @@ export async function collectDiff(
 ): Promise<RepoDiff> {
   const staged = await gitRun(ctx, sandbox, stepId, ["add", "-A"]);
   if (staged.exitCode !== 0) throw new WorkspaceError("diff_failed", "git add failed");
-  const diffArgs = ["diff", "--cached", "--no-renames"];
-  const raw = await gitOutput(sandbox, [...diffArgs, "--raw", "-z", baselineTree]);
-  const numstat = await gitOutput(sandbox, [...diffArgs, "--numstat", "-z", baselineTree]);
-  const patch = await gitOutput(sandbox, [...diffArgs, "--binary", baselineTree]);
+  const tree = (await gitOutput(sandbox, ["write-tree"])).trim();
+  if (!/^[0-9a-f]{40}$/.test(tree))
+    throw new WorkspaceError("diff_failed", "Could not record the changed tree");
+  const diffArgs = ["diff", "--no-renames"];
+  const raw = await gitOutput(sandbox, [
+    ...diffArgs,
+    "--raw",
+    "--no-abbrev",
+    "-z",
+    baselineTree,
+    tree,
+  ]);
+  const numstat = await gitOutput(sandbox, [...diffArgs, "--numstat", "-z", baselineTree, tree]);
+  const patch = await gitOutput(sandbox, [...diffArgs, "--binary", baselineTree, tree]);
   if (new TextEncoder().encode(patch).byteLength > DIFF_LIMITS.maxPatchBytes)
     throw new DiffRejectedError(
       `The change is larger than ${Math.round(DIFF_LIMITS.maxPatchBytes / 1000)} KB`,
@@ -265,11 +302,12 @@ export async function collectDiff(
   }
   const parts = raw.split("\0");
   const files: DiffFile[] = [];
+  const blobs: { path: string; blobId: string }[] = [];
   for (let index = 0; index + 1 < parts.length; index += 2) {
     const meta = parts[index] ?? "";
     const path = parts[index + 1] ?? "";
     if (meta === "" || path === "") continue;
-    const [, newMode = "", , , status = ""] = meta.replace(/^:/, "").split(" ");
+    const [, newMode = "", , newBlob = "", status = ""] = meta.replace(/^:/, "").split(" ");
     const kind = status.startsWith("A") ? "added" : status.startsWith("D") ? "deleted" : "modified";
     let relative: string;
     try {
@@ -285,15 +323,37 @@ export async function collectDiff(
       kind === "deleted" ? "100644" : newMode === "100644" || newMode === "100755" ? newMode : null;
     if (mode === null)
       throw new DiffRejectedError(`${relative} is a symlink or submodule (mode ${newMode})`);
+    if (kind !== "deleted") {
+      if (!/^[0-9a-f]{40}$/.test(newBlob))
+        throw new WorkspaceError("diff_failed", `Could not read the blob id of ${relative}`);
+      blobs.push({ path: relative, blobId: newBlob });
+    }
     const count = counts.get(path) ?? { additions: 0, deletions: 0 };
     files.push({ path: relative, status: kind, mode, ...count });
   }
   if (files.length > DIFF_LIMITS.maxFiles)
     throw new DiffRejectedError(`The change touches more than ${DIFF_LIMITS.maxFiles} files`);
+  const root = await sandbox.resolve(sandbox.repoDir);
+  const contents: DiffContent[] = [];
+  let total = 0;
+  for (const blob of blobs) {
+    const content = await readChangedFile(sandbox, root, blob.path, blob.blobId);
+    total += content.byteLength;
+    if (total > DIFF_LIMITS.maxContentBytes)
+      throw new DiffRejectedError(
+        `The changed files are larger than ${Math.round(DIFF_LIMITS.maxContentBytes / 1000)} KB in total`,
+      );
+    contents.push({
+      path: blob.path,
+      sha256: sha256Hex(content),
+      base64: Buffer.from(content).toString("base64"),
+    });
+  }
   return {
     baseSha,
     patch,
     files,
+    contents,
     stat: {
       files: files.length,
       additions: files.reduce((sum, file) => sum + file.additions, 0),
@@ -302,24 +362,21 @@ export async function collectDiff(
   };
 }
 
-export async function fileChanges(sandbox: Sandbox, diff: RepoDiff): Promise<FileChange[]> {
-  const root = await sandbox.resolve(sandbox.repoDir);
-  const changes: FileChange[] = [];
-  for (const file of diff.files) {
-    if (file.status === "deleted") {
-      changes.push({ path: file.path, mode: file.mode, content: null });
-      continue;
-    }
-    const absolute = posix.join(root, file.path);
-    if ((await sandbox.resolve(absolute)) !== absolute)
-      throw new DiffRejectedError(`${file.path} changed into a link after review`);
-    const content = await sandbox.readFile(absolute, DIFF_LIMITS.maxFileBytes + 1);
-    if (content === null) throw new DiffRejectedError(`${file.path} is missing`);
+export function approvedFileChanges(diff: RepoDiff): FileChange[] {
+  if (diff.contents === undefined)
+    throw new DiffRejectedError("The approved diff carries no pinned file contents");
+  const pinned = new Map(diff.contents.map((entry) => [entry.path, entry]));
+  return diff.files.map((file): FileChange => {
+    if (file.status === "deleted") return { path: file.path, mode: file.mode, content: null };
+    const entry = pinned.get(file.path);
+    if (entry === undefined) throw new DiffRejectedError(`${file.path} has no approved content`);
+    const content = new Uint8Array(Buffer.from(entry.base64, "base64"));
     if (content.byteLength > DIFF_LIMITS.maxFileBytes)
       throw new DiffRejectedError(`${file.path} is larger than the file cap`);
-    changes.push({ path: file.path, mode: file.mode, content });
-  }
-  return changes;
+    if (sha256Hex(content) !== entry.sha256)
+      throw new DiffRejectedError(`${file.path} does not match its approved SHA-256`);
+    return { path: file.path, mode: file.mode, content };
+  });
 }
 
 export async function applyRecordedPatch(

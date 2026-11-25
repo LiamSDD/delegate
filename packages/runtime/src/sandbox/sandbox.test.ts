@@ -208,6 +208,22 @@ describe("LocalProcessSandbox exec", () => {
     expect(await readdir(sandbox.workdir)).not.toContain("child-survived");
   });
 
+  it("kills background processes left behind when a command exits", async () => {
+    const sandbox = await sandboxWithRepo();
+    const marker = posix.join(sandbox.workdir, "background-survived");
+    const started = Date.now();
+    const result = await sandbox.exec({
+      cmd: "sh",
+      args: ["-c", `(sleep 1; touch ${marker}) & echo started`],
+      timeoutMs: 10_000,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.timedOut).toBe(false);
+    expect(Date.now() - started).toBeLessThan(900);
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    expect(await readdir(sandbox.workdir)).not.toContain("background-survived");
+  });
+
   it("reports a missing binary as exit 127 instead of throwing", async () => {
     const sandbox = await sandboxWithRepo();
     const result = await sandbox.exec({

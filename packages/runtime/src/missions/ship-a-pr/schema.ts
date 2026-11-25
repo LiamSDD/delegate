@@ -17,6 +17,7 @@ export const DIFF_LIMITS = {
   maxPatchBytes: 400_000,
   maxFiles: 50,
   maxFileBytes: 400_000,
+  maxContentBytes: 1_000_000,
   commandOutputChars: 3_800,
 } as const;
 
@@ -29,10 +30,21 @@ export const DiffFileSchema = z.object({
 });
 export type DiffFile = z.infer<typeof DiffFileSchema>;
 
+export const DiffContentSchema = z.object({
+  path: z.string().min(1).max(400),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  base64: z
+    .string()
+    .max(Math.ceil(DIFF_LIMITS.maxFileBytes / 3) * 4)
+    .regex(/^[A-Za-z0-9+/]*={0,2}$/),
+});
+export type DiffContent = z.infer<typeof DiffContentSchema>;
+
 export const RepoDiffSchema = z.object({
   baseSha: z.string().regex(/^[0-9a-f]{40}$/),
   patch: z.string().max(DIFF_LIMITS.maxPatchBytes),
   files: z.array(DiffFileSchema).max(DIFF_LIMITS.maxFiles),
+  contents: z.array(DiffContentSchema).max(DIFF_LIMITS.maxFiles).optional(),
   stat: DiffStatSchema,
 });
 export type RepoDiff = z.infer<typeof RepoDiffSchema>;

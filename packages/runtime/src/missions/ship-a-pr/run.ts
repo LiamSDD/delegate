@@ -62,7 +62,7 @@ import {
   cloneRepository,
   collectDiff,
   commandSummary,
-  fileChanges,
+  approvedFileChanges,
   readProjectFiles,
   runInSandbox,
   runProjectCommand,
@@ -519,6 +519,8 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
       const sandbox = await workspace(task.step.id);
       const { info } = workspaceInfo();
       const checks = await runChecks(sandbox, task.step.id, "verify", info.profile);
+      live = undefined;
+      await sandbox.close();
       const id = await publish(
         task.step.id,
         SHIP_TEST_REPORT_KIND,
@@ -766,8 +768,7 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
       });
       const startedAt = ctx.now().getTime();
       try {
-        const sandbox = await workspace(task.step.id);
-        const files = await fileChanges(sandbox, diff);
+        const files = approvedFileChanges(diff);
         const opened = await session.openPullRequest({
           baseSha: info.baseSha,
           base,

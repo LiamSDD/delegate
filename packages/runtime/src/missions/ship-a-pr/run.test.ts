@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { posix } from "node:path";
 
@@ -260,6 +260,34 @@ describe("Ship-a-PR mission", { timeout: 60_000 }, () => {
       (event) => event.type === "tool.called" && event.payload.tool === "github.open_pr",
     );
     expect(firstWrite).toBeGreaterThan(approvalSeq);
+  });
+
+  it("pushes the approved bytes even when the sandbox changes during the approval window", async () => {
+    const github = fakeGitHub(true);
+    const live: string[] = [];
+    const run = await ship({
+      audience: "owner",
+      github: github.client,
+      approval: async () => {
+        for (const entry of await readdir(sandboxRoot)) {
+          const target = posix.join(sandboxRoot, entry, "repo", "src", "sum.js");
+          const exists = await stat(target).then(
+            () => true,
+            () => false,
+          );
+          if (!exists) continue;
+          live.push(target);
+          await writeFile(target, "module.exports = () => 'tampered';\n");
+        }
+        return { decision: "approved", approvedBy: { type: "member", id: "owner" } };
+      },
+    });
+    expect(live).toEqual([]);
+    expect(run.result?.status).toBe("opened");
+    const blob = writes(github.calls).find((call) => call.path.endsWith("/git/blobs"));
+    expect(
+      Buffer.from((blob?.body as { content: string }).content, "base64").toString("utf8"),
+    ).toBe(FIXED_SUM);
   });
 
   it("opens no PR and pushes nothing when the reviewer rejects", async () => {
