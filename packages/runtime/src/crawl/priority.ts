@@ -210,6 +210,24 @@ function termMatches(segment: string, term: string): boolean {
   );
 }
 
+function bestTopic(profile: CrawlProfile, segments: readonly string[]): CrawlTopic | undefined {
+  let best: CrawlTopic | undefined;
+  for (const topic of profile.topics) {
+    const matched = segments.some((segment) =>
+      topic.terms.some((term) => termMatches(segment, term)),
+    );
+    if (matched && (best === undefined || topic.weight > best.weight)) best = topic;
+  }
+  return best;
+}
+
+export function topicOfSegments(
+  profile: CrawlProfile,
+  segments: readonly string[],
+): string | undefined {
+  return bestTopic(profile, segments)?.name;
+}
+
 export function scoreUrl(profile: CrawlProfile, input: ScoreInput): UrlScore {
   let url: URL;
   try {
@@ -221,14 +239,7 @@ export function scoreUrl(profile: CrawlProfile, input: ScoreInput): UrlScore {
   const localised = localeOf(segments[0]) !== undefined;
   const content = localised ? segments.slice(1) : segments;
   const anchor = (input.anchorText ?? "").toLowerCase().replace(/\s+/g, "-");
-  let best: CrawlTopic | undefined;
-  for (const topic of profile.topics) {
-    const inPath = content
-      .slice(0, 3)
-      .some((segment) => topic.terms.some((term) => termMatches(segment, term)));
-    const inAnchor = anchor !== "" && topic.terms.some((term) => termMatches(anchor, term));
-    if ((inPath || inAnchor) && (best === undefined || topic.weight > best.weight)) best = topic;
-  }
+  const best = bestTopic(profile, [...content.slice(0, 3), ...(anchor === "" ? [] : [anchor])]);
   let score = 100;
   score -= input.depth * profile.depthPenalty;
   score -= Math.max(0, content.length - 1) * profile.segmentPenalty;

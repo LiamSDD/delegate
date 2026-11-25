@@ -161,7 +161,7 @@ export const RUNTIME_PROMPT_FILES = {
   goalConnectors: "custom-goal.connectors.v1.md",
   repoArchitect: "repo-xray.architect.v1.md",
   repoImprover: "repo-xray.improver.v1.md",
-  gapAnalysis: "deep-research.gaps.v1.md",
+  gapAnalysis: "deep-research.gaps.v2.md",
 } as const;
 
 export const REFLECT_BUDGET: RunBudgetLimits = { maxTokens: 20_000, maxMicroUsd: 0 };

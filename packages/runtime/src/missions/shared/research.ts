@@ -482,6 +482,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
         key: `page:${url}`,
         kind: "page" as const,
         label: pathLabel(url),
+        url,
         hints: "",
         execute: () => call("fetch_page", { url }),
       }));
@@ -491,6 +492,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
           key: `feed:${feed}`,
           kind: "feed",
           label: `feed ${pathLabel(feed)}`,
+          url: feed,
           hints: "news announcements press blog updates",
           execute: () => call("read_feed", { url: feed }),
         });
