@@ -49,12 +49,25 @@ Agreement (exact-match rate, within-one rate, Cohen's kappa with a 95% asymptoti
 ```bash
 pnpm eval --mission xray|audit|build|repo|goal|all [--trials 3] [--cases id,id] [--tag gate] [--audience public-demo|owner] [--offline | --replay <run dir>] [--concurrency 1-8] [--no-judge] [--baseline]
 pnpm eval:smoke          # one gate case per mission: scripted fixtures recorded, then replayed; part of pnpm check
-pnpm gate                # pnpm check, then the X-ray gate-tagged cases x 1 trial; GATE_FULL=1 runs every case x 3
+pnpm gate                # pnpm check, then every mission's gate-tagged cases x 1 trial (--mission xray for one); GATE_FULL=1 runs every case x 3
 pnpm label --mission goal
 pnpm agreement
+pnpm evolve --mission goal --kind prompt|playbook [--target <prompt key>] [--key <playbook key>] [--trials 3]
+pnpm train [--mission all|xray|audit|build|repo|goal] [--rounds 1] [--budget-minutes 60] [--trials 3] [--dry-run]
+pnpm route:learn [--min-trials 20] [--dry-run]
 ```
 
 Live runs load the repository-root `.env.local`. Raw runs go to `results/runs/<mission>/<timestamp>/` (`<case>/<trial>.events.jsonl`, `.trial.json`, `.judge.json`, `.qa.json` for Build-an-Agent, `summary.json`, `summary.md`) and are git-ignored; the result file `results/<mission>/<timestamp>.json` (`EvalResultFileSchema`, `src/results.ts`) is what gets committed and what `/evals` reads. Baselines are `results/baseline.json` (X-ray) and `results/baseline.<mission>.json`, written only with `--baseline`. A trial whose run fails with `no_model_available` is retried twice; the wait is 60 s then 120 s, or the largest `retryAfterMs` the run's fallbacks reported (at most 10 minutes), and it is shared, so concurrent workers pause too. The failed attempt's log is kept. Hard checks fail the gate; infrastructure failures (`no_model_available`, `site_unreachable`, `cancelled`) count as errored rather than invalid output. Judges use role `planner`, score 1 to 5 and are stored normalised as (score − 1) / 4.
+
+Each trial row of a result file also records `hardFailures` (the hard checks it failed) and `serving` (calls per role, provider and model in that trial). Both are optional in the schema, so files written before they existed still parse; such files cannot serve as a training baseline and can rarely be attributed to a model by `pnpm route:learn`.
+
+## Gate, training and routing
+
+The per-mission rules live in `src/evolve/targets.ts`: the hard checks in the table above, the regression threshold against the mission's baseline file, the prompts a candidate may change (the mission's own generation prompts, never the shared planner, reader, critic or editor) and the house playbook keys. ADR 0021 has the reasoning.
+
+- `pnpm gate` runs every mission and names the failing hard checks per mission; one failing mission fails the gate.
+- `pnpm train` runs rounds of two steps per mission (one prompt revision, one playbook revision). Each step evaluates the candidate on the same cases as its parent and promotes it only on a supported win with no case regression, no new hard failure, a 0% red-team result and the same models serving both arms. It writes one record per step to `results/training/<id>.json` and one file per finished arm to `results/training/arms/<mission>/`; both are committed. Raw arm logs (`results/training/runs/`) and the resume state (`results/training/pending/`) are git-ignored. Run the same command again to resume; `--dry-run` prints the plan and the time estimates.
+- `pnpm route:learn` aggregates the live result files per mission, role and model and writes `config/routing.learned.json`. It never reads replays or training arms.
 
 ## Case format
 
