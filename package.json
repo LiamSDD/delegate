@@ -22,6 +22,7 @@
     "redteam": "pnpm --filter @delegate/evals redteam",
     "evolve": "pnpm --filter @delegate/evals evolve",
     "smoke": "pnpm --filter @delegate/runtime smoke",
+    "delegate": "node packages/cli/bin/delegate.mjs",
     "db:generate": "pnpm --filter @delegate/db db:generate",
     "db:migrate": "pnpm --filter @delegate/db db:migrate",
     "format": "prettier --write .",
