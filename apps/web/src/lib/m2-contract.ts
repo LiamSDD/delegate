@@ -21,7 +21,7 @@ export {
 
 import type { RoiInputs } from "@delegate/runtime";
 
-export const RUNNABLE_MISSION_IDS = ["company-xray", "automation-audit"] as const;
+export const RUNNABLE_MISSION_IDS = ["company-xray", "automation-audit", "build-agent"] as const;
 export type RunnableMissionId = (typeof RUNNABLE_MISSION_IDS)[number];
 
 export const ROI_INPUT_KEYS = [
@@ -37,6 +37,7 @@ export type RoiOverrides = Partial<RoiInputs>;
 export const MISSION_LABELS: Record<string, string> = {
   "company-xray": "Company X-ray",
   "automation-audit": "Automation Audit",
+  "build-agent": "Build-an-Agent",
 };
 
 export function missionLabel(id: string): string {

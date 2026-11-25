@@ -1,18 +1,10 @@
 "use client";
 
-import {
-  Check,
-  ChevronRight,
-  Copy,
-  Download,
-  FileWarning,
-  Hammer,
-  Printer,
-  RotateCcw,
-} from "lucide-react";
+import { Check, ChevronRight, Copy, Download, FileWarning, Printer, RotateCcw } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 
 import type { AutomationAudit, RoiInputKey, RoiOverrides } from "@/lib/m2-contract";
+import type { NextAction } from "@/lib/m3-contract";
 import {
   type AuditOverrides,
   auditCitationNumbers,
@@ -32,6 +24,7 @@ import type { BriefArtifact } from "@/lib/runs/run-view";
 import { cn } from "@/lib/utils";
 
 import { CitationMarker, download } from "./brief-panel";
+import { BuildItButton } from "./build-it-button";
 import { actionButton, Chip, Eyebrow, type Tone } from "./primitives";
 
 const DIFFICULTY_TONE: Record<string, Tone> = {
@@ -140,7 +133,9 @@ function OpportunityCard({
   citations,
   open,
   onToggle,
+  build,
 }: {
+  build: { action: NextAction; runId: string; primary: boolean } | null;
   entry: RankedOpportunity;
   overrides: RoiOverrides;
   onChange: (key: RoiInputKey, value: number) => void;
@@ -305,15 +300,15 @@ function OpportunityCard({
             </ul>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-3 print:hidden">
-          <button type="button" disabled aria-describedby={`${bodyId}-m3`} className={actionButton}>
-            <Hammer className="size-3.5" aria-hidden="true" />
-            Build it
-          </button>
-          <span id={`${bodyId}-m3`} className="font-mono text-2xs text-text-subtle">
-            Arrives in M3
-          </span>
-        </div>
+        {build === null ? null : (
+          <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-3 print:hidden">
+            <BuildItButton action={build.action} runId={build.runId} primary={build.primary} />
+            <span className="text-xs text-text-muted">
+              A cited assistant trained on this company&apos;s own site, with its own evals and gaps
+              report.
+            </span>
+          </div>
+        )}
       </div>
     </li>
   );
@@ -403,7 +398,11 @@ export function AuditPanel({
   target,
   running,
   unverified = false,
+  runId,
+  buildActions = [],
 }: {
+  runId?: string;
+  buildActions?: readonly NextAction[];
   artifact: BriefArtifact | null;
   target: string | null;
   running: boolean;
@@ -425,6 +424,16 @@ export function AuditPanel({
   const total = audit === null ? null : portfolioTotal(audit, overrides);
   const model = audit === null ? null : portfolioTotal(audit, {});
   const adjusted = ranked.some((entry) => entry.edited);
+  const buildFor = (entry: RankedOpportunity) => {
+    const action = buildActions.find(
+      (candidate) =>
+        candidate.missionId === "build-agent" &&
+        (candidate.opportunityId ?? candidate.input.opportunityId) === entry.opportunity.id,
+    );
+    return action === undefined || runId === undefined
+      ? null
+      : { action, runId, primary: entry.rank === 1 && !running };
+  };
 
   return (
     <section aria-labelledby="audit-heading" className="audit-report flex flex-col gap-4">
@@ -564,6 +573,7 @@ export function AuditPanel({
                   });
                 }}
                 citations={citations}
+                build={buildFor(entry)}
                 open={openIds[entry.opportunity.id] ?? entry.rank === 1}
                 onToggle={() => {
                   setOpenIds((current) => ({

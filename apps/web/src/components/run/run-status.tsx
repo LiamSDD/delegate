@@ -7,6 +7,7 @@ import {
   Gauge,
   Globe,
   RefreshCw,
+  RotateCcw,
   ShieldX,
   Unplug,
   Wallet,
@@ -15,10 +16,13 @@ import {
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 
+import type { RunEvent } from "@delegate/runtime";
+
 import { type Brief, briefStats } from "@/lib/runs/brief";
+import { resumeNotices } from "@/lib/runs/resume";
 import { formatDuration, type Outcome } from "@/lib/runs/run-view";
 import type { RunnableMissionId } from "@/lib/m2-contract";
-import { startRun } from "@/lib/runs/start-run";
+import { startRun, type StartRunRequest } from "@/lib/runs/start-run";
 import type { StreamState } from "@/lib/runs/stream-state";
 import { MAX_AUTO_RETRIES } from "@/lib/runs/stream-state";
 import { cn } from "@/lib/utils";
@@ -75,9 +79,32 @@ function Banner({
   );
 }
 
+export function ResumedBanner({ events }: { events: readonly RunEvent[] }) {
+  const notices = resumeNotices(events);
+  const last = notices.at(-1);
+  if (last === undefined) return null;
+  return (
+    <Banner
+      tone="accent"
+      icon={<RotateCcw className="size-4" />}
+      title={
+        notices.length === 1
+          ? "Resumed after restart"
+          : `Resumed ${String(notices.length)}× after restarts`
+      }
+    >
+      {last.reason}{" "}
+      <span className="font-mono text-2xs text-text-subtle">
+        {new Date(last.at).toLocaleTimeString()}
+      </span>
+    </Banner>
+  );
+}
+
 export type RunAgainInput = {
   missionId: RunnableMissionId;
-  input: { url: string; focus?: string; department?: string };
+  input: StartRunRequest["input"];
+  parentRunId?: string;
 } | null;
 
 export function RunAgainButton({

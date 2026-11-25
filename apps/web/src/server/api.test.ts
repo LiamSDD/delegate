@@ -150,6 +150,63 @@ describe("POST /api/runs", () => {
     });
   });
 
+  it("starts build-agent from a visible parent audit with its goal and provenance", async () => {
+    const d = deps();
+    const parent = await handleCreateRun(
+      post({ missionId: "automation-audit", input: { url: "acme.com" } }),
+      d,
+    );
+    const cookie = cookieFrom(parent);
+    const { runId: parentRunId } = (await parent.json()) as { runId: string };
+    const response = await handleCreateRun(
+      post(
+        {
+          missionId: "build-agent",
+          input: {
+            url: "acme.com",
+            goal: "Answer billing questions from the help centre",
+            name: "Billing helper",
+            opportunityId: "opp-1",
+            fromAuditRunId: "ignored-client-value",
+          },
+          parentRunId,
+        },
+        { cookie },
+      ),
+      d,
+    );
+    expect(response.status).toBe(201);
+    const { runId } = (await response.json()) as { runId: string };
+    const summary = await handleGetRun(get(`/api/runs/${runId}`, cookie), runId, d);
+    expect(await summary.json()).toMatchObject({
+      run: {
+        mission: "build-agent",
+        input: {
+          url: "https://acme.com/",
+          goal: "Answer billing questions from the help centre",
+          name: "Billing helper",
+          opportunityId: "opp-1",
+          fromAuditRunId: parentRunId,
+        },
+      },
+    });
+  });
+
+  it("requires a goal for build-agent and rejects goals on other missions", async () => {
+    const d = deps();
+    const missingGoal = await handleCreateRun(
+      post({ missionId: "build-agent", input: { url: "acme.com" } }),
+      d,
+    );
+    expect(missingGoal.status).toBe(400);
+    expect(await missingGoal.json()).toMatchObject({ error: { code: "invalid_request" } });
+    const stray = await handleCreateRun(
+      post({ missionId: "company-xray", input: { url: "acme.com", goal: "x" } }),
+      d,
+    );
+    expect(stray.status).toBe(400);
+  });
+
   it("rate limits run creation per guest", async () => {
     const d = deps({ guestLimiter: createRateLimiter({ limit: 2, windowMs: 3_600_000 }) });
     const first = await handleCreateRun(post(validBody), d);

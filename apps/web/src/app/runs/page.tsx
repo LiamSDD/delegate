@@ -3,8 +3,10 @@ import Link from "next/link";
 
 import { missionLabel } from "@/lib/m2-contract";
 import { formatDuration } from "@/lib/runs/run-view";
+import { apiDeps } from "@/server/deps";
+import { reviveOrSweep } from "@/server/durable";
 import { currentGuest } from "@/server/page-session";
-import { listRuns, type RunListItem } from "@/server/runs";
+import { getRunRecord, listOpenRuns, listRuns, type RunListItem } from "@/server/runs";
 
 export const metadata: Metadata = { title: "Runs" };
 
@@ -20,6 +22,7 @@ const STATUS: Record<RunListItem["status"], { label: string; className: string }
 const MISSION_TONE: Record<string, string> = {
   "company-xray": "border-border bg-surface-2 text-text-muted",
   "automation-audit": "border-transparent bg-accent-soft text-accent",
+  "build-agent": "border-transparent bg-success-soft text-success",
 };
 
 function duration(run: RunListItem): string {
@@ -35,6 +38,13 @@ const dateFormat = new Intl.DateTimeFormat("en-GB", {
 
 export default async function RunsPage() {
   const guest = await currentGuest();
+  if (guest !== null) {
+    const deps = apiDeps();
+    for (const id of await listOpenRuns(guest.app, guest.session)) {
+      const record = await getRunRecord(guest.app, guest.session.userId, id);
+      if (record !== null) await reviveOrSweep(guest.app, guest.session.userId, record, deps);
+    }
+  }
   const runs = guest === null ? [] : await listRuns(guest.app, guest.session);
 
   return (

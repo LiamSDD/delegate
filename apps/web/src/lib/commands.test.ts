@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { COMMANDS, filterCommands, moveIndex } from "./commands";
+import { COMMANDS, commandsFor, filterCommands, moveIndex } from "./commands";
 
 describe("filterCommands", () => {
   it("returns every command for an empty query", () => {
@@ -18,6 +18,10 @@ describe("filterCommands", () => {
   it("offers every command the shell promises", () => {
     expect(COMMANDS.map((command) => command.id).sort()).toEqual(
       [
+        "agent-copy-embed",
+        "agent-focus",
+        "agent-reset",
+        "go-agents",
         "go-control",
         "go-evals",
         "go-runs",
@@ -26,6 +30,17 @@ describe("filterCommands", () => {
         "open-docs",
         "toggle-theme",
       ].sort(),
+    );
+  });
+});
+
+describe("commandsFor", () => {
+  it("offers assistant commands only on an assistant page", () => {
+    const ids = (path: string) => commandsFor(COMMANDS, path).map((command) => command.id);
+    expect(ids("/runs")).not.toContain("agent-reset");
+    expect(ids("/agents")).not.toContain("agent-reset");
+    expect(ids("/agents/6f1c3a52-3c5e-4d3c-9d55-0d2f3c1e9b10")).toEqual(
+      expect.arrayContaining(["agent-reset", "agent-focus", "agent-copy-embed", "go-agents"]),
     );
   });
 });

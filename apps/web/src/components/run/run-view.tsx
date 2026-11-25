@@ -12,12 +12,14 @@ import { missionLabel, type RunnableMissionId } from "@/lib/m2-contract";
 import { AgentLanes } from "./agent-lanes";
 import { AuditPanel } from "./audit-panel";
 import { BriefPanel } from "./brief-panel";
+import { BuildAgentPanel } from "./build-agent-panel";
 import { NextActions, nextActionsFor } from "./next-actions";
 import { PlanApprovalCard } from "./plan-approval-card";
 import { PlanPanel } from "./plan-panel";
 import { Eyebrow, useNow } from "./primitives";
-import { OutcomeBanner, StreamBanner } from "./run-status";
+import { OutcomeBanner, ResumedBanner, StreamBanner } from "./run-status";
 import { RunTopBar } from "./run-top-bar";
+import { SummaryStrip } from "./summary-strip";
 import { useRunStream } from "./use-run-stream";
 
 type TabId = "plan" | "activity" | "brief";
@@ -84,7 +86,12 @@ function Skeleton({
 }
 
 function isRunnable(id: string): id is RunnableMissionId {
-  return id === "company-xray" || id === "automation-audit";
+  return id === "company-xray" || id === "automation-audit" || id === "build-agent";
+}
+
+function optionalText(raw: Record<string, unknown>, key: string): string | undefined {
+  const value = raw[key];
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
@@ -110,15 +117,17 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
       ? null
       : parseBrief(ready.brief.content);
   const isAudit = (ready?.missionId ?? missionId) === "automation-audit";
+  const isBuild = (ready?.missionId ?? missionId) === "build-agent";
   const hasBrief =
     (ready?.brief !== null && ready?.brief !== undefined) ||
-    (ready?.audit !== null && ready?.audit !== undefined);
+    (ready?.audit !== null && ready?.audit !== undefined) ||
+    (isBuild && Object.values(ready?.state.artifacts ?? {}).some((a) => a.kind === "assistant"));
   const pendingPlan = ready?.pendingPlan ?? null;
   const tab: TabId = chosenTab ?? (pendingPlan !== null ? "plan" : hasBrief ? "brief" : "activity");
   const TABS: { id: TabId; label: string }[] = [
     { id: "plan", label: pendingPlan === null ? "Plan" : "Approve plan" },
     { id: "activity", label: "Agents" },
-    { id: "brief", label: isAudit ? "Audit" : "Brief" },
+    { id: "brief", label: isAudit ? "Audit" : isBuild ? "Assistant" : "Brief" },
   ];
   const actions =
     ready === null
@@ -161,15 +170,18 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
       : (() => {
           const created = events[0];
           const raw = created?.type === "run.created" ? created.payload.input : {};
-          const focus = typeof raw.focus === "string" ? raw.focus : undefined;
-          const department = typeof raw.department === "string" ? raw.department : undefined;
+          const fields = ["focus", "department", "goal", "name", "opportunityId"] as const;
+          const extra = Object.fromEntries(
+            fields.flatMap((key) => {
+              const value = optionalText(raw, key);
+              return value === undefined ? [] : [[key, value]];
+            }),
+          );
+          const parentRunId = optionalText(raw, "parentRunId");
           return {
             missionId: ready.missionId,
-            input: {
-              url: ready.url,
-              ...(focus === undefined ? {} : { focus }),
-              ...(department === undefined ? {} : { department }),
-            },
+            input: { url: ready.url, ...extra },
+            ...(parentRunId === undefined ? {} : { parentRunId }),
           };
         })();
 
@@ -191,6 +203,7 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
       <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-4 px-4 py-4 md:px-6 md:py-6">
         <div aria-live="polite" data-print="hide" className="flex flex-col gap-3">
           <StreamBanner stream={stream} onReconnect={reconnect} />
+          <ResumedBanner events={events} />
           {ready?.outcome === null || ready?.outcome === undefined ? null : (
             <OutcomeBanner
               outcome={ready.outcome}
@@ -199,6 +212,7 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
               input={input}
             />
           )}
+          {ready === null ? null : <SummaryStrip view={ready} events={events} />}
         </div>
         {view?.ok === false ? (
           <div
@@ -321,8 +335,12 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
             )}
           >
             <NextActions runId={runId} actions={actions} />
-            {isAudit ? (
+            {isBuild ? (
+              <BuildAgentPanel events={events} running={running} />
+            ) : isAudit ? (
               <AuditPanel
+                runId={runId}
+                buildActions={actions}
                 artifact={ready?.audit ?? null}
                 target={ready?.target ?? target}
                 running={running}

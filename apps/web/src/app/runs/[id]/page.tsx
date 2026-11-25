@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { RunView } from "@/components/run/run-view";
+import { apiDeps } from "@/server/deps";
+import { reviveOrSweep } from "@/server/durable";
 import { currentGuest } from "@/server/page-session";
-import { getRunRecord, sweepIfStale } from "@/server/runs";
+import { getRunRecord } from "@/server/runs";
 
 export const metadata: Metadata = { title: "Run" };
 
@@ -11,9 +13,9 @@ export default async function RunPage({ params }: PageProps<"/runs/[id]">) {
   const { id } = await params;
   const guest = await currentGuest();
   if (guest === null) notFound();
-  const record = await getRunRecord(guest.app, guest.session.userId, id);
-  if (record === null) notFound();
-  await sweepIfStale(guest.app, guest.session.userId, record);
+  const found = await getRunRecord(guest.app, guest.session.userId, id);
+  if (found === null) notFound();
+  const record = (await reviveOrSweep(guest.app, guest.session.userId, found, apiDeps())) ?? found;
   const url = typeof record.input.url === "string" ? record.input.url : null;
   return (
     <RunView

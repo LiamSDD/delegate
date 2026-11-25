@@ -49,11 +49,28 @@ describe("M2 run view panels render from a simulated audit", () => {
     expect(view.citation).toEqual({ kind: "reported", value: 0.875, checked: 16 });
     const now = Date.parse(log.at(-1)?.at ?? "");
     const audit = renderToString(
-      createElement(AuditPanel, { artifact: view.audit, target: "acme.test", running: false }),
+      createElement(AuditPanel, {
+        artifact: view.audit,
+        target: "acme.test",
+        running: false,
+        runId: RUN,
+        buildActions: view.nextActions.map((action) => ({ ...action, available: true })),
+      }),
     );
     expect(audit).toContain("Support ticket triage");
     expect(audit).toContain("estimate");
-    expect(audit).toContain("Arrives in M3");
+    expect(audit).toContain("Build it");
+    expect(audit).not.toContain("Not buildable");
+    const simulated = renderToString(
+      createElement(AuditPanel, {
+        artifact: view.audit,
+        target: "acme.test",
+        running: false,
+        runId: RUN,
+        buildActions: view.nextActions,
+      }),
+    );
+    expect(simulated).toContain("Not buildable from this audit");
     const lanes = renderToString(
       createElement(AgentLanes, { lanes: view.lanes, liveFromSeq: null, waiting: false, now }),
     );

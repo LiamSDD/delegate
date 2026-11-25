@@ -4,6 +4,7 @@ import "@fontsource/instrument-serif";
 import "./globals.css";
 
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
 
@@ -11,6 +12,7 @@ import { CommandPaletteProvider } from "@/components/command-palette";
 import { MotionProvider } from "@/components/motion-provider";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { EMBED_REQUEST_HEADER } from "@/lib/security-headers";
 import { themeInitScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
@@ -27,6 +29,17 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   await connection();
+  const embed = (await headers()).get(EMBED_REQUEST_HEADER) === "1";
+  if (embed) {
+    return (
+      <html lang="en" suppressHydrationWarning>
+        <head>
+          <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        </head>
+        <body className="h-dvh overflow-hidden bg-surface text-text">{children}</body>
+      </html>
+    );
+  }
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

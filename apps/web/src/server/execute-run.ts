@@ -1,3 +1,6 @@
+import { holdLease, type RunLease } from "@delegate/runtime/server";
+import type { RunEvent } from "@delegate/runtime";
+
 import type { AppDatabase } from "./db";
 import type { RunnableMissionId } from "@/lib/m2-contract";
 
@@ -28,14 +31,39 @@ export interface ExecuteRunOptions {
   registry: RunRegistry;
   autoApprovePlan?: boolean;
   awaitPlanApproval?: AwaitPlanApproval;
+  lease?: RunLease;
+  resumeFrom?: readonly RunEvent[];
 }
 
 export async function executeRun(options: ExecuteRunOptions): Promise<void> {
+  if (options.lease === undefined) {
+    await executeHeld(options, undefined, () => true);
+    return;
+  }
+  try {
+    const held = await holdLease(options.lease, undefined, (signal, isHeld) =>
+      executeHeld(options, signal, isHeld),
+    );
+    if (!held.acquired) console.warn("run lease held by another worker", options.ctx.runId);
+  } catch (error: unknown) {
+    console.error("run lease failed", options.ctx.runId, error);
+  }
+}
+
+async function executeHeld(
+  options: ExecuteRunOptions,
+  leaseSignal: AbortSignal | undefined,
+  isHeld: () => boolean,
+): Promise<void> {
   const { app, ctx, registry } = options;
   const controller = registry.register(ctx.runId);
+  const signal =
+    leaseSignal === undefined
+      ? controller.signal
+      : AbortSignal.any([controller.signal, leaseSignal]);
   const progress = { terminal: false };
   const emit = async (draft: EventDraft) => {
-    if (progress.terminal) throw new RunAlreadyTerminalError(ctx.runId);
+    if (progress.terminal || !isHeld()) throw new RunAlreadyTerminalError(ctx.runId);
     const event = await appendEvent(app, ctx, draft);
     if (isTerminalEventType(event.type)) progress.terminal = true;
   };
@@ -53,7 +81,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
       missionId: options.missionId,
       input: options.input,
       emit,
-      signal: controller.signal,
+      signal,
+      ...(options.resumeFrom === undefined ? {} : { resumeFrom: options.resumeFrom }),
       planApprover:
         options.autoApprovePlan === true
           ? { type: "system", id: "auto-approve" }
@@ -62,7 +91,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
         options.awaitPlanApproval ??
         createPlanApprovalWaiter({ app, ctx, autoApprove: options.autoApprovePlan ?? false }),
     });
-    if (!progress.terminal && !controller.signal.aborted) {
+    if (!progress.terminal && !signal.aborted) {
       await finish(
         result.status === "completed"
           ? { type: "run.completed", payload: { summary: "The mission reported completion." } }
@@ -75,11 +104,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
       );
     }
   } catch (error: unknown) {
-    if (
-      !progress.terminal &&
-      !controller.signal.aborted &&
-      !(error instanceof RunAlreadyTerminalError)
-    ) {
+    if (!progress.terminal && !signal.aborted && !(error instanceof RunAlreadyTerminalError)) {
       console.error("run failed", ctx.runId, error);
       await finish({
         type: "run.failed",

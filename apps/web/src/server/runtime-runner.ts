@@ -5,6 +5,9 @@ import modelsConfig from "@config/models.json";
 import {
   parsePromptFile,
   type PromptFile,
+  resumeMission as runtimeResumeMission,
+  type ResumeMissionOptions,
+  type ResumeMissionResult,
   runMission as runtimeRunMission,
   type RunMissionOptions,
   type RunMissionResult,
@@ -14,6 +17,7 @@ import {
 
 import { isOwnerModeEnabled } from "@/flags";
 
+import { assistantStores } from "./assistants";
 import { resolveRepoRoot } from "./db";
 import type { MissionRunner } from "./mission-runner";
 import { adaptRuntimeEmit } from "./runtime-emit";
@@ -36,29 +40,46 @@ export function loadRepoPrompts(): RuntimePrompts {
 export interface RuntimeRunnerOptions {
   env: Record<string, string | undefined>;
   runMission?: (options: RunMissionOptions) => Promise<RunMissionResult>;
+  resumeMission?: (options: ResumeMissionOptions) => Promise<ResumeMissionResult>;
   loadPrompts?: () => RuntimePrompts;
 }
 
 export function createRuntimeRunner(options: RuntimeRunnerOptions): MissionRunner {
   const runMission = options.runMission ?? runtimeRunMission;
+  const resumeMission = options.resumeMission ?? runtimeResumeMission;
   const loadPrompts = options.loadPrompts ?? loadRepoPrompts;
-  const audience = isOwnerModeEnabled(options.env) ? "owner" : "public-demo";
+  const audience: "owner" | "public-demo" = isOwnerModeEnabled(options.env)
+    ? "owner"
+    : "public-demo";
   let prompts: RuntimePrompts | undefined;
-  return ({ runId, missionId, input, emit, signal, awaitPlanApproval, planApprover }) => {
+  return async ({
+    runId,
+    missionId,
+    input,
+    emit,
+    signal,
+    awaitPlanApproval,
+    planApprover,
+    resumeFrom,
+  }) => {
     prompts ??= loadPrompts();
-    return runMission({
+    const shared = {
       runId,
-      missionId,
-      input,
-      context: { audience, classification: "public" },
+      context: { audience, classification: "public" as const },
       env: options.env,
       emit: adaptRuntimeEmit(runId, emit),
       signal,
       modelsConfig,
-      latency: "interactive",
+      latency: "interactive" as const,
       prompts,
       awaitPlanApproval,
       planApprover,
-    });
+      ...assistantStores(),
+    };
+    if (resumeFrom !== undefined) {
+      const result = await resumeMission({ ...shared, events: resumeFrom });
+      return { status: result.status === "completed" ? "completed" : "failed" };
+    }
+    return runMission({ ...shared, missionId, input });
   };
 }

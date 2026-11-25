@@ -1,16 +1,17 @@
 "use client";
 
-import { ArrowRight, Hammer, RefreshCw } from "lucide-react";
+import { ArrowRight, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { type NextAction, RUNNABLE_MISSION_IDS, type RunnableMissionId } from "@/lib/m2-contract";
 import { startRun } from "@/lib/runs/start-run";
 
-import { actionButton, Eyebrow, primaryButton } from "./primitives";
+import { BuildItButton } from "./build-it-button";
+import { Eyebrow, primaryButton } from "./primitives";
 
 function isRunnable(id: string): id is RunnableMissionId {
-  return (RUNNABLE_MISSION_IDS as readonly string[]).includes(id);
+  return id !== "build-agent" && (RUNNABLE_MISSION_IDS as readonly string[]).includes(id);
 }
 
 export function nextActionsFor(
@@ -39,7 +40,8 @@ export function NextActions({ runId, actions }: { runId: string; actions: readon
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const runnable = actions.filter((action) => isRunnable(action.missionId));
-  const builds = actions.filter((action) => action.missionId === "build-it");
+  const builds = actions.filter((action) => action.missionId === "build-agent" && action.available);
+  const topBuild = builds[0];
   if (runnable.length === 0 && builds.length === 0) return null;
 
   return (
@@ -85,15 +87,21 @@ export function NextActions({ runId, actions }: { runId: string; actions: readon
             </button>
           );
         })}
-        {builds.length > 0 ? (
-          <span className="flex items-center gap-2">
-            <button type="button" disabled className={actionButton}>
-              <Hammer className="size-3.5" aria-hidden="true" />
-              Build it · {builds.length} opportunities
-            </button>
-            <span className="font-mono text-2xs text-text-subtle">Arrives in M3</span>
-          </span>
-        ) : null}
+        {topBuild === undefined ? null : (
+          <>
+            <BuildItButton
+              action={topBuild}
+              runId={runId}
+              primary
+              label={`Build it: ${typeof topBuild.input.name === "string" ? topBuild.input.name : "top opportunity"}`}
+            />
+            {builds.length > 1 ? (
+              <span className="font-mono text-2xs text-text-subtle">
+                +{builds.length - 1} more on the opportunity cards
+              </span>
+            ) : null}
+          </>
+        )}
       </div>
       {error === null ? null : (
         <p role="alert" className="text-xs text-danger">

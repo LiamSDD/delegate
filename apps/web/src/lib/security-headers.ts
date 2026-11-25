@@ -15,12 +15,19 @@ export function createNonce(): string {
   return randomBytes(16).toString("base64");
 }
 
+export const EMBED_REQUEST_HEADER = "x-delegate-embed";
+
 export interface CspOptions {
   nonce: string;
   isDev: boolean;
+  frameable?: boolean;
 }
 
-export function buildContentSecurityPolicy({ nonce, isDev }: CspOptions): string {
+export function buildContentSecurityPolicy({
+  nonce,
+  isDev,
+  frameable = false,
+}: CspOptions): string {
   if (!NONCE_PATTERN.test(nonce)) throw new Error("CSP nonce must be base64");
   const scriptSrc = ["'self'", `'nonce-${nonce}'`, THEME_INIT_SCRIPT_HASH, "'strict-dynamic'"];
   if (isDev) scriptSrc.push("'unsafe-eval'");
@@ -31,7 +38,7 @@ export function buildContentSecurityPolicy({ nonce, isDev }: CspOptions): string
     "img-src 'self' data:",
     "font-src 'self'",
     "connect-src 'self'",
-    "frame-ancestors 'none'",
+    frameable ? "frame-ancestors *" : "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
     "object-src 'none'",

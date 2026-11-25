@@ -13,7 +13,14 @@ type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
 
 export interface StartRunRequest {
   missionId: RunnableMissionId;
-  input: { url: string; focus?: string; department?: string };
+  input: {
+    url: string;
+    focus?: string;
+    department?: string;
+    goal?: string;
+    name?: string;
+    opportunityId?: string;
+  };
   parentRunId?: string;
 }
 

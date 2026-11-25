@@ -6,7 +6,9 @@ import { validatePlanEdit } from "@/lib/runs/plan";
 import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 
 import type { AppDatabase } from "./db";
+import { reviveOrSweep } from "./durable";
 import { executeRun } from "./execute-run";
+import { createDbLease } from "./leases";
 import type { MissionRunner } from "./mission-runner";
 import { pendingPlanApproval, PlanDecisionError, recordPlanDecision } from "./plan-approval";
 import type { RunRegistry } from "./run-registry";
@@ -21,7 +23,6 @@ import {
   readEvents,
   RunAlreadyTerminalError,
   type RunRecord,
-  sweepIfStale,
 } from "./runs";
 import {
   type GuestSession,
@@ -84,15 +85,31 @@ function notFound(): Response {
   return apiError(404, "not_found", "No run with that id is visible to this session.");
 }
 
-export const CreateRunRequestSchema = z.strictObject({
-  missionId: z.enum(RUNNABLE_MISSION_IDS),
-  input: z.strictObject({
-    url: z.string().min(1).max(2048),
-    focus: z.string().trim().min(1).max(500).optional(),
-    department: z.string().trim().min(1).max(120).optional(),
-  }),
-  parentRunId: z.uuid().optional(),
-});
+export const CreateRunRequestSchema = z
+  .strictObject({
+    missionId: z.enum(RUNNABLE_MISSION_IDS),
+    input: z.strictObject({
+      url: z.string().min(1).max(2048),
+      focus: z.string().trim().min(1).max(500).optional(),
+      department: z.string().trim().min(1).max(120).optional(),
+      goal: z.string().trim().min(1).max(900).optional(),
+      name: z.string().trim().min(1).max(80).optional(),
+      opportunityId: z.string().trim().min(1).max(40).optional(),
+      fromAuditRunId: z.string().max(100).optional(),
+    }),
+    parentRunId: z.uuid().optional(),
+  })
+  .superRefine((request, ctx) => {
+    const buildOnly = ["goal", "name", "opportunityId", "fromAuditRunId"] as const;
+    if (request.missionId === "build-agent") {
+      if (request.input.goal === undefined)
+        ctx.addIssue({ code: "custom", path: ["input", "goal"], message: "A goal is required" });
+      return;
+    }
+    for (const key of buildOnly)
+      if (request.input[key] !== undefined)
+        ctx.addIssue({ code: "custom", path: ["input", key], message: "Only for build-agent" });
+  });
 
 export const PlanDecisionRequestSchema = z.discriminatedUnion("decision", [
   z.strictObject({
@@ -219,13 +236,6 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
       });
     }
 
-    const input = {
-      url: url.url,
-      ...(parsed.data.input.focus === undefined ? {} : { focus: parsed.data.input.focus }),
-      ...(parsed.data.input.department === undefined || parsed.data.missionId !== "automation-audit"
-        ? {}
-        : { department: parsed.data.input.department }),
-    };
     const parentRunId =
       parsed.data.parentRunId === undefined
         ? undefined
@@ -235,6 +245,7 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
         headers: cookieHeaders,
       });
     }
+    const input = missionInput(parsed.data, url.url, parentRunId);
     const runner = deps.runner();
     const { runId } = await createRunRecord(app, session, {
       missionId: parsed.data.missionId,
@@ -243,15 +254,17 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
       ...(parentRunId === undefined ? {} : { parentRunId }),
     });
     const autoApprovePlan = readCookie(request, AUTO_APPROVE_COOKIE) === "1";
+    const ctx = { runId, workspaceId: session.workspaceId, userId: session.userId };
     deps.schedule(() =>
       executeRun({
         app,
-        ctx: { runId, workspaceId: session.workspaceId, userId: session.userId },
+        ctx,
         missionId: parsed.data.missionId,
         input,
         runner: runner.run,
         registry: deps.registry,
         autoApprovePlan,
+        ...(runner.execution === "live" ? { lease: createDbLease(app, ctx) } : {}),
       }),
     );
     return Response.json({ runId }, { status: 201, headers: { ...NO_STORE, ...cookieHeaders } });
@@ -259,6 +272,28 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
     console.error("create run failed", error);
     return apiError(500, "internal", "The run could not be created.");
   }
+}
+
+export function missionInput(
+  request: CreateRunRequest,
+  url: string,
+  parentRunId: string | undefined,
+): Record<string, unknown> {
+  const { focus, department, goal, name, opportunityId } = request.input;
+  if (request.missionId === "build-agent") {
+    return {
+      url,
+      goal,
+      ...(name === undefined ? {} : { name }),
+      ...(opportunityId === undefined ? {} : { opportunityId }),
+      ...(parentRunId === undefined ? {} : { fromAuditRunId: parentRunId }),
+    };
+  }
+  return {
+    url,
+    ...(focus === undefined ? {} : { focus }),
+    ...(department === undefined || request.missionId !== "automation-audit" ? {} : { department }),
+  };
 }
 
 async function guestFor(
@@ -278,10 +313,7 @@ async function freshRecord(
 ): Promise<RunRecord | null> {
   const record = await getRunRecord(app, session.userId, runId);
   if (record === null) return null;
-  const swept = await sweepIfStale(app, session.userId, record, deps.now?.() ?? new Date());
-  if (!swept) return record;
-  deps.registry.abort(runId, "worker lost");
-  return getRunRecord(app, session.userId, runId);
+  return reviveOrSweep(app, session.userId, record, deps);
 }
 
 export function runSummary(record: RunRecord) {

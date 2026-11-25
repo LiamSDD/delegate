@@ -11,6 +11,7 @@ export const DOCS_URL = `${REPO_URL}/tree/main/docs`;
 
 export const NAV_ITEMS = [
   { href: "/runs", label: "Runs" },
+  { href: "/agents", label: "Agents" },
   { href: "/control", label: "Control" },
   { href: "/evals", label: "Evals" },
   { href: "/docs", label: "Docs" },

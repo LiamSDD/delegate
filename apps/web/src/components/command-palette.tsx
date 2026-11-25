@@ -1,6 +1,15 @@
 "use client";
 
-import { ArrowRight, BookOpen, Contrast, Plus, Search } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  Code,
+  Contrast,
+  MessageSquarePlus,
+  MessagesSquare,
+  Plus,
+  Search,
+} from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
@@ -18,7 +27,9 @@ import {
 import { Kbd } from "@/components/kbd";
 import { useModifierLabel } from "@/components/platform";
 import {
+  AGENT_COMMAND_EVENT,
   COMMANDS,
+  commandsFor,
   type CommandDefinition,
   type CommandId,
   filterCommands,
@@ -47,6 +58,10 @@ const ICONS: Record<CommandId, typeof Plus> = {
   "new-run": Plus,
   "toggle-theme": Contrast,
   "go-runs": ArrowRight,
+  "go-agents": ArrowRight,
+  "agent-focus": MessagesSquare,
+  "agent-reset": MessageSquarePlus,
+  "agent-copy-embed": Code,
   "go-control": ArrowRight,
   "go-evals": ArrowRight,
   "go-settings": ArrowRight,
@@ -95,7 +110,7 @@ function CommandDialog({ onClose }: { onClose: () => void }) {
   const titleId = useId();
   const optionId = (id: CommandId) => `${listId}-${id}`;
 
-  const results = filterCommands(COMMANDS, query);
+  const results = filterCommands(commandsFor(COMMANDS, pathname), query);
   const activeIndex = Math.min(active, Math.max(results.length - 1, 0));
   const activeCommand = results[activeIndex];
 
@@ -127,6 +142,13 @@ function CommandDialog({ onClose }: { onClose: () => void }) {
         return;
       case "open-docs":
         window.open(DOCS_URL, "_blank", "noopener,noreferrer");
+        return;
+      case "agent-focus":
+      case "agent-reset":
+      case "agent-copy-embed":
+        requestAnimationFrame(() =>
+          window.dispatchEvent(new CustomEvent(AGENT_COMMAND_EVENT, { detail: command.id })),
+        );
         return;
       default:
         if (command.href !== undefined) router.push(command.href);

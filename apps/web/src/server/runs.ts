@@ -65,6 +65,8 @@ export interface RunRecord {
   eventCount: number;
   lastEventAt: Date | null;
   lastEventType: string | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: Date | null;
 }
 
 const inputRecord = z.record(z.string(), z.unknown());
@@ -307,6 +309,8 @@ export async function getRunRecord(
       eventCount: stat.count,
       lastEventAt: toDate(stat.last_at),
       lastEventType: await lastEventType(tx, runId),
+      leaseOwner: run.leaseOwner,
+      leaseExpiresAt: run.leaseExpiresAt,
     };
   });
 }
@@ -378,6 +382,40 @@ export async function sweepIfStale(
     if (error instanceof RunAlreadyTerminalError) return false;
     throw error;
   }
+}
+
+export async function readAllEvents(
+  app: AppDatabase,
+  userId: string,
+  runId: string,
+): Promise<RunEvent[]> {
+  const all: RunEvent[] = [];
+  for (;;) {
+    const page = await readEvents(app, userId, runId, all.at(-1)?.seq ?? 0);
+    all.push(...page);
+    if (page.length < REPLAY_PAGE_SIZE) return all;
+  }
+}
+
+export async function listOpenRuns(
+  app: AppDatabase,
+  session: GuestSession,
+  limit = 20,
+): Promise<string[]> {
+  const rows = await withTenant(app.db, session.userId, (tx) =>
+    tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.workspaceId, session.workspaceId),
+          sql`${runs.status} not in ('completed', 'failed')`,
+        ),
+      )
+      .orderBy(desc(runs.createdAt))
+      .limit(limit),
+  );
+  return rows.map((row) => row.id);
 }
 
 export interface ArtifactContent {
