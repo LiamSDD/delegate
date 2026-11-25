@@ -15,10 +15,10 @@ import {
   type RunOutcome,
   type ServingRecord,
 } from "../graders/run-metrics";
+import { type EvalMission } from "../results";
 import { type Check } from "../types";
 
-export const EVAL_MISSIONS = ["xray", "audit", "build", "repo", "goal"] as const;
-export type EvalMission = (typeof EVAL_MISSIONS)[number];
+export { EVAL_MISSIONS, type EvalMission } from "../results";
 
 export interface BaseCase {
   id: string;

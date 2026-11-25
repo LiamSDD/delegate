@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { runDir } from "../judge/agreement-store";
-import { EvalResultFileSchema } from "../results";
+import { EVAL_MISSION_INFO, EvalResultFileSchema } from "../results";
 import { resultFilePath, runEval, type RunEvalDeps, type RunEvalOptions } from "../runner";
 import { loadBuildDataset } from "../datasets/build";
 import { fixtureAnswers, scriptedRunMission } from "../testing/mission-fixtures";
@@ -41,6 +41,16 @@ function options(
     ...overrides,
   };
 }
+
+describe("mission registry", () => {
+  it("matches the web-safe mission list the /evals page renders", () => {
+    for (const mission of EVAL_MISSIONS)
+      expect(EVAL_MISSION_INFO[mission]).toEqual({
+        title: missionAdapter(mission).title,
+        dataset: missionAdapter(mission).dataset.name,
+      });
+  });
+});
 
 describe("runEval across missions", () => {
   it.each(EVAL_MISSIONS)(

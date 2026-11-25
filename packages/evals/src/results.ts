@@ -11,6 +11,17 @@ export { wilsonInterval, type ProportionInterval } from "./stats";
 
 export const EVAL_RESULT_FILE_VERSION = 1;
 
+export const EVAL_MISSIONS = ["xray", "audit", "build", "repo", "goal"] as const;
+export type EvalMission = (typeof EVAL_MISSIONS)[number];
+
+export const EVAL_MISSION_INFO: Record<EvalMission, { title: string; dataset: string }> = {
+  xray: { title: "Company X-ray", dataset: "company-xray" },
+  audit: { title: "AI Automation Audit", dataset: "automation-audit" },
+  build: { title: "Build-an-Agent", dataset: "build-agent" },
+  repo: { title: "Repo X-ray", dataset: "repo-xray" },
+  goal: { title: "Custom goal", dataset: "custom-goal" },
+};
+
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
 const count = z.number().int().nonnegative();
 const unit = z.number().min(0).max(1);
