@@ -171,6 +171,21 @@ const samples: Record<RunEvent["type"], unknown> = {
       retryAfterMs: 15000,
     },
   },
+  "connector.call": {
+    type: "connector.call",
+    stepId: "s1",
+    payload: {
+      toolCallId: "tc_1",
+      connectorId: "c_1",
+      server: "tickets",
+      tool: "search_issues",
+      ok: true,
+      durationMs: 120,
+      bytes: 2048,
+      truncated: false,
+      summary: "3 results",
+    },
+  },
 };
 
 function envelope(seq: number, body: unknown): unknown {

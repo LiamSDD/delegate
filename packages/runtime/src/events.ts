@@ -21,6 +21,7 @@ export const RUN_EVENT_TYPES = [
   "run.completed",
   "run.failed",
   "model.fallback",
+  "connector.call",
 ] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
@@ -328,6 +329,21 @@ export const RunEventSchema = z.discriminatedUnion("type", [
     }),
   ),
   event("model.fallback", ModelFallbackPayloadSchema),
+  stepEvent(
+    "connector.call",
+    z.object({
+      toolCallId: id,
+      connectorId: id,
+      server: id,
+      tool: id,
+      ok: z.boolean(),
+      durationMs: z.number().int().nonnegative(),
+      bytes: z.number().int().nonnegative(),
+      truncated: z.boolean(),
+      summary: z.string(),
+      redactions: redactionCount,
+    }),
+  ),
 ]);
 
 export type RunEvent = z.infer<typeof RunEventSchema>;
@@ -636,6 +652,7 @@ export function foldRun(events: readonly RunEvent[]): RunState {
       case "agent.message":
       case "tool.result":
       case "critic.flagged":
+      case "connector.call":
         break;
     }
   }
