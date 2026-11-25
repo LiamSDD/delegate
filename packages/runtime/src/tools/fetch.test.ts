@@ -9,6 +9,7 @@ import {
   type HostGate,
   type HostOutcome,
 } from "./fetch";
+import { HostPoliteness } from "../crawl/politeness";
 
 type Handler = (url: URL, init: RequestInit | undefined) => Response;
 
@@ -414,6 +415,80 @@ describe("fetcher behaviour", () => {
     expect(error).toMatchObject({ code: "http_error", status: 429, retryAfterMs: 7000 });
     expect(outcomes.at(-1)).toMatchObject({ status: 429, retryAfterMs: 7000, failed: true });
     expect(h.sleeps).toEqual([]);
+  });
+
+  it("reports a content-type refusal to the host gate as a success, not a host failure", async () => {
+    const outcomes: HostOutcome[] = [];
+    const gate: HostGate = {
+      acquire: () =>
+        Promise.resolve((outcome) => {
+          outcomes.push(outcome);
+        }),
+      setCrawlDelay: () => undefined,
+    };
+    const h = harness(
+      {
+        "https://acme.example/logo": () =>
+          new Response("png", { headers: { "content-type": "image/png" } }),
+      },
+      {},
+      { hostGate: gate },
+    );
+    const error = await createFetcher(h.options)
+      .fetch({ url: "https://acme.example/logo" })
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "content_type" });
+    expect(outcomes.at(-1)).toMatchObject({ status: 200 });
+    expect(outcomes.at(-1)?.failed).toBeUndefined();
+  });
+
+  it("skips a host whose Crawl-delay is longer than the cap and says why", async () => {
+    const delays: number[] = [];
+    const gate: HostGate = {
+      acquire: () => Promise.resolve(() => undefined),
+      setCrawlDelay: (_host, ms) => {
+        delays.push(ms);
+      },
+    };
+    const h = harness(
+      {
+        "https://slow.example/robots.txt": () =>
+          new Response("User-agent: *\nCrawl-delay: 600\n", {
+            headers: { "content-type": "text/plain" },
+          }),
+        "https://slow.example/page": () => html("ok"),
+      },
+      {},
+      { hostGate: gate },
+    );
+    const error = await createFetcher(h.options)
+      .fetch({ url: "https://slow.example/page" })
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "crawl_delay" });
+    expect(error instanceof Error ? error.message : "").toMatch(/crawl-delay 600 s/i);
+    expect(delays).toEqual([]);
+    expect(h.calls.map((call) => call.url)).toEqual(["https://slow.example/robots.txt"]);
+  });
+
+  it("fails a later fetch fast instead of sleeping out a day-long Retry-After", async () => {
+    const h = harness(
+      {
+        "https://busy.example/a": () =>
+          new Response("slow down", { status: 429, headers: { "retry-after": "86400" } }),
+        "https://busy.example/b": () => html("ok"),
+      },
+      {},
+      { hostGate: new HostPoliteness({ minIntervalMs: 0 }), timeoutMs: 15_000 },
+    );
+    const fetcher = createFetcher(h.options);
+    await fetcher.fetch({ url: "https://busy.example/a" }).catch(() => undefined);
+    const started = Date.now();
+    const error = await fetcher
+      .fetch({ url: "https://busy.example/b" })
+      .catch((caught: unknown) => caught);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(error).toMatchObject({ code: "host_busy" });
+    expect(h.calls.some((call) => call.url === "https://busy.example/b")).toBe(false);
   });
 
   it("parses Retry-After as seconds or an HTTP date", () => {

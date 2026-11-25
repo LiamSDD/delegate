@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { HostWaitError, MAX_CRAWL_DELAY_MS } from "../tools/fetch";
 import { DuplicateIndex, contentHash, hammingDistance, simhash } from "./dedupe";
 import { Frontier } from "./frontier";
 import { HostPoliteness } from "./politeness";
@@ -231,6 +232,48 @@ describe("HostPoliteness", () => {
     expect(gate.limit("a.example")).toBe(3);
     (await gate.acquire("a.example"))({ latencyMs: 20, status: 503 });
     expect(gate.limit("a.example")).toBe(1);
+  });
+
+  it("returns promptly when the caller aborts during a Crawl-delay wait", async () => {
+    const gate = new HostPoliteness({ minIntervalMs: 0 });
+    gate.setCrawlDelay("a.example", 2_000);
+    (await gate.acquire("a.example"))({ latencyMs: 1 });
+    const started = Date.now();
+    const outcome = await gate.acquire("a.example", AbortSignal.timeout(50)).then(
+      () => "acquired",
+      (error: unknown) => (error instanceof HostWaitError ? error.reason : "other"),
+    );
+    expect(outcome).toBe("aborted");
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("drops an aborted waiter so it never takes a slot", async () => {
+    const gate = new HostPoliteness({ perHost: 1, minIntervalMs: 0 });
+    const first = await gate.acquire("a.example");
+    const controller = new AbortController();
+    const waiting = gate.acquire("a.example", controller.signal);
+    controller.abort();
+    await expect(waiting).rejects.toMatchObject({ reason: "aborted" });
+    first({ latencyMs: 1 });
+    expect(gate.capacity("a.example")).toBe(1);
+    (await gate.acquire("a.example"))({ latencyMs: 1 });
+    expect(gate.stats()[0]?.requests).toBe(2);
+  });
+
+  it("fails fast when the next slot is beyond the caller's wait budget", async () => {
+    const c = clock();
+    const gate = new HostPoliteness({ minIntervalMs: 0, ...c });
+    (await gate.acquire("a.example"))({ latencyMs: 1, status: 429, retryAfterMs: 86_400_000 });
+    await expect(gate.acquire("a.example", undefined, 15_000)).rejects.toMatchObject({
+      reason: "too_late",
+    });
+    expect(c.now()).toBe(0);
+  });
+
+  it("never spaces a host further apart than the Crawl-delay cap", () => {
+    const gate = new HostPoliteness({ minIntervalMs: 0 });
+    gate.setCrawlDelay("a.example", 600_000);
+    expect(gate.stats()[0]?.intervalMs).toBe(MAX_CRAWL_DELAY_MS);
   });
 
   it("slows down when latency climbs and recovers when the host is healthy again", async () => {
