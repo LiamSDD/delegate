@@ -8,6 +8,9 @@ export const CAPABILITIES = {
   repoWrite: "repo.write",
   messageSend: "message.send",
   webhookSend: "webhook.send",
+  sandboxRead: "sandbox.read",
+  sandboxWrite: "sandbox.write",
+  sandboxExec: "sandbox.exec",
 } as const;
 
 export type Capability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];
@@ -83,6 +86,76 @@ export const ownerDefaultPolicy: Policy = PolicySchema.parse({
       capabilities: [CAPABILITIES.webFetch],
       domains: ["*"],
     },
+    {
+      id: "owner-spend-cap",
+      kind: "spend_cap",
+      perRunMicroUsd: 2_000_000,
+      perDayMicroUsd: 10_000_000,
+      onExceed: "deny",
+    },
+    {
+      id: "no-confidential-data",
+      kind: "classification",
+      classifications: ["confidential", "restricted"],
+      forbiddenTools: ["*"],
+    },
+  ],
+});
+
+export const GITHUB_OPEN_PR_TOOL = "github.open_pr";
+export const GITHUB_API_HOST = "api.github.com";
+
+export const SANDBOX_CAPABILITIES: readonly Capability[] = [
+  CAPABILITIES.sandboxRead,
+  CAPABILITIES.sandboxWrite,
+  CAPABILITIES.sandboxExec,
+];
+
+export const shipDemoPolicy: Policy = PolicySchema.parse({
+  id: "ship-demo",
+  name: "Ship-a-PR for guests",
+  description:
+    "Public demo Ship-a-PR: the Engineer reads, writes and runs allowlisted commands only inside an isolated sandbox, keyless public-demo providers, no spend. Pull requests are denied outright: guests only ever receive a patch and a test report.",
+  rules: [
+    {
+      id: "sandbox-capabilities",
+      kind: "capability_allowlist",
+      capabilities: [...SANDBOX_CAPABILITIES, CAPABILITIES.artifactWrite],
+    },
+    { id: "no-pull-requests", kind: "deny_tools", tools: [GITHUB_OPEN_PR_TOOL] },
+    { id: "zero-spend", kind: "spend_cap", perRunMicroUsd: 0, perDayMicroUsd: 0, onExceed: "deny" },
+    {
+      id: "public-demo-providers",
+      kind: "provider_terms",
+      allowed: ["public-demo-ok", "local-only", "byok"],
+    },
+    {
+      id: "no-confidential-data",
+      kind: "classification",
+      classifications: ["confidential", "restricted"],
+      forbiddenTools: ["*"],
+    },
+  ],
+});
+
+export const shipOwnerPolicy: Policy = PolicySchema.parse({
+  id: "ship-owner",
+  name: "Ship-a-PR for the owner",
+  description:
+    "Owner Ship-a-PR: sandbox-only reads, writes and allowlisted commands; one pull request to the GitHub API on the repository the GitHub App is installed on, always after human approval; spend cap for bring-your-own-key models.",
+  rules: [
+    {
+      id: "sandbox-capabilities",
+      kind: "capability_allowlist",
+      capabilities: [...SANDBOX_CAPABILITIES, CAPABILITIES.artifactWrite, CAPABILITIES.repoWrite],
+    },
+    {
+      id: "github-api-only",
+      kind: "egress_allowlist",
+      capabilities: [CAPABILITIES.repoWrite],
+      domains: [GITHUB_API_HOST],
+    },
+    { id: "pull-request-approval", kind: "require_approval", tools: [GITHUB_OPEN_PR_TOOL] },
     {
       id: "owner-spend-cap",
       kind: "spend_cap",
