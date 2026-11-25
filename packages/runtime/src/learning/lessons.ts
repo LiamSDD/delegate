@@ -166,7 +166,7 @@ export function runOutcome(events: readonly LoggedEvent[]): "completed" | "faile
   return events.some((event) => event.type === "run.failed") ? "failed" : "completed";
 }
 
-function planShape(events: readonly LoggedEvent[], completed: boolean): Lesson[] {
+function planShape(events: readonly LoggedEvent[]): Lesson[] {
   let steps: string[] = [];
   let source = "planner";
   for (const event of events) {
@@ -185,7 +185,7 @@ function planShape(events: readonly LoggedEvent[], completed: boolean): Lesson[]
     key: `plan_shape:${ids.join(">")}`,
     kind: "plan_shape",
     polarity: "keep",
-    text: `Plan ${ids.join(" → ")} (${source} plan) ${completed ? "completed the run" : "ended in a failed run"}.`,
+    text: `Plan shape ${ids.join(" → ")} (${source} plan).`,
   });
   return made === undefined ? [] : [made];
 }
@@ -401,9 +401,8 @@ function tools(events: readonly LoggedEvent[]): Lesson[] {
 }
 
 export function extractLessonCandidates(events: readonly LoggedEvent[], frame: RunFrame): Lesson[] {
-  const completed = runOutcome(events) === "completed";
   const all = [
-    ...planShape(events, completed),
+    ...planShape(events),
     ...failures(events),
     ...critic(events),
     ...fallbacks(events),
