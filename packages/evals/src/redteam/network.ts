@@ -104,17 +104,19 @@ export function recordingFetcher(
       : { allowPublicIpLiterals: options.allowPublicIpLiterals }),
   });
   const blocks: string[] = [];
+  const recorded = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof FetchBlockedError && SECURITY_FETCH_CODES.has(error.code))
+        blocks.push(error.code);
+      throw error;
+    }
+  };
   return {
     blocks,
-    fetch: async (request) => {
-      try {
-        return await inner.fetch(request);
-      } catch (error) {
-        if (error instanceof FetchBlockedError && SECURITY_FETCH_CODES.has(error.code))
-          blocks.push(error.code);
-        throw error;
-      }
-    },
+    fetch: (request) => recorded(() => inner.fetch(request)),
+    download: (request) => recorded(() => inner.download(request)),
     pagesFetched: () => inner.pagesFetched(),
     sitemapsFor: (url) => inner.sitemapsFor(url),
   };
