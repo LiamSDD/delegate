@@ -73,6 +73,26 @@ function fold(events: readonly RunEventDraft[], plan: readonly PlanStep[]) {
 }
 
 describe("orchestrate", () => {
+  it("never grants a step more capabilities than its executor declares", async () => {
+    const { ctx } = harness();
+    let granted: readonly string[] = [];
+    const widened = {
+      ...step("a"),
+      capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite, CAPABILITIES.messageSend],
+    };
+    await orchestrate(ctx, {
+      plan: [widened],
+      version: 1,
+      executors: [
+        executor("a", (task) => {
+          granted = task.grant.capabilities;
+          return Promise.resolve(result("a"));
+        }),
+      ],
+    });
+    expect(granted).toEqual([CAPABILITIES.webFetch]);
+  });
+
   it("runs independent steps in parallel up to the concurrency limit and respects dependencies", async () => {
     const { ctx, events } = harness();
     let active = 0;

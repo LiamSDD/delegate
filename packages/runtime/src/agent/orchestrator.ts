@@ -23,6 +23,10 @@ export function redact(text: string): string {
   return text.replace(SECRET_PATTERN, "[redacted]").slice(0, 500);
 }
 
+export function grantedCapabilities(step: PlanStep, executor: StepExecutor): string[] {
+  return step.capabilities.filter((capability) => executor.capabilities.includes(capability));
+}
+
 export type Replanner = (
   state: ReplanState,
 ) => Promise<{ steps: PlanStep[]; reason: string } | null>;
@@ -150,7 +154,7 @@ export async function orchestrate(
       }
       const raw = await executor.run({
         step,
-        grant: { id: step.id, capabilities: step.capabilities },
+        grant: { id: step.id, capabilities: grantedCapabilities(step, executor) },
         agent,
         inputs,
         spawn: (role, modelRole) => spawn(step.id, role, modelRole),
