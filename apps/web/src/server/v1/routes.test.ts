@@ -76,6 +76,23 @@ describe("v1 routes and the OpenAPI document", () => {
     }
   });
 
+  it("answers without path parameters, as Next calls a route that has none", async () => {
+    const routes = await exportedRoutes();
+    for (const [route, handler] of routes) {
+      const [method = "GET", path = "/"] = route.split(" ");
+      const call = z
+        .custom<(request: Request, context: { params: Promise<undefined> }) => Promise<Response>>(
+          (value) => typeof value === "function",
+        )
+        .parse(handler);
+      const response = await call(
+        new Request(`https://delegate.example${API_BASE_PATH}${path}`, { method }),
+        { params: Promise.resolve(undefined) },
+      );
+      expect(response.status, route).toBe(path === "/openapi.json" ? 200 : 401);
+    }
+  });
+
   it("serves the generated document under the documented base path", async () => {
     const served: unknown = await handleOpenApi().json();
     expect(served).toEqual(JSON.parse(JSON.stringify(buildOpenApiDocument())));

@@ -9,7 +9,7 @@ import {
 } from "@delegate/sdk/contract";
 import type { z } from "zod";
 
-import { authenticateBearer } from "../api-tokens";
+import { authenticateBearer, bearerToken } from "../api-tokens";
 import { siteOrigin } from "../mcp-endpoint";
 import { flushSoon } from "../webhooks/dispatch";
 import { errorResponse, newRequestId, NO_STORE, V1Error, zodIssues } from "./errors";
@@ -139,12 +139,15 @@ export async function handleV1(
   const spec: OperationSpec = OPERATIONS[id];
   let headers: Record<string, string> = { [REQUEST_ID_HEADER]: requestId };
   try {
+    const unauthorized = new V1Error(
+      "unauthorized",
+      "The API token is missing, invalid or revoked.",
+      { headers: { "WWW-Authenticate": 'Bearer realm="delegate"' } },
+    );
+    if ((bearerToken(request) ?? "") === "") throw unauthorized;
     const app = await deps.api.app();
     const session = await authenticateBearer(app, request);
-    if (session === null)
-      throw new V1Error("unauthorized", "The API token is missing, invalid or revoked.", {
-        headers: { "WWW-Authenticate": 'Bearer realm="delegate"' },
-      });
+    if (session === null) throw unauthorized;
     const budget = deps.limiter.take(session.tokenId);
     headers = { ...headers, ...rateLimitHeaders(budget) };
     if (!budget.ok)

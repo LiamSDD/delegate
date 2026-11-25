@@ -193,7 +193,7 @@ function EndpointRow({
       </ul>
       {confirming === null ? null : (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-2 px-3 py-2">
-          <p className="min-w-0 flex-1 text-sm text-text">
+          <p className="min-w-0 flex-1 basis-full text-sm text-text sm:basis-0">
             {confirming === "rotate"
               ? "Rotating replaces the secret at once: deliveries signed with the old one stop verifying until your receiver has the new secret."
               : "Deleting stops deliveries to this URL and removes its delivery log."}

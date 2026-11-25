@@ -4,8 +4,10 @@ import { v1Deps } from "./deps";
 import type { AuthenticatedOperationId } from "./handlers";
 import { handleOpenApi, handleUnknownRoute, handleV1 } from "./router";
 
+type RawParams = Record<string, string | string[] | undefined>;
+
 export interface V1RouteContext {
-  params: Promise<Record<string, string | string[] | undefined>>;
+  params: Promise<RawParams | undefined>;
 }
 
 export interface V1RouteHandler {
@@ -13,9 +15,9 @@ export interface V1RouteHandler {
   readonly operationId: OperationId;
 }
 
-function pathParams(raw: Record<string, string | string[] | undefined>): Record<string, string> {
+function pathParams(raw: RawParams | undefined): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(raw).flatMap(([name, value]) =>
+    Object.entries(raw ?? {}).flatMap(([name, value]) =>
       typeof value === "string" ? [[name, value]] : [],
     ),
   );
