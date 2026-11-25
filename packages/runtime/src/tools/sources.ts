@@ -42,13 +42,29 @@ export interface NewSource {
 export class SourceStore {
   private readonly byId = new Map<string, SourceDocument>();
   private readonly byUrl = new Map<string, SourceDocument>();
+  private lastId = 0;
+
+  restore(document: SourceDocument): void {
+    const key = normaliseUrlKey(document.record.url);
+    if (this.byId.has(document.record.sourceId) || this.byUrl.has(key)) return;
+    const record = SourceRecordSchema.parse(document.record);
+    const restored: SourceDocument = {
+      record,
+      text: document.text.slice(0, SOURCE_TEXT_MAX_CHARS),
+      hiddenText: [...document.hiddenText],
+    };
+    this.byId.set(record.sourceId, restored);
+    this.byUrl.set(key, restored);
+    this.lastId = Math.max(this.lastId, Number(record.sourceId.slice(1)));
+  }
 
   add(source: NewSource): { document: SourceDocument; created: boolean } {
     const key = normaliseUrlKey(source.url);
     const existing = this.byUrl.get(key);
     if (existing !== undefined) return { document: existing, created: false };
+    this.lastId += 1;
     const record = SourceRecordSchema.parse({
-      sourceId: `S${this.byId.size + 1}`,
+      sourceId: `S${this.lastId}`,
       url: source.url,
       title: source.title.trim() === "" ? source.url : source.title.trim().slice(0, 200),
       fetchedAt: source.fetchedAt,

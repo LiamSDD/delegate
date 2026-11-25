@@ -1,4 +1,10 @@
-import { type HostGate, type HostOutcome, type HostRelease } from "../tools/fetch";
+import {
+  HostWaitError,
+  MAX_CRAWL_DELAY_MS,
+  type HostGate,
+  type HostOutcome,
+  type HostRelease,
+} from "../tools/fetch";
 
 export const POLITENESS_DEFAULTS = {
   perHost: 6,
@@ -55,6 +61,10 @@ interface HostState {
   firstStartAt?: number;
   lastEndAt?: number;
   waiters: (() => void)[];
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 export function realSleep(ms: number): Promise<void> {
@@ -119,27 +129,65 @@ export class HostPoliteness implements HostGate {
 
   setCrawlDelay(host: string, delayMs: number): void {
     const state = this.state(host);
-    state.crawlDelayMs = delayMs;
+    const capped = Math.min(Math.max(0, delayMs), MAX_CRAWL_DELAY_MS);
+    state.crawlDelayMs = capped;
     state.max = 1;
     state.limit = 1;
-    state.intervalMs = Math.max(this.minIntervalMs, delayMs);
+    state.intervalMs = Math.max(this.minIntervalMs, capped);
   }
 
-  async acquire(host: string, signal?: AbortSignal): Promise<HostRelease> {
+  async acquire(
+    host: string,
+    signal?: AbortSignal,
+    maxWaitMs = Number.POSITIVE_INFINITY,
+  ): Promise<HostRelease> {
     const state = this.state(host);
-    const aborted = () => signal?.aborted === true;
+    const giveUpAt = this.now() + maxWaitMs;
     for (;;) {
-      if (aborted()) throw new Error("aborted");
+      if (isAborted(signal)) throw new HostWaitError("aborted", 0);
       const at = this.now();
       const startAt = Math.max(at, state.nextStartAt, state.backoffUntil);
+      if (startAt > giveUpAt) throw new HostWaitError("too_late", startAt - at);
       state.nextStartAt = startAt + state.intervalMs;
-      if (startAt > at) await this.sleep(startAt - at);
-      if (aborted()) throw new Error("aborted");
+      if (startAt > at) await this.pause(startAt - at, signal);
+      if (isAborted(signal)) throw new HostWaitError("aborted", 0);
       if (state.active < state.limit) return this.start(state);
-      await new Promise<void>((resolve) => {
-        state.waiters.push(resolve);
-      });
+      await this.queue(state, signal);
     }
+  }
+
+  private pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+    if (signal === undefined) return this.sleep(ms);
+    return new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new HostWaitError("aborted", ms));
+      };
+      const finish = () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (this.sleep === realSleep) timer = setTimeout(finish, ms);
+      else this.sleep(ms).then(finish, reject);
+    });
+  }
+
+  private queue(state: HostState, signal: AbortSignal | undefined): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const wake = () => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      };
+      const onAbort = () => {
+        const index = state.waiters.indexOf(wake);
+        if (index !== -1) state.waiters.splice(index, 1);
+        reject(new HostWaitError("aborted", 0));
+      };
+      state.waiters.push(wake);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   backoffIn(host: string): number {

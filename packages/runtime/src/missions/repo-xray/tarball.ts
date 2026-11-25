@@ -5,6 +5,7 @@ export const TAR_LIMITS = {
   maxUncompressedBytes: 256 * 1024 * 1024,
   maxEntries: 50_000,
   chunkBytes: 64 * 1024,
+  maxMetadataBytes: 1024 * 1024,
 } as const;
 
 const BLOCK = 512;
@@ -185,6 +186,8 @@ class TarParser {
     const size = readSize(block);
     const padding = (BLOCK - (size % BLOCK)) % BLOCK;
     if (flag === "x" || flag === "g" || flag === "L") {
+      if (size > TAR_LIMITS.maxMetadataBytes)
+        throw new TarballError("corrupt_tar", "Tar metadata entry is larger than 1 MB");
       this.chunks = [];
       this.pending = { kind: "meta", flag, remaining: size, padding };
       return;

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { checkPlanSteps } from "../../agent/planner";
 import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
 import { type AwaitPlanApproval } from "../../plan-approval";
-import { loadRuntimePrompts, runMission } from "../../server";
+import { loadRuntimePrompts, resumeMission, runMission } from "../../server";
 import { createFetcher } from "../../tools/fetch";
 import { fixtureDns, fixtureFetch } from "../../testing/fixture-site";
 import { scriptedProvider, testRun, textTurn } from "../../testing/fakes";
@@ -215,7 +215,13 @@ function referenceApi(url: URL): Response | undefined {
 async function runGoal(
   goal: string,
   awaitPlanApproval?: AwaitPlanApproval,
-): Promise<{ status: string; events: RunEvent[]; requested: string[] }> {
+  options: { hardDeadlineMs?: number; killAt?: string } = {},
+): Promise<{
+  status: string;
+  events: RunEvent[];
+  requested: string[];
+  resume: () => ReturnType<typeof resumeMission>;
+}> {
   const site = fixtureFetch((url, init) => {
     const api = referenceApi(url);
     if (api !== undefined) return api;
@@ -245,23 +251,44 @@ async function runGoal(
       budget: { maxTokens: 300_000, maxMicroUsd: 0 },
     },
   });
-  const result = await runMission({
+  const common = {
     runId: "run_goal",
-    missionId: "custom-goal",
-    input: { goal },
-    context: { audience: "public-demo", classification: "public" },
+    context: { audience: "public-demo" as const, classification: "public" as const },
     env: {},
-    emit: (draft) => {
-      append(draft);
-      return Promise.resolve();
-    },
     fetchImpl: site.fetchImpl,
     resolveDns: fixtureDns,
     sleep: () => Promise.resolve(),
     modelsConfig: unthrottledConfig,
+    ...(options.hardDeadlineMs === undefined ? {} : { hardDeadlineMs: options.hardDeadlineMs }),
+  };
+  const controller = new AbortController();
+  let killed = false;
+  const result = await runMission({
+    ...common,
+    missionId: "custom-goal",
+    input: { goal },
+    signal: controller.signal,
+    emit: (draft) => {
+      if (killed) return Promise.reject(new Error("process killed"));
+      append(draft);
+      if (draft.type === "step.started" && draft.stepId === options.killAt) {
+        killed = true;
+        controller.abort();
+      }
+      return Promise.resolve();
+    },
     ...(awaitPlanApproval === undefined ? {} : { awaitPlanApproval }),
   });
-  return { status: result.status, events, requested: site.requested };
+  const resume = () =>
+    resumeMission({
+      ...common,
+      events: [...events],
+      emit: (draft) => {
+        append(draft);
+        return Promise.resolve();
+      },
+    });
+  return { status: result.status, events, requested: site.requested, resume };
 }
 
 function finalBrief(events: readonly RunEvent[]): GoalBrief {
@@ -380,6 +407,63 @@ describe("runMission custom-goal end to end (fixture web, scripted model over HT
       expect.objectContaining({ missionId: "automation-audit", available: false }),
     ]);
   });
+});
+
+describe("custom-goal time limit and resume", () => {
+  const GOAL = "I want to achieve acme's marketing and agentic work";
+
+  it("skips research past the hard deadline and still publishes a cited, partial brief", async () => {
+    const { status, events, requested } = await runGoal(GOAL, undefined, { hardDeadlineMs: 0 });
+    expect(status).toBe("completed");
+    expect(requested.some((url) => url.startsWith("https://www.acme.example/"))).toBe(false);
+    expect(requested.some((url) => url.includes("prop=extracts"))).toBe(false);
+    const brief = finalBrief(events);
+    expect(brief.partial?.skippedSteps).toEqual(
+      expect.arrayContaining(["research", "research_topic"]),
+    );
+    expect(
+      events.some(
+        (event) => event.type === "critic.flagged" && event.payload.claimId === "deadline:partial",
+      ),
+    ).toBe(true);
+    expect(foldRun(events).status).toBe("completed");
+  });
+
+  for (const killAt of ["read", "critic"])
+    it(`resumes after a crash at ${killAt} from checkpoints without refetching`, async () => {
+      const run = await runGoal(GOAL, undefined, { killAt });
+      expect(run.status).toBe("failed");
+      expect(foldRun(run.events).status).toBe("running");
+      const killedAt = run.events.length;
+      const fetchedBefore = run.requested.length;
+      const resumed = await run.resume();
+      expect(resumed).toMatchObject({ status: "completed", resumed: true });
+      expect(resumed.skippedSteps).toEqual(
+        expect.arrayContaining(["resolve_target", "research", "research_topic"]),
+      );
+      const restarted = run.events
+        .slice(killedAt)
+        .filter((event) => event.type === "step.started")
+        .map((event) => event.stepId);
+      expect(restarted).not.toContain("research");
+      expect(restarted).not.toContain("resolve_target");
+      const refetched = run.requested.slice(fetchedBefore);
+      expect(refetched.some((url) => url.includes("search=acme&"))).toBe(false);
+      expect(refetched.some((url) => url.includes("prop=extracts"))).toBe(false);
+      expect(
+        refetched.filter(
+          (url) =>
+            url.startsWith("https://www.acme.example/") &&
+            !url.endsWith("/robots.txt") &&
+            !url.includes("feed"),
+        ),
+      ).toEqual([]);
+      const brief = finalBrief(run.events);
+      expect(brief.status).toBe("complete");
+      expect(brief.company?.url).toBe("https://www.acme.example/");
+      expect(brief.sources.some((source) => source.kind === "company_site")).toBe(true);
+      expect(brief.sources.some((source) => source.kind === "wikipedia")).toBe(true);
+    });
 });
 
 describe("custom-goal plan validation", () => {

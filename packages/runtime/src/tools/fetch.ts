@@ -22,6 +22,8 @@ export type FetchBlockCode =
   | "dns_failed"
   | "blocked_address"
   | "robots"
+  | "crawl_delay"
+  | "host_busy"
   | "too_many_redirects"
   | "content_type"
   | "too_large"
@@ -53,8 +55,24 @@ export interface HostOutcome {
 
 export type HostRelease = (outcome: HostOutcome) => void;
 
+export const MAX_CRAWL_DELAY_MS = 10_000;
+
+export class HostWaitError extends Error {
+  override readonly name = "HostWaitError";
+  constructor(
+    readonly reason: "aborted" | "too_late",
+    readonly waitMs: number,
+  ) {
+    super(
+      reason === "aborted"
+        ? "Stopped waiting for the host"
+        : `The host's next polite slot is ${Math.ceil(waitMs / 1000)} s away`,
+    );
+  }
+}
+
 export interface HostGate {
-  acquire(host: string, signal?: AbortSignal): Promise<HostRelease>;
+  acquire(host: string, signal?: AbortSignal, maxWaitMs?: number): Promise<HostRelease>;
   setCrawlDelay(host: string, delayMs: number): void;
 }
 
@@ -333,7 +351,7 @@ export function createFetcher(options: FetcherOptions): Fetcher {
         );
         const robots = parseRobots(document.text);
         const delay = robots.crawlDelaySeconds(userAgent);
-        if (delay !== undefined && delay > 0)
+        if (delay !== undefined && delay > 0 && delay * 1000 <= MAX_CRAWL_DELAY_MS)
           options.hostGate?.setCrawlDelay(url.host, delay * 1000);
         return robots;
       } catch (error) {
@@ -360,6 +378,14 @@ export function createFetcher(options: FetcherOptions): Fetcher {
     }
     if (!robots.isAllowed(`${url.pathname}${url.search}`, userAgent)) {
       throw new FetchBlockedError("robots", url.href, "Disallowed by robots.txt");
+    }
+    const delay = robots.crawlDelaySeconds(userAgent);
+    if (delay !== undefined && delay * 1000 > MAX_CRAWL_DELAY_MS) {
+      throw new FetchBlockedError(
+        "crawl_delay",
+        url.href,
+        `Host skipped: crawl-delay ${delay} s is longer than the ${MAX_CRAWL_DELAY_MS / 1000} s cap`,
+      );
     }
   }
 
@@ -409,6 +435,7 @@ export function createFetcher(options: FetcherOptions): Fetcher {
       pages += 1;
     }
     const deadline = new Deadline(timeLimit, input.signal);
+    const deadlineAt = now().getTime() + timeLimit;
     const fail = (url: string, error: unknown): never => {
       if (error instanceof FetchBlockedError) throw error;
       if (deadline.timedOut) {
@@ -431,7 +458,24 @@ export function createFetcher(options: FetcherOptions): Fetcher {
         if (input.respectRobots !== false) await assertRobots(url, input.signal);
         let release: HostRelease | undefined;
         if (options.hostGate === undefined) await politeSlot(url.host);
-        else release = await options.hostGate.acquire(url.host, deadline.signal);
+        else {
+          try {
+            release = await options.hostGate.acquire(
+              url.host,
+              deadline.signal,
+              Math.max(0, deadlineAt - now().getTime()),
+            );
+          } catch (error) {
+            if (error instanceof HostWaitError && error.reason === "too_late") {
+              throw new FetchBlockedError(
+                "host_busy",
+                url.href,
+                `${error.message}, past this request's deadline`,
+              );
+            }
+            throw error;
+          }
+        }
         const startedAt = now().getTime();
         const settle = (outcome: Omit<HostOutcome, "latencyMs">) => {
           release?.({ latencyMs: Math.max(0, now().getTime() - startedAt), ...outcome });
@@ -495,6 +539,7 @@ export function createFetcher(options: FetcherOptions): Fetcher {
           const type = mediaType(header);
           const allowed = mode.contentTypes;
           if (allowed !== "any" && !allowed.some((pattern) => pattern.test(type))) {
+            settle({ status: response.status });
             await response.body?.cancel().catch(() => undefined);
             throw new FetchBlockedError(
               "content_type",

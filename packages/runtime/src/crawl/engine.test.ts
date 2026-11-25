@@ -20,7 +20,7 @@ function page(title: string, body: string, head = ""): string {
   return `<!doctype html><html lang="en"><head><title>${title}</title>${head}</head><body><nav><a href="/">Home</a> <a href="/pricing">Pricing</a> <a href="/about">About</a></nav><main><h1>${title}</h1><p>${body}</p></main></body></html>`;
 }
 
-type Route = () => Response;
+type Route = () => Response | Promise<Response>;
 
 function html(body: string): Response {
   return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -233,6 +233,87 @@ describe("crawl engine", () => {
     );
     expect(refetched).toEqual([]);
     expect(second.requested.some((url) => url.endsWith("sitemap.xml"))).toBe(false);
+  });
+
+  it("re-runs sitemap discovery on resume when the saved frontier was truncated", async () => {
+    const paths = Array.from({ length: 450 }, (_, index) => `/docs/p${index}`);
+    const routes: Record<string, Route> = {
+      [`${ORIGIN}/`]: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return html(page("Home", words(21)));
+      },
+      [`${ORIGIN}/sitemap.xml`]: () =>
+        xml(
+          `<urlset>${paths.map((path) => `<url><loc>${ORIGIN}${path}</loc></url>`).join("")}</urlset>`,
+        ),
+    };
+    paths.forEach((path, index) => {
+      routes[`${ORIGIN}${path}`] = () => html(page(`P${index}`, words(500 + index)));
+    });
+    const first = site(routes);
+    const cut = await crawl(
+      options(first.fetcher, { budget: { maxPages: 5, maxPerPattern: 1_000 } }),
+    );
+    expect(cut.checkpoint.frontier.length).toBe(400);
+    expect(cut.checkpoint.discovered).toBe(false);
+    const restored = JSON.parse(JSON.stringify(cut.checkpoint)) as CrawlCheckpoint;
+    const second = site(routes);
+    const resumed = await crawl(
+      options(second.fetcher, {
+        checkpoint: restored,
+        budget: { maxPages: 500, maxPerPattern: 1_000 },
+      }),
+    );
+    expect(resumed.stopReason).toBe("exhausted");
+    const requested = new Set([...first.requested, ...second.requested]);
+    for (const path of paths) expect(requested).toContain(`${ORIGIN}${path}`);
+    const pagesFetchedTwice = second.requested.filter(
+      (url) => first.requested.includes(url) && url.includes("/docs/"),
+    );
+    expect(pagesFetchedTwice).toEqual([]);
+  });
+
+  it("fails a host fast on a day-long Retry-After instead of hanging the crawl", async () => {
+    const routes: Record<string, Route> = {
+      [`${ORIGIN}/`]: () =>
+        html(page("Home", `${words(31)} <a href="/pricing">p</a> <a href="/about">a</a>`)),
+      [`${ORIGIN}/pricing`]: () =>
+        new Response("slow down", { status: 429, headers: { "retry-after": "86400" } }),
+      [`${ORIGIN}/about`]: () => html(page("About", words(32))),
+    };
+    const requested: string[] = [];
+    const fetcher = createFetcher({
+      fetchImpl: (input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        requested.push(url.href);
+        if (url.pathname === "/robots.txt")
+          return Promise.resolve(new Response("", { status: 404 }));
+        const route = routes[url.href];
+        return Promise.resolve(route === undefined ? new Response("", { status: 404 }) : route());
+      },
+      resolveDns: () => Promise.resolve(["93.184.215.14"]),
+      hostGate: new HostPoliteness({ minIntervalMs: 0, perHost: 1 }),
+      maxPages: 50,
+    });
+    const started = Date.now();
+    const result = await crawl({
+      fetcher,
+      seeds: [`${ORIGIN}/`],
+      scope: (url) => siteScope(ORIGIN).contains(url),
+      onPage: () => Promise.resolve(true),
+    });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(result.pages.map((entry) => entry.url)).toContain(`${ORIGIN}/`);
+  });
+
+  it("skips a host whose Crawl-delay is too long and records why", async () => {
+    const { fetcher, requested } = site(BASE_ROUTES, "User-agent: *\nCrawl-delay: 600\n");
+    const started = Date.now();
+    const result = await crawl(options(fetcher));
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(result.pages).toEqual([]);
+    expect(result.skipped[0]?.reason).toMatch(/crawl-delay 600 s/i);
+    expect(requested.every((url) => url.endsWith("/robots.txt"))).toBe(true);
   });
 
   it("stops at the time budget and puts in-flight pages back on the queue", async () => {

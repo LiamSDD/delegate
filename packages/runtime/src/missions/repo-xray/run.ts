@@ -18,18 +18,25 @@ import {
 import { ModelStreamError, withQualityNote, type ModelCallResult } from "../../agent/model-call";
 import { chainHead, missionClock } from "../../agent/pacing";
 import { StructuredOutputError, callStructured } from "../../agent/structured";
-import { FatalStepError, type StepExecutor, type SubAgentResult } from "../../agent/subagent";
+import {
+  FatalStepError,
+  type StepExecutor,
+  type SubAgentResult,
+  type SubAgentTask,
+} from "../../agent/subagent";
+import { type ExistingArtifact } from "../../durable/checkpoints";
 import { type CriticCategory } from "../../events";
 import { type PromptFile } from "../../prompts";
 import { READER_DEFAULTS, readUntrusted } from "../../quarantine/reader";
 import { NoModelAvailableError } from "../../router";
 import { type Fetcher } from "../../tools/fetch";
-import { executeToolCall } from "../../tools/registry";
+import { executeToolCall, type StepGrant } from "../../tools/registry";
 import { SOURCE_TEXT_MAX_CHARS } from "../../tools/sources";
 import { NEXT_ACTIONS_KIND, type NextActions } from "../next-actions";
 import { plural } from "../shared/research";
 import { analyseSnapshot, type RepoAnalysis } from "./analysis";
 import { DOWNLOAD_REPO_TOOL, repoArchiveTool } from "./archive";
+import { REPO_STATE_KIND, RepoStateCheckpointSchema, type RepoStateCheckpoint } from "./checkpoint";
 import { buildDiagram, defaultPicks } from "./diagram";
 import { docSources, locateQuote, REPO_READER_TASK } from "./docs";
 import {
@@ -83,10 +90,14 @@ export interface RepoXrayDependencies {
   fetcher: Fetcher;
   prompts: RepoXrayPrompts;
   run?: Omit<PlannedRunOptions, "plannerPrompt">;
+  existingArtifacts?: readonly ExistingArtifact[];
+  hardDeadlineMs?: number;
 }
 
 export const REPO_XRAY_LIMITS = {
   targetMs: 150_000,
+  hardDeadlineMs: 250_000,
+  criticReserveMs: 40_000,
   architectMaxTokens: 5_000,
   improverMaxTokens: 4_000,
   dependencyItems: 200,
@@ -219,6 +230,71 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
       citationAccuracy: null,
     },
   };
+  const hardDeadlineMs = Math.max(0, deps.hardDeadlineMs ?? REPO_XRAY_LIMITS.hardDeadlineMs);
+  const startedAt = ctx.now().getTime();
+  const window = (ms: number) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, ms);
+    timer.unref();
+    const signal =
+      ctx.signal === undefined
+        ? controller.signal
+        : AbortSignal.any([ctx.signal, controller.signal]);
+    const bounded: RunContext = { ...ctx, signal };
+    return {
+      ctx: bounded,
+      passed: () => controller.signal.aborted || ctx.now().getTime() >= startedAt + ms,
+      aborted: () => controller.signal.aborted,
+      clear: () => {
+        clearTimeout(timer);
+      },
+    };
+  };
+  const modelWindow = window(Math.max(0, hardDeadlineMs - REPO_XRAY_LIMITS.criticReserveMs));
+  const criticWindow = window(hardDeadlineMs);
+  const skippedForTime: string[] = [];
+  const restoredClaim = (claim: {
+    text: string;
+    evidence: string[];
+    support?: "weak" | "unverified" | undefined;
+  }): StateClaim => ({
+    text: claim.text,
+    evidence: claim.evidence,
+    ...(claim.support === undefined ? {} : { support: claim.support }),
+  });
+  let pinnedCommit: string | null | undefined;
+  let restoredDiagram: Diagram | null | undefined;
+  for (const artifact of deps.existingArtifacts ?? []) {
+    if (artifact.kind === REPO_XRAY_KIND) {
+      state.artifactId = artifact.artifactId;
+      state.version = artifact.version;
+      continue;
+    }
+    if (artifact.kind !== REPO_STATE_KIND) continue;
+    const parsed = RepoStateCheckpointSchema.safeParse(artifact.content);
+    if (!parsed.success) continue;
+    const saved = parsed.data;
+    if (saved.commit !== undefined) pinnedCommit = saved.commit;
+    if (saved.docFacts !== undefined) state.docFacts = saved.docFacts;
+    if (saved.summary !== undefined) state.summary = saved.summary.map(restoredClaim);
+    if (saved.onboarding !== undefined)
+      state.onboarding = saved.onboarding.map((step) => ({
+        title: step.title,
+        claim: restoredClaim(step.claim),
+      }));
+    if (saved.responsibilities !== undefined)
+      state.responsibilities = new Map(
+        saved.responsibilities.map(([module, claim]) => [module, restoredClaim(claim)]),
+      );
+    if (saved.diagram !== undefined) restoredDiagram = saved.diagram;
+    if (saved.improvements !== undefined)
+      state.improvements = saved.improvements.map(({ support, ...improvement }) => ({
+        ...improvement,
+        ...(support === undefined ? {} : { support }),
+      }));
+  }
   const promptVersions = [
     prompts.reader,
     prompts.repoArchitect,
@@ -456,6 +532,14 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
       todos: { total: analysis.todos.total, byMarker: analysis.todos.byMarker },
       improvements,
       verification: state.verification,
+      ...(skippedForTime.length === 0
+        ? {}
+        : {
+            partial: {
+              reason: `Partial: the run reached its ${Math.round(hardDeadlineMs / 1000)} s time limit, so some model steps were skipped.`,
+              skippedSteps: [...skippedForTime],
+            },
+          }),
       generatedAt: ctx.now().toISOString(),
       promptVersions,
     });
@@ -539,6 +623,109 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
     ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
   });
 
+  const saveState = async (stepId: string, checkpoint: RepoStateCheckpoint) => {
+    const parsed = RepoStateCheckpointSchema.safeParse(checkpoint);
+    if (!parsed.success) return;
+    await emit({
+      runId,
+      type: "artifact.created",
+      stepId,
+      payload: {
+        artifactId: crypto.randomUUID(),
+        kind: REPO_STATE_KIND,
+        title: `Checkpoint: ${stepId}`,
+        version: 1,
+        content: parsed.data,
+      },
+    });
+  };
+
+  const download = (grant: StepGrant, at: string) => {
+    const entry = chainHead(ctx, "fast");
+    return executeToolCall(
+      ctx,
+      grant,
+      [archiveTool],
+      {
+        name: DOWNLOAD_REPO_TOOL,
+        argumentsJson: JSON.stringify({ owner: input.owner, repo: input.repo, ref: at }),
+      },
+      {
+        actor: { type: "system", id: "repo-xray" },
+        ...(entry === undefined
+          ? {}
+          : { provider: { id: entry.provider.id, terms: entry.provider.terms } }),
+      },
+    );
+  };
+
+  const analyseInto = (snapshot: RepoSnapshot): RepoAnalysis => {
+    const analysis = analyseSnapshot(snapshot);
+    state.analysis = analysis;
+    delete state.evidence;
+    state.hotspots = buildHotspots(snapshot, analysis);
+    state.diagram =
+      restoredDiagram ?? buildDiagram(analysis, defaultPicks(analysis), "import-graph").diagram;
+    return analysis;
+  };
+
+  const downloaded = (): RepoSnapshot | undefined => state.snapshot;
+  let materialising: Promise<void> | undefined;
+  const rematerialise = () => {
+    materialising ??= restoreSnapshot();
+    return materialising;
+  };
+  const restoreSnapshot = async () => {
+    if (state.snapshot !== undefined || pinnedCommit === undefined) return;
+    const fetchStep = REPO_PLAN.find((step) => step.id === REPO_STEP_IDS.fetch);
+    await download(
+      { id: REPO_STEP_IDS.fetch, capabilities: fetchStep?.capabilities ?? [] },
+      pinnedCommit ?? ref,
+    );
+    const snapshot = downloaded();
+    if (snapshot === undefined)
+      throw new FatalStepError(
+        "repo_unavailable",
+        "The repository snapshot could not be restored after a restart.",
+      );
+    analyseInto(snapshot);
+    if (state.artifactId !== undefined) verifyDeterministic(compose("draft"));
+  };
+
+  const timeSkip = async (task: SubAgentTask): Promise<SubAgentResult> => {
+    skippedForTime.push(task.step.id);
+    const message = `Skipped: the run reached its ${Math.round(hardDeadlineMs / 1000)} s time limit; the X-ray is published with what was already produced.`;
+    await task.agent.say(message);
+    return {
+      summary: message,
+      findings: [],
+      sources: [],
+      confidence: 0.3,
+      artifacts: state.artifactId === undefined ? [] : [state.artifactId],
+    };
+  };
+
+  const bounded = (
+    executor: StepExecutor,
+    limit: ReturnType<typeof window>,
+    checkpoint?: () => RepoStateCheckpoint,
+  ): StepExecutor => ({
+    ...executor,
+    run: async (task) => {
+      await rematerialise();
+      if (limit.passed()) return timeSkip(task);
+      let result: SubAgentResult;
+      try {
+        result = await executor.run(task);
+      } catch (error) {
+        if (!limit.aborted() || ctx.signal?.aborted === true) throw error;
+        return timeSkip(task);
+      }
+      if (checkpoint !== undefined) await saveState(task.step.id, checkpoint());
+      return result;
+    },
+  });
+
   const fetchRepo: StepExecutor = {
     id: REPO_STEP_IDS.fetch,
     role: "researcher",
@@ -548,22 +735,7 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
     description:
       "Download the repository once as a tar.gz archive from codeload.github.com (no API key, no REST rate limit), stream-decompress it with size caps and keep only text files. No model calls.",
     run: async (task) => {
-      const entry = chainHead(ctx, "fast");
-      const outcome = await executeToolCall(
-        ctx,
-        task.grant,
-        [archiveTool],
-        {
-          name: DOWNLOAD_REPO_TOOL,
-          argumentsJson: JSON.stringify({ owner: input.owner, repo: input.repo, ref }),
-        },
-        {
-          actor: { type: "system", id: "repo-xray" },
-          ...(entry === undefined
-            ? {}
-            : { provider: { id: entry.provider.id, terms: entry.provider.terms } }),
-        },
-      );
+      const outcome = await download(task.grant, ref);
       const snapshot = state.snapshot;
       if (!outcome.ok || snapshot === undefined)
         throw new FatalStepError("repo_unavailable", outcome.content.replace(/^Tool error: /, ""));
@@ -571,6 +743,7 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
         throw new FatalStepError("repo_empty", "The archive contained no readable text files.");
       const summary = outcome.outcome?.summary ?? `Kept ${snapshot.files.size} files`;
       await task.agent.say(`${label}@${snapshot.commit?.slice(0, 7) ?? ref}: ${summary}.`);
+      await saveState(task.step.id, { commit: snapshot.commit });
       return { summary, findings: [], sources: [], confidence: 1, artifacts: [] };
     },
   };
@@ -585,12 +758,10 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
     description:
       "Deterministic extraction in code: file tree, languages by bytes, manifests and dependencies, entry points, tests and frameworks, CI, the JS/TS and Python import graph, risky patterns, secret-like values (redacted), TODO counts and test gaps. No model calls.",
     run: async (task) => {
+      await rematerialise();
       const snapshot = state.snapshot;
       if (snapshot === undefined) throw new Error("No snapshot to analyse");
-      const analysis = analyseSnapshot(snapshot);
-      state.analysis = analysis;
-      state.hotspots = buildHotspots(snapshot, analysis);
-      state.diagram = buildDiagram(analysis, defaultPicks(analysis), "import-graph").diagram;
+      const analysis = analyseInto(snapshot);
       const content = await publish(task.step.id, "draft");
       const verified = verifyDeterministic(content);
       const languages =
@@ -633,7 +804,7 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
           artifacts: [],
         };
       const entry = chainHead(ctx, "fast");
-      const readings = await readUntrusted(ctx, {
+      const readings = await readUntrusted(modelWindow.ctx, {
         stepId: task.step.id,
         task: REPO_READER_TASK,
         systemPrompt: prompts.reader.body,
@@ -710,7 +881,7 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
       const { analysis } = requireSnapshot();
       let calls: ModelCallResult[] = [];
       try {
-        const result = await callStructured(ctx, {
+        const result = await callStructured(modelWindow.ctx, {
           role: "planner",
           stepId: task.step.id,
           system: prompts.repoArchitect.body,
@@ -776,7 +947,7 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
       const { snapshot } = requireSnapshot();
       let calls: ModelCallResult[] = [];
       try {
-        const result = await callStructured(ctx, {
+        const result = await callStructured(modelWindow.ctx, {
           role: "worker",
           stepId: task.step.id,
           system: prompts.repoImprover.body,
@@ -923,7 +1094,7 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
           return [[id, item.quote === undefined ? [item.text] : [item.quote]] as const];
         }),
       );
-      const outcome = await runCriticSafely(ctx, verified.survivors, {
+      const outcome = await runCriticSafely(criticWindow.ctx, verified.survivors, {
         stepId: task.step.id,
         agent: task.agent,
         spawnEditor: () => task.spawn("editor", "worker"),
@@ -967,12 +1138,36 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
         "Architecture map, module responsibilities, onboarding guide, dependency and security hotspots, test-coverage gaps and 5–8 ranked improvements for a public GitHub repository; every claim cites path:line ranges in the snapshot.",
       input: { url: input.url, ref },
       planningHints: REPO_PLANNING_HINTS,
-      executors: [fetchRepo, analyse, readDocs, architect, improve, critic],
+      executors: [
+        fetchRepo,
+        analyse,
+        bounded(readDocs, modelWindow, () => ({ docFacts: state.docFacts })),
+        bounded(architect, modelWindow, () => ({
+          summary: state.summary,
+          onboarding: state.onboarding,
+          responsibilities: [...state.responsibilities.entries()],
+          diagram: state.diagram,
+        })),
+        bounded(improve, modelWindow, () => ({ improvements: state.improvements })),
+        bounded(critic, criticWindow),
+      ],
       allowedCapabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
     },
     defaultPlan: REPO_PLAN,
     clock,
     finish: async (outcome) => {
+      modelWindow.clear();
+      criticWindow.clear();
+      await rematerialise().catch(() => undefined);
+      if (skippedForTime.length > 0)
+        await flag(
+          undefined,
+          "deadline:partial",
+          `Skipped for time: ${skippedForTime.join(", ")}`,
+          `The run reached its ${Math.round(hardDeadlineMs / 1000)} s time limit; the X-ray is partial and says so`,
+          "info",
+          "claim",
+        );
       if (
         state.snapshot === undefined ||
         state.analysis === undefined ||

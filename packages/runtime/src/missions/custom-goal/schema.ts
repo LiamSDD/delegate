@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 import { type CriticClaim, type KeptClaim } from "../../agent/critic";
+import { SourceRecordSchema } from "../../tools/sources";
 import { BriefSourceSchema, ClaimSchema, SourceMixSchema, type Claim } from "../company-xray/brief";
 
 export const GOAL_BRIEF_KIND = "goal-brief";
+export const GOAL_CHECKPOINT_KIND = "custom-goal.checkpoint";
 
 export const LEVELS = ["low", "medium", "high"] as const;
 export const LevelSchema = z.enum(LEVELS);
@@ -90,6 +92,33 @@ export const GoalCompanySchema = z.object({
 });
 export type GoalCompany = z.infer<typeof GoalCompanySchema>;
 
+export const GoalCheckpointSchema = z.object({
+  company: GoalCompanySchema.nullable().optional(),
+  discoveries: z
+    .object({
+      names: z.array(z.string().max(300)).max(20),
+      githubOrgs: z.array(z.string().max(100)).max(20),
+      feeds: z.array(z.string().max(2_000)).max(20),
+      unfetched: z.array(z.string().max(2_000)).max(500),
+    })
+    .optional(),
+  documents: z
+    .array(
+      z.object({
+        record: SourceRecordSchema,
+        text: z.string(),
+        hiddenText: z.array(z.string()).max(200),
+      }),
+    )
+    .max(200),
+});
+export type GoalCheckpoint = z.infer<typeof GoalCheckpointSchema>;
+
+export const GoalPartialSchema = z.object({
+  reason: z.string().min(1).max(300),
+  skippedSteps: z.array(z.string().min(1).max(60)).max(12),
+});
+
 const GoalBriefBase = z.object({
   missionId: z.literal("custom-goal"),
   goal: z.string().min(1).max(900),
@@ -100,6 +129,7 @@ const GoalBriefBase = z.object({
   rankFormula: z.string(),
   generatedAt: z.iso.datetime({ offset: true }),
   promptVersions: z.array(z.string()).max(20),
+  partial: GoalPartialSchema.optional(),
 });
 
 export const GoalBriefSchema = GoalBriefBase.extend({
