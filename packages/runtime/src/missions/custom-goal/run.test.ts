@@ -248,7 +248,11 @@ function referenceApi(url: URL): Response | undefined {
 async function runGoal(
   goal: string,
   awaitPlanApproval?: AwaitPlanApproval,
-  options: { hardDeadlineMs?: number; killAt?: string } = {},
+  options: {
+    hardDeadlineMs?: number;
+    killAt?: string;
+    reference?: (url: URL) => Response | undefined;
+  } = {},
 ): Promise<{
   status: string;
   events: RunEvent[];
@@ -256,7 +260,7 @@ async function runGoal(
   resume: () => ReturnType<typeof resumeMission>;
 }> {
   const site = fixtureFetch((url, init) => {
-    const api = referenceApi(url);
+    const api = options.reference?.(url) ?? referenceApi(url);
     if (api !== undefined) return api;
     if (url.href !== POLLINATIONS) return undefined;
     const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as WireBody;
@@ -578,6 +582,170 @@ describe("custom-goal plan validation", () => {
     );
     const checked = checkPlanSteps(plan, mission.planner);
     expect(checked.ok).toBe(false);
+  });
+});
+
+describe("research_topic as a team (one researcher per topic)", () => {
+  const GOAL = "Improve acme's marketing, pricing and hiring";
+
+  function companyArticles(url: URL): Response | undefined {
+    if (url.hostname !== "en.wikipedia.org" || url.pathname !== "/w/api.php") return undefined;
+    if (url.searchParams.get("list") === "search") {
+      const query = url.searchParams.get("srsearch") ?? "";
+      if (!query.startsWith("Acme Robotics ")) return json({ query: { search: [] } });
+      const topic = query.replace("Acme Robotics ", "");
+      return json({
+        query: {
+          search: [{ title: `Acme Robotics ${topic}` }, { title: `History of ${topic} at Acme` }],
+        },
+      });
+    }
+    if (url.searchParams.get("prop") === "extracts") {
+      const titles = (url.searchParams.get("titles") ?? "").split("|");
+      return json({
+        query: {
+          pages: Object.fromEntries(
+            titles.map((title, index) => [
+              String(index + 1),
+              {
+                title,
+                extract: `Acme Robotics changed its ${title.replace(/^Acme Robotics |^History of | at Acme$/g, "")} approach in 2024, according to its annual report for that year.`,
+              },
+            ]),
+          ),
+        },
+      });
+    }
+    return undefined;
+  }
+
+  const topicStep = (events: readonly RunEvent[]) => {
+    const proposed = events.find((event) => event.type === "plan.proposed");
+    if (proposed?.type !== "plan.proposed") throw new Error("no plan");
+    return proposed.payload.steps.find((step) => step.id === "research_topic");
+  };
+
+  const topicSources = (events: readonly RunEvent[]) => {
+    const done = events.find(
+      (event) => event.type === "step.completed" && event.stepId === "research_topic",
+    );
+    if (done?.type !== "step.completed") throw new Error("research_topic did not complete");
+    const checkpoint = done.payload.checkpoint as { sources: { title: string }[] };
+    return checkpoint.sources.map((source) => source.title);
+  };
+
+  const topicsCovered = (titles: readonly string[]) =>
+    ["marketing", "pricing", "hiring"].filter((topic) =>
+      titles.some((title) => title.includes(topic)),
+    );
+
+  const on = (events: readonly RunEvent[], type: RunEvent["type"]) =>
+    events.filter(
+      (event) => event.type === type && "stepId" in event && event.stepId === "research_topic",
+    );
+
+  it("declares a bounded team in the plan and runs one member per topic within the step's grant", async () => {
+    const { status, events, requested } = await runGoal(GOAL, undefined, {
+      reference: companyArticles,
+    });
+    expect(status).toBe("completed");
+    expect(topicStep(events)?.team).toEqual({
+      size: 3,
+      from: "resolve_target",
+      reducer: "merge_findings",
+      memberTokens: 20_000,
+      memberMs: 60_000,
+    });
+    const state = foldRun(events);
+    expect(state.status).toBe("completed");
+    expect(state.steps.every((step) => step.status === "succeeded")).toBe(true);
+
+    const messages = on(events, "agent.message").flatMap((event) =>
+      event.type === "agent.message" ? [event.payload.text] : [],
+    );
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        'Team member 1 of 3: Research Acme Robotics and "marketing" in public reference sources',
+        'Team member 2 of 3: Research Acme Robotics and "pricing" in public reference sources',
+        'Team member 3 of 3: Research Acme Robotics and "hiring" in public reference sources',
+      ]),
+    );
+    expect(on(events, "agent.spawned")).toHaveLength(4);
+    for (const topic of ["marketing", "pricing", "hiring"])
+      expect(requested.some((url) => url.includes(`srsearch=Acme+Robotics+${topic}`))).toBe(true);
+    const calls = on(events, "tool.called");
+    expect(calls).toHaveLength(3);
+    expect(
+      calls.every(
+        (event) => event.type === "tool.called" && event.payload.capability === "web.fetch",
+      ),
+    ).toBe(true);
+    expect(
+      on(events, "policy.decided").every(
+        (event) => event.type === "policy.decided" && event.payload.decision === "allow",
+      ),
+    ).toBe(true);
+
+    const titles = topicSources(events);
+    expect(titles).toHaveLength(4);
+    expect(topicsCovered(titles)).toEqual(["marketing", "pricing", "hiring"]);
+    expect(on(events, "usage.updated")).toHaveLength(4);
+    const brief = finalBrief(events);
+    expect(brief.status).toBe("complete");
+    expect(brief.sources.filter((source) => source.kind === "wikipedia").length).toBeGreaterThan(0);
+  });
+
+  it("runs the single-agent path when a reviewer removes the team, with the same number of reader calls and one topic left out", async () => {
+    const { status, events } = await runGoal(
+      GOAL,
+      (proposal) =>
+        Promise.resolve({
+          decision: "approved",
+          steps: proposal.steps.map(({ team: _team, ...step }) => step),
+        }),
+      { reference: companyArticles },
+    );
+    expect(status).toBe("completed");
+    expect(events.find((event) => event.type === "plan.revised")).toMatchObject({
+      payload: { source: "reviewer", diff: { changed: ["research_topic"] } },
+    });
+    expect(on(events, "agent.spawned")).toHaveLength(1);
+    expect(on(events, "tool.called")).toHaveLength(1);
+    const titles = topicSources(events);
+    expect(titles).toHaveLength(4);
+    expect(topicsCovered(titles)).toEqual(["marketing", "pricing"]);
+    expect(on(events, "usage.updated")).toHaveLength(4);
+  });
+
+  it("falls back to general topic articles on the single-agent path when no member finds the company", async () => {
+    const { status, events } = await runGoal(GOAL);
+    expect(status).toBe("completed");
+    expect(on(events, "agent.spawned")).toHaveLength(4);
+    const summaries = on(events, "tool.called").flatMap((event) =>
+      event.type === "tool.called" ? [event.payload.argsSummary] : [],
+    );
+    expect(summaries.filter((summary) => summary.includes("Acme Robotics"))).toHaveLength(3);
+    expect(summaries.at(-1)).toBe("Wikipedia search for marketing; pricing; hiring");
+    expect(summaries).toHaveLength(4);
+    expect(topicSources(events).length).toBeGreaterThan(0);
+  });
+
+  it("restores a finished team step on resume without spawning its members again", async () => {
+    const crashed = await runGoal(GOAL, undefined, {
+      reference: companyArticles,
+      killAt: "synthesise",
+    });
+    expect(crashed.status).toBe("failed");
+    const before = on(crashed.events, "agent.spawned").length;
+    const resumed = await crashed.resume();
+    expect(resumed.status).toBe("completed");
+    expect(on(crashed.events, "agent.spawned")).toHaveLength(before);
+    expect(foldRun(crashed.events).status).toBe("completed");
+  });
+
+  it("keeps a goal with one topic on the single-agent path", async () => {
+    const { events } = await runGoal("Make our marketing planning more agentic");
+    expect(topicStep(events)?.team).toBeUndefined();
   });
 });
 
