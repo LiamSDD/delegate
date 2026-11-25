@@ -10,7 +10,7 @@ import type { AssistantStores } from "../assistants";
 import type { AppDatabase } from "../db";
 import { createFakeRunner } from "../fake-runner";
 import { createRunRegistry, type RunRegistry } from "../run-registry";
-import { createSecretBox } from "../secrets";
+import { createSecretBox, type SecretBox } from "../secrets";
 import { createRateLimiter, resolveGuest } from "../session";
 import type { WebhookRuntime } from "../webhooks/runtime";
 import type { WebhookRequest, WebhookSendOutcome } from "../webhooks/transport";
@@ -21,6 +21,8 @@ import { handleOpenApi, handleUnknownRoute, handleV1 } from "./router";
 export const TEST_ORIGIN = "https://delegate.example";
 export const TEST_SESSION_SECRET = "s".repeat(32);
 export const PUBLIC_TEST_ADDRESS = "93.184.215.14";
+
+const SETTLE_LIMIT_MS = 10_000;
 
 export interface TestBackground {
   tasks: Promise<void>[];
@@ -45,10 +47,23 @@ export function createBackground(): TestBackground {
     },
     has: (runId) => inner.has(runId),
   };
-  const settle = async () => {
+  const drain = async () => {
     for (let seen = -1; seen !== tasks.length;) {
       seen = tasks.length;
       await Promise.allSettled(tasks);
+    }
+  };
+  const settle = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error("background work did not settle: is a run still waiting?"));
+      }, SETTLE_LIMIT_MS);
+    });
+    try {
+      await Promise.race([drain(), late]);
+    } finally {
+      clearTimeout(timer);
     }
   };
   return {
@@ -57,7 +72,7 @@ export function createBackground(): TestBackground {
     settle,
     async stop(graceMs = 5_000) {
       for (const runId of open) inner.abort(runId, "test finished");
-      await Promise.race([settle(), new Promise((resolve) => setTimeout(resolve, graceMs))]);
+      await Promise.race([drain(), new Promise((resolve) => setTimeout(resolve, graceMs))]);
     },
   };
 }
@@ -194,21 +209,32 @@ export interface TestWebhooks {
   clock: { now: Date };
   respond: (request: WebhookRequest) => WebhookSendOutcome | Promise<WebhookSendOutcome>;
   dns: Map<string, string[]>;
-  key: Buffer;
+  sealed: string[];
 }
 
 export function createTestWebhooks(
   background: TestBackground,
   options: { encryption?: boolean } = {},
 ): TestWebhooks {
-  const key = randomBytes(32);
-  const box = options.encryption === false ? null : createSecretBox(key);
+  const sealed: string[] = [];
+  const real = createSecretBox(randomBytes(32));
+  const box: SecretBox | null =
+    options.encryption === false
+      ? null
+      : {
+          ...real,
+          seal(plaintext, associated) {
+            const ciphertext = real.seal(plaintext, associated);
+            sealed.push(ciphertext);
+            return ciphertext;
+          },
+        };
   const state: TestWebhooks = {
     sent: [],
-    clock: { now: new Date("2026-11-25T12:00:00.000Z") },
+    sealed,
+    clock: { now: new Date() },
     respond: () => ({ kind: "response", status: 200, excerpt: "ok", retryAfterMs: null }),
     dns: new Map(),
-    key,
     runtime: {
       schedule: (task) => {
         background.tasks.push(task());
