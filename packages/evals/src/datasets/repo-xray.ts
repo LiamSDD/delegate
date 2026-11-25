@@ -8,8 +8,8 @@ const slug = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
 
 export const REPO_XRAY_DATASET = {
   name: "repo-xray",
-  version: 1,
-  file: "v1.jsonl",
+  version: 2,
+  file: "v2.jsonl",
 } as const;
 
 export const REPO_FACT_KINDS = [
@@ -44,7 +44,7 @@ export const RepoXrayCaseSchema = z.strictObject({
     owner: z.string().min(1),
     name: z.string().min(1),
     language: z.string().min(1),
-    size: z.enum(["small", "medium"]),
+    size: z.enum(["small", "medium", "large"]),
   }),
   expectedFacts: z.array(RepoExpectedFactSchema).min(3).max(6),
   tags: z.array(slug),
@@ -59,9 +59,9 @@ export function parseRepoXrayDataset(source: string): RepoXrayCase[] {
     if (line.trim() === "") continue;
     const parsed = RepoXrayCaseSchema.safeParse(JSON.parse(line));
     if (!parsed.success)
-      throw new Error(`repo-xray/v1.jsonl line ${index + 1}: ${parsed.error.message}`);
+      throw new Error(`repo-xray dataset line ${index + 1}: ${parsed.error.message}`);
     if (!RepoXrayInputSchema.safeParse(parsed.data.input).success)
-      throw new Error(`repo-xray/v1.jsonl line ${index + 1}: input is not a GitHub repository`);
+      throw new Error(`repo-xray dataset line ${index + 1}: input is not a GitHub repository`);
     if (ids.has(parsed.data.id)) throw new Error(`Duplicate repo-xray case id ${parsed.data.id}`);
     ids.add(parsed.data.id);
     cases.push(parsed.data);
@@ -70,7 +70,7 @@ export function parseRepoXrayDataset(source: string): RepoXrayCase[] {
 }
 
 export const REPO_XRAY_DATASET_PATH = fileURLToPath(
-  new URL("../../datasets/repo-xray/v1.jsonl", import.meta.url),
+  new URL(`../../datasets/repo-xray/${REPO_XRAY_DATASET.file}`, import.meta.url),
 );
 
 export function loadRepoXrayDataset(path = REPO_XRAY_DATASET_PATH): RepoXrayCase[] {
