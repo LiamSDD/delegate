@@ -84,6 +84,7 @@ function connectorTool(source: ConnectorToolSource, tool: ScreenedTool, readerPr
         call: {
           targetDomain: source.host,
           argsSummary,
+          args,
           run: async ({ run, stepId, toolCallId }) => {
             const started = run.now().getTime();
             let result: ConnectorCallResult | undefined;

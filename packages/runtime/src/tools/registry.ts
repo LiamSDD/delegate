@@ -4,6 +4,7 @@ import { type z } from "zod";
 import { type RunContext } from "../agent/context";
 import { type Actor } from "../events";
 import { type ToolDefinition } from "../providers/types";
+import { canonicalJson, sha256Text, TOOL_APPROVAL_ARGS_MAX_BYTES } from "./approvals";
 
 export const TOOL_SUMMARY_MAX_CHARS = 280;
 export const TOOL_RESULT_FOR_MODEL_MAX_CHARS = 8_000;
@@ -41,6 +42,7 @@ export interface ToolSpec<I> {
 export interface PreparedCall {
   targetDomain: string | undefined;
   argsSummary: string;
+  args: unknown;
   run: (execution: ToolExecution) => Promise<ToolOutcome>;
 }
 
@@ -73,6 +75,7 @@ export function defineTool<I>(spec: ToolSpec<I>): RegisteredTool {
         call: {
           targetDomain: spec.targetDomain(input),
           argsSummary: spec.summariseArgs(input).slice(0, TOOL_SUMMARY_MAX_CHARS),
+          args: input,
           run: (execution) => spec.execute(input, execution),
         },
       };
@@ -188,6 +191,16 @@ export async function executeToolCall(
     spentRunMicroUsd: run.budget.spent().microUsd,
     spentDayMicroUsd: 0,
   });
+  const argsJson = canonicalJson(prepared.call.args);
+  if (
+    decision.decision === "require_approval" &&
+    run.approvals !== undefined &&
+    new TextEncoder().encode(argsJson).byteLength > TOOL_APPROVAL_ARGS_MAX_BYTES
+  )
+    return refuse(
+      RUNTIME_POLICY_ID,
+      `Tool arguments are larger than ${TOOL_APPROVAL_ARGS_MAX_BYTES / 1024} KB and cannot be shown in full for approval`,
+    );
   await decide(decision.decision, decision.policyId, decision.reason);
   let approvedBy: Actor | undefined;
   if (decision.decision === "require_approval" && run.approvals !== undefined) {
@@ -211,6 +224,8 @@ export async function executeToolCall(
       tool: tool.name,
       capability: tool.capability,
       argsSummary: prepared.call.argsSummary,
+      argsJson,
+      argsSha256: sha256Text(argsJson),
       policyId: decision.policyId,
       reason: decision.reason,
     });

@@ -1,4 +1,27 @@
+import { createHash } from "node:crypto";
+
 import { type Actor } from "../events";
+
+export const TOOL_APPROVAL_ARGS_MAX_BYTES = 32_768;
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, entry]) => [key, sortKeys(entry)]),
+    );
+  return value;
+}
+
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortKeys(value ?? {}));
+}
+
+export function sha256Text(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
 
 export interface ToolApprovalRequest {
   approvalId: string;
@@ -7,6 +30,8 @@ export interface ToolApprovalRequest {
   tool: string;
   capability: string;
   argsSummary: string;
+  argsJson: string;
+  argsSha256: string;
   policyId: string;
   reason: string;
 }

@@ -7,10 +7,12 @@ import {
   withTenant,
 } from "@delegate/db";
 import type { Actor } from "@delegate/runtime";
-import type {
-  ToolApprovalGate,
-  ToolApprovalRequest,
-  ToolApprovalResolution,
+import {
+  sha256Text,
+  TOOL_APPROVAL_ARGS_MAX_BYTES,
+  type ToolApprovalGate,
+  type ToolApprovalRequest,
+  type ToolApprovalResolution,
 } from "@delegate/runtime/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -26,12 +28,18 @@ export const TOOL_DECISION_ACTION = "tool.decision";
 export const TOOL_TIMEOUT_REASON = "Nobody approved the tool call in time, so it did not run.";
 export const TOOL_TIMEOUT_ACTOR: Actor = { type: "system", id: "tool-approval-timeout" };
 
-const actionSchema = z.object({
-  kind: z.literal("tool"),
-  approvalId: z.string().min(1),
-  tool: z.string().min(1),
-  argsSummary: z.string(),
-});
+const SHA256 = /^[0-9a-f]{64}$/;
+
+const actionSchema = z
+  .object({
+    kind: z.literal("tool"),
+    approvalId: z.string().min(1),
+    tool: z.string().min(1),
+    argsSummary: z.string(),
+    argsJson: z.string().max(TOOL_APPROVAL_ARGS_MAX_BYTES),
+    argsSha256: z.string().regex(SHA256),
+  })
+  .refine((action) => sha256Text(action.argsJson) === action.argsSha256);
 
 const decisionDetailsSchema = z.object({
   decision: z.enum(["approved", "rejected"]),
@@ -62,6 +70,8 @@ export interface PendingToolApproval {
   runtimeApprovalId: string;
   tool: string;
   argsSummary: string;
+  argsJson: string;
+  argsSha256: string;
 }
 
 export async function pendingToolApprovals(
@@ -92,6 +102,8 @@ export async function pendingToolApprovals(
             runtimeApprovalId: action.data.approvalId,
             tool: action.data.tool,
             argsSummary: action.data.argsSummary,
+            argsJson: action.data.argsJson,
+            argsSha256: action.data.argsSha256,
           },
         ]
       : [];
@@ -136,7 +148,16 @@ async function latestDecision(tx: TenantTx, approvalId: string) {
   return parsed.success ? parsed.data : null;
 }
 
+export class ToolArgumentsError extends Error {
+  override readonly name = "ToolArgumentsError";
+}
+
 async function findOrOpen(app: AppDatabase, ctx: RunContext, request: ToolApprovalRequest) {
+  if (
+    new TextEncoder().encode(request.argsJson).byteLength > TOOL_APPROVAL_ARGS_MAX_BYTES ||
+    sha256Text(request.argsJson) !== request.argsSha256
+  )
+    throw new ToolArgumentsError("The tool arguments cannot be shown in full for approval");
   return withTenant(app.db, ctx.userId, async (tx) => {
     const rows = await tx
       .select({
@@ -145,7 +166,13 @@ async function findOrOpen(app: AppDatabase, ctx: RunContext, request: ToolApprov
         action: approvals.action,
       })
       .from(approvals)
-      .where(and(eq(approvals.runId, ctx.runId), eq(approvals.stepId, TOOL_APPROVAL_STEP)))
+      .where(
+        and(
+          eq(approvals.runId, ctx.runId),
+          eq(approvals.stepId, TOOL_APPROVAL_STEP),
+          eq(approvals.status, "pending"),
+        ),
+      )
       .orderBy(desc(approvals.requestedAt));
     const existing = rows.find((row) => {
       const action = actionSchema.safeParse(row.action);
@@ -153,7 +180,7 @@ async function findOrOpen(app: AppDatabase, ctx: RunContext, request: ToolApprov
         action.success &&
         action.data.approvalId === request.approvalId &&
         action.data.tool === request.tool &&
-        action.data.argsSummary === request.argsSummary
+        action.data.argsSha256 === request.argsSha256
       );
     });
     if (existing !== undefined) return existing;
@@ -168,6 +195,8 @@ async function findOrOpen(app: AppDatabase, ctx: RunContext, request: ToolApprov
           approvalId: request.approvalId,
           tool: request.tool,
           argsSummary: request.argsSummary,
+          argsJson: request.argsJson,
+          argsSha256: request.argsSha256,
           capability: request.capability,
           policyId: request.policyId,
         },

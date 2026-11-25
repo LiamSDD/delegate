@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { githubInstallations, withTenant } from "@delegate/db";
 import type { RunEvent } from "@delegate/runtime";
 import type { ToolApprovalRequest } from "@delegate/runtime/server";
@@ -14,7 +16,7 @@ import { createRunRegistry } from "./run-registry";
 import { createRunRecord, getRunRecord, type RunContext } from "./runs";
 import { createRateLimiter, resolveGuest, signSession } from "./session";
 import { createToolApprovalGate, pendingToolApprovals } from "./tool-approval";
-import { handleToolDecision } from "./tool-approval-api";
+import { handleListToolApprovals, handleToolDecision } from "./tool-approval-api";
 
 const ORIGIN = "http://localhost:3000";
 const secret = "s".repeat(32);
@@ -57,6 +59,9 @@ async function newRun(mission = "custom-goal"): Promise<{ ctx: RunContext; cooki
   };
 }
 
+const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
+const fullArgs = '{"body":"Escalate to ann@acme.example","id":"4711"}';
+
 const request: ToolApprovalRequest = {
   approvalId: "ap_1",
   toolCallId: "tc_2",
@@ -64,9 +69,17 @@ const request: ToolApprovalRequest = {
   tool: "mcp__tickets__add_comment",
   capability: "connector.write",
   argsSummary: 'tickets.add_comment {"id":"4711","body":"[redacted:email]"}',
+  argsJson: fullArgs,
+  argsSha256: sha256(fullArgs),
   policyId: "builtin",
   reason: "Capability connector.write has side effects and always requires human approval",
 };
+
+function list(runId: string, cookie: string) {
+  return new Request(`${ORIGIN}/api/runs/${runId}/tool-approval`, {
+    headers: { origin: ORIGIN, host: "localhost:3000", cookie },
+  });
+}
 
 function decide(runId: string, cookie: string, body: unknown) {
   return new Request(`${ORIGIN}/api/runs/${runId}/tool-approval`, {
@@ -91,9 +104,29 @@ describe("durable approval of connector write calls", () => {
     const decision = gate.decide(request);
     await waitForPending(ctx);
     const [pending] = await pendingToolApprovals(app, ctx.userId, ctx.runId);
-    expect(pending).toMatchObject({ tool: request.tool, argsSummary: request.argsSummary });
+    expect(pending).toMatchObject({
+      tool: request.tool,
+      argsJson: fullArgs,
+      argsSha256: request.argsSha256,
+    });
+    const listed = await handleListToolApprovals(list(ctx.runId, cookie), ctx.runId, deps());
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toEqual({
+      approvals: [
+        {
+          approvalId: "ap_1",
+          tool: request.tool,
+          argsJson: fullArgs,
+          argsSha256: request.argsSha256,
+        },
+      ],
+    });
     const response = await handleToolDecision(
-      decide(ctx.runId, cookie, { approvalId: "ap_1", decision: "approved" }),
+      decide(ctx.runId, cookie, {
+        approvalId: "ap_1",
+        decision: "approved",
+        argsSha256: request.argsSha256,
+      }),
       ctx.runId,
       deps(),
     );
@@ -102,6 +135,55 @@ describe("durable approval of connector write calls", () => {
       resolution: "approved",
       resolvedBy: { type: "guest", id: ctx.userId },
     });
+  });
+
+  it("refuses an approval for arguments other than the ones waiting", async () => {
+    const { ctx, cookie } = await newRun();
+    const decision = createToolApprovalGate({ app, ctx, pollMs: 5, timeoutMs: 300 }).decide(
+      request,
+    );
+    await waitForPending(ctx);
+    const stale = await handleToolDecision(
+      decide(ctx.runId, cookie, {
+        approvalId: "ap_1",
+        decision: "approved",
+        argsSha256: sha256('{"id":"4711"}'),
+      }),
+      ctx.runId,
+      deps(),
+    );
+    expect(stale.status).toBe(409);
+    expect(await pendingToolApprovals(app, ctx.userId, ctx.runId)).toHaveLength(1);
+    await expect(decision).resolves.toMatchObject({ resolution: "rejected" });
+  });
+
+  it("reuses an approval row only while it is pending and for the same arguments", async () => {
+    const { ctx, cookie } = await newRun();
+    const first = createToolApprovalGate({ app, ctx, pollMs: 5 }).decide(request);
+    await waitForPending(ctx);
+    await handleToolDecision(
+      decide(ctx.runId, cookie, {
+        approvalId: "ap_1",
+        decision: "approved",
+        argsSha256: request.argsSha256,
+      }),
+      ctx.runId,
+      deps(),
+    );
+    await expect(first).resolves.toMatchObject({ resolution: "approved" });
+    const swapped = '{"body":"Delete every ticket","id":"4711"}';
+    const second = createToolApprovalGate({ app, ctx, pollMs: 5, timeoutMs: 300 }).decide({
+      ...request,
+      argsJson: swapped,
+      argsSha256: sha256(swapped),
+    });
+    await waitForPending(ctx);
+    const [pending] = await pendingToolApprovals(app, ctx.userId, ctx.runId);
+    expect(pending?.argsJson).toBe(swapped);
+    await expect(second).resolves.toMatchObject({ resolution: "rejected" });
+    const third = createToolApprovalGate({ app, ctx, pollMs: 5, timeoutMs: 300 }).decide(request);
+    await waitForPending(ctx);
+    await expect(third).resolves.toMatchObject({ resolution: "rejected" });
   });
 
   it("returns the rejection and its reason", async () => {
@@ -140,10 +222,13 @@ describe("durable approval of connector write calls", () => {
       request,
     );
     await waitForPending(ctx);
-    const body = { approvalId: "ap_1", decision: "approved" };
+    const body = { approvalId: "ap_1", decision: "approved", argsSha256: request.argsSha256 };
     expect(
       (await handleToolDecision(decide(ctx.runId, stranger.cookie, body), ctx.runId, deps()))
         .status,
+    ).toBe(404);
+    expect(
+      (await handleListToolApprovals(list(ctx.runId, stranger.cookie), ctx.runId, deps())).status,
     ).toBe(404);
     const crossSite = new Request(`${ORIGIN}/api/runs/${ctx.runId}/tool-approval`, {
       method: "POST",
@@ -157,7 +242,11 @@ describe("durable approval of connector write calls", () => {
     });
     expect((await handleToolDecision(crossSite, ctx.runId, deps())).status).toBe(403);
     const unknown = await handleToolDecision(
-      decide(ctx.runId, cookie, { approvalId: "ap_9", decision: "approved" }),
+      decide(ctx.runId, cookie, {
+        approvalId: "ap_9",
+        decision: "approved",
+        argsSha256: request.argsSha256,
+      }),
       ctx.runId,
       deps(),
     );

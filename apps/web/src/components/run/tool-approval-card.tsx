@@ -2,7 +2,7 @@
 
 import type { RunEvent } from "@delegate/runtime";
 import { Plug } from "lucide-react";
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { z } from "zod";
 
 import { pendingToolCalls, type PendingToolCall } from "@/lib/runs/tool-approvals";
@@ -11,10 +11,74 @@ import { actionButton, Chip, Eyebrow, primaryButton } from "./primitives";
 
 const errorSchema = z.object({ error: z.object({ message: z.string() }) });
 
+const pendingSchema = z.object({
+  approvals: z.array(
+    z.object({
+      approvalId: z.string(),
+      tool: z.string(),
+      argsJson: z.string(),
+      argsSha256: z.string().regex(/^[0-9a-f]{64}$/),
+    }),
+  ),
+});
+
+interface FullArguments {
+  text: string;
+  sha256: string;
+}
+
+const ARGUMENT_POLL_MS = 1_000;
+const ARGUMENT_POLL_ATTEMPTS = 30;
+
+function pretty(json: string): string {
+  try {
+    return JSON.stringify(JSON.parse(json) as unknown, null, 2);
+  } catch {
+    return json;
+  }
+}
+
+function useFullArguments(runId: string, approvalId: string) {
+  const [args, setArgs] = useState<FullArguments | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async (attempt: number) => {
+      try {
+        const response = await fetch(`/api/runs/${runId}/tool-approval`, { cache: "no-store" });
+        const parsed = pendingSchema.safeParse(await response.json().catch(() => null));
+        const match = parsed.success
+          ? parsed.data.approvals.find((entry) => entry.approvalId === approvalId)
+          : undefined;
+        if (cancelled) return;
+        if (match !== undefined) {
+          setArgs({ text: pretty(match.argsJson), sha256: match.argsSha256 });
+          return;
+        }
+      } catch {
+        if (cancelled) return;
+      }
+      if (attempt + 1 >= ARGUMENT_POLL_ATTEMPTS) {
+        setFailed(true);
+        return;
+      }
+      timer = setTimeout(() => void load(attempt + 1), ARGUMENT_POLL_MS);
+    };
+    void load(0);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [runId, approvalId]);
+  return { args, failed };
+}
+
 function Card({ runId, call }: { runId: string; call: PendingToolCall }) {
   const headingId = useId();
   const [state, setState] = useState<"idle" | "approving" | "rejecting" | "sent">("idle");
   const [error, setError] = useState<string | null>(null);
+  const { args, failed } = useFullArguments(runId, call.approvalId);
   const busy = state !== "idle";
 
   const send = async (decision: "approved" | "rejected") => {
@@ -24,7 +88,11 @@ function Card({ runId, call }: { runId: string; call: PendingToolCall }) {
       const response = await fetch(`/api/runs/${runId}/tool-approval`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ approvalId: call.approvalId, decision }),
+        body: JSON.stringify(
+          decision === "approved"
+            ? { approvalId: call.approvalId, decision, argsSha256: args?.sha256 }
+            : { approvalId: call.approvalId, decision },
+        ),
       });
       if (response.ok) {
         setState("sent");
@@ -66,11 +134,22 @@ function Card({ runId, call }: { runId: string; call: PendingToolCall }) {
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <Chip tone="warning">side effects</Chip>
-          <Chip>arguments redacted for personal data</Chip>
+          <Chip>full arguments, exactly as they will be sent</Chip>
         </div>
-        <pre className="max-h-40 overflow-auto rounded-md bg-surface-2 p-3 font-mono text-xs break-all whitespace-pre-wrap text-text">
-          {call.args === "" ? "(no arguments)" : call.args}
+        <pre
+          tabIndex={0}
+          aria-label="Full tool arguments"
+          className="max-h-80 overflow-auto rounded-md bg-surface-2 p-3 font-mono text-xs break-all whitespace-pre-wrap text-text"
+        >
+          {args !== null
+            ? args.text
+            : failed
+              ? "The full arguments could not be loaded, so this call cannot be approved here."
+              : "Loading the full arguments…"}
         </pre>
+        {args === null ? null : (
+          <p className="font-mono text-2xs break-all text-text-subtle">sha256 {args.sha256}</p>
+        )}
         <p className="text-xs text-text-subtle">
           The run is paused. Unanswered requests are rejected after 10 minutes. The decision is
           recorded in the run log and the audit view.
@@ -85,7 +164,7 @@ function Card({ runId, call }: { runId: string; call: PendingToolCall }) {
         <button
           type="button"
           className={primaryButton}
-          disabled={busy}
+          disabled={busy || args === null}
           onClick={() => {
             void send("approved");
           }}

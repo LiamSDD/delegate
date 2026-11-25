@@ -63,6 +63,7 @@ export interface ApiDeps {
 
 export type ApiErrorCode =
   | "no_pending_ship"
+  | "arguments_changed"
   | "forbidden_origin"
   | "unsupported_media_type"
   | "payload_too_large"
