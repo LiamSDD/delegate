@@ -7,7 +7,9 @@ import {
   type RunEvent,
 } from "../events";
 
-type WithoutEnvelope<T> = T extends unknown ? Omit<T, "runId" | "seq" | "at"> : never;
+type WithoutEnvelope<T> = T extends unknown
+  ? Omit<T, "runId" | "seq" | "at"> & { at?: string }
+  : never;
 export type ForkSeedEvent = WithoutEnvelope<RunEvent>;
 
 export const MAX_FORK_OBJECTIVE_CHARS = 2000;
@@ -40,7 +42,7 @@ export interface ForkRequest {
 }
 
 function stripEnvelope(event: RunEvent): ForkSeedEvent {
-  const { runId: _runId, seq: _seq, at: _at, ...rest } = event;
+  const { runId: _runId, seq: _seq, ...rest } = event;
   return rest;
 }
 
@@ -140,7 +142,12 @@ export function assembleForkLog(
   return [
     created,
     ...seed.map((event, index) =>
-      parseRunEvent({ ...event, runId: created.runId, seq: created.seq + index + 1, at }),
+      parseRunEvent({
+        ...event,
+        runId: created.runId,
+        seq: created.seq + index + 1,
+        at: event.at ?? at,
+      }),
     ),
   ];
 }

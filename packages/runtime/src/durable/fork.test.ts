@@ -241,6 +241,31 @@ describe("planFork", () => {
     expect(analysis.point?.approved).toBe(true);
   });
 
+  it("keeps the parent's timestamps on copied events and stamps new ones with the fork's time", () => {
+    const parentAt = (seq: number) =>
+      new Date(Date.parse("2026-11-25T09:00:00.000Z") + seq * 60_000).toISOString();
+    const parent = completedRun().map((event) => ({ ...event, at: parentAt(event.seq) }));
+    const fork = planFork(parent, { stepId: "index", objective: "Index only docs" });
+    if (!fork.ok) throw new Error("fork refused");
+    const forked = assembleForkLog(
+      forkCreated({
+        runId: parentId,
+        stepId: "index",
+        parentSeq: fork.parentSeq,
+        seededThrough: fork.seed.length + 1,
+        objectiveEdited: true,
+      }),
+      fork.seed,
+    );
+    const copied = forked.slice(1, -1);
+    expect(copied.map((event) => event.at)).toEqual(
+      parent.slice(1, copied.length + 1).map((event) => event.at),
+    );
+    expect(forked.at(-1)?.type).toBe("plan.revised");
+    expect(forked.at(-1)?.at).toBe(at);
+    expect(forked[0]?.at).toBe(at);
+  });
+
   it("forking from the first step keeps only the approved plan", () => {
     const fork = planFork(completedRun(), { stepId: "crawl" });
     if (!fork.ok) throw new Error("fork refused");

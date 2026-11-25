@@ -161,7 +161,7 @@ export async function createForkRecord(
           payload: event.payload,
           stepId: event.stepId ?? null,
           agentId: event.agentId ?? null,
-          createdAt: new Date(createdRow.createdAt),
+          createdAt: new Date(event.at),
         })),
       );
     }

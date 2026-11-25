@@ -1,6 +1,8 @@
 import { foldRun } from "@delegate/runtime";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { buildRunView } from "@/lib/runs/run-view";
+
 import { type ApiDeps, forkRefusalResponse, handleCreateRun, handleForkRun } from "./api";
 import { type AppDatabase, createPgliteAppDatabase } from "./db";
 import { createFakeRunner } from "./fake-runner";
@@ -123,6 +125,10 @@ describe("POST /api/runs/[id]/fork", () => {
       parentEvents.slice(1, readStart.seq - 1).map((event) => event.type),
     );
     expect(seeded.at(-1)?.type).toBe("plan.revised");
+    expect(seeded.slice(1, -1).map((event) => event.at)).toEqual(
+      parentEvents.slice(1, readStart.seq - 1).map((event) => event.at),
+    );
+    expect(seeded.at(-1)?.at).toBe(created?.at);
 
     const record = await getRunRecord(app, userId, body.runId);
     expect(record?.totals.inputTokens).toBe(1800);
@@ -133,6 +139,15 @@ describe("POST /api/runs/[id]/fork", () => {
     const state = foldRun(finished);
     expect(state.status).toBe("completed");
     expect(state.forkedFrom?.runId).toBe(parent.runId);
+    const view = buildRunView(finished);
+    const forkCreated = finished[0];
+    const terminal = finished.at(-1);
+    if (forkCreated === undefined || terminal === undefined) throw new Error("empty fork log");
+    expect(view.ok && view.createdAt).toBe(forkCreated.at);
+    expect(view.ok && view.finishedAt).toBe(terminal.at);
+    expect(Date.parse(forkCreated.at)).toBeGreaterThanOrEqual(
+      Date.parse(parentEvents.at(-1)?.at ?? ""),
+    );
     expect(
       finished.filter((event) => event.type === "step.started").map((event) => event.stepId),
     ).toEqual(["map-site", "read-pages", "write-brief"]);
