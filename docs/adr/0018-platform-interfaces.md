@@ -59,3 +59,11 @@ v1 counts requests per token (1,200 per hour, the MCP budget) and reports `RateL
 - `approval.requested` deliveries are enqueued right after the approval row is opened, not in the same transaction; a crash in between loses the notification, never the approval.
 - Rotating a secret invalidates the old one at once. The signature header already allows several `v1=` values, so overlapping secrets can be added without changing verifiers.
 - Not done: webhook triggers for standing missions (SPEC D), endpoint auto-disable after repeated failures, shared rate-limit state across instances, and plan edits through v1 (the web UI keeps them).
+
+## Notes from the implementation
+
+- The settings routes live beside the page, under `/settings/webhooks/endpoints` (list and add, delete, `rotate`, `test`), with the same cookie and same-origin guard as the other settings routes. A bearer token is refused there.
+- The CLI stores the deployment's URL with the token and refuses to send a stored token to any other deployment. Text that comes from a run is stripped of control characters before it is printed, because step summaries can quote web pages.
+- The webhook guide's dependency-free verification sample is executed by `packages/sdk/src/webhooks-guide.test.ts` and attacked by the red-team suite (`wh-005` to `wh-011`), so the documented code is the tested code.
+- The red-team suite cannot import the web app. Its `webhook-delivery` target runs the runtime guards the transport is composed of, and its `tenant` target runs the real migrations in an in-process PGlite; the web tests run the same dataset cases against the shipped transport and the v1 handlers (`redteam.test.ts` in `server/webhooks` and `server/v1`).
+- Opportunistic retries are triggered by v1 requests, by the Webhooks settings page and by any later webhook event of the workspace. Requests the web UI makes to the unversioned routes do not trigger them.

@@ -338,7 +338,12 @@ async function watch(
   const iterator = client.runs.events(runId, { after: options.after, signal });
   let planUndecided = false;
   let hinted = false;
-  let next = iterator.next();
+  const advance = () => {
+    const step = iterator.next();
+    step.catch(() => undefined);
+    return step;
+  };
+  let next = advance();
   try {
     for (;;) {
       let quiet: ReturnType<typeof setTimeout> | undefined;
@@ -371,7 +376,7 @@ async function watch(
       } else if (step.value.type === "plan.approved" || step.value.type === "run.failed") {
         planUndecided = false;
       }
-      next = iterator.next();
+      next = advance();
     }
   } catch (error) {
     if (limit.signal.aborted && !io.signal.aborted) {
