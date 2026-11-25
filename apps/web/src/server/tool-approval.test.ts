@@ -217,10 +217,15 @@ describe("Ship-a-PR uses the visitor's connected installation", () => {
         accountType: "Organization",
         repositorySelection: "selected",
         repositories: ["acme/widgets"],
+        githubUserId: 4242,
+        githubLogin: "acme-dev",
       }),
     );
     const find = connectedInstallations(() => Promise.resolve(app))(ctx.workspaceId, ctx.userId);
-    await expect(find("acme", "widgets")).resolves.toEqual({ installationId: 77 });
+    await expect(find("acme", "widgets")).resolves.toEqual({
+      installationId: 77,
+      collaborator: "acme-dev",
+    });
     await expect(find("acme", "gadgets")).resolves.toBeNull();
     const other = await newRun("ship-a-pr");
     await expect(

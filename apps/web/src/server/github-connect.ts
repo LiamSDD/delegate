@@ -150,7 +150,25 @@ const installationsResponseSchema = z.object({
 
 const repositoriesResponseSchema = z.object({
   total_count: z.int().nonnegative(),
-  repositories: z.array(z.object({ full_name: z.string() })),
+  repositories: z.array(
+    z.object({
+      full_name: z.string(),
+      permissions: z
+        .object({
+          admin: z.boolean().optional(),
+          maintain: z.boolean().optional(),
+          push: z.boolean().optional(),
+        })
+        .optional(),
+    }),
+  ),
+});
+
+const LOGIN_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+
+const userResponseSchema = z.object({
+  id: z.int().positive(),
+  login: z.string().regex(LOGIN_PATTERN),
 });
 
 function githubHeaders(token: string): Record<string, string> {
@@ -185,6 +203,20 @@ export async function exchangeCode(
   return parsed.data.access_token;
 }
 
+export async function fetchGithubUser(
+  userToken: string,
+  fetchImpl: typeof fetch,
+): Promise<{ id: number; login: string }> {
+  const response = await fetchImpl(`${GITHUB_API}/user`, {
+    headers: githubHeaders(userToken),
+    redirect: "error",
+  });
+  const parsed = userResponseSchema.safeParse(await response.json().catch(() => null));
+  if (!response.ok || !parsed.success)
+    throw new GithubConnectError("github_unavailable", "GitHub did not identify your account.");
+  return parsed.data;
+}
+
 export async function listUserInstallations(
   userToken: string,
   fetchImpl: typeof fetch,
@@ -199,12 +231,13 @@ export async function listUserInstallations(
   return parsed.data.installations;
 }
 
-export async function listInstallationRepositories(
+export async function listPushableRepositories(
   userToken: string,
   installationId: number,
   fetchImpl: typeof fetch,
 ): Promise<string[]> {
   const names: string[] = [];
+  let seen = 0;
   for (let page = 1; page <= MAX_REPOSITORY_PAGES; page += 1) {
     const response = await fetchImpl(
       `${GITHUB_API}/user/installations/${installationId}/repositories?per_page=100&page=${page}`,
@@ -213,8 +246,18 @@ export async function listInstallationRepositories(
     const parsed = repositoriesResponseSchema.safeParse(await response.json().catch(() => null));
     if (!response.ok || !parsed.success)
       throw new GithubConnectError("github_unavailable", "GitHub did not list the repositories.");
-    names.push(...parsed.data.repositories.map((repo) => repo.full_name));
-    if (names.length >= parsed.data.total_count || parsed.data.repositories.length < 100) break;
+    names.push(
+      ...parsed.data.repositories
+        .filter(
+          (repo) =>
+            repo.permissions?.admin === true ||
+            repo.permissions?.maintain === true ||
+            repo.permissions?.push === true,
+        )
+        .map((repo) => repo.full_name),
+    );
+    seen += parsed.data.repositories.length;
+    if (seen >= parsed.data.total_count || parsed.data.repositories.length < 100) break;
   }
   return names;
 }
@@ -225,6 +268,9 @@ export interface VerifiedInstallation {
   accountType: string;
   repositorySelection: "all" | "selected";
   repositories: string[];
+  repositoriesVerified: boolean;
+  githubUserId: number;
+  githubLogin: string;
 }
 
 export async function verifyInstallation(
@@ -245,15 +291,17 @@ export async function verifyInstallation(
       "not_your_installation",
       "That installation is not accessible to the GitHub account that authorized Delegate.",
     );
+  const user = await fetchGithubUser(userToken, fetchImpl);
+  const selected = match.repository_selection === "selected";
   return {
     installationId: match.id,
     accountLogin: account.login,
     accountType: account.type,
     repositorySelection: match.repository_selection,
-    repositories:
-      match.repository_selection === "selected"
-        ? await listInstallationRepositories(userToken, match.id, fetchImpl)
-        : [],
+    repositories: selected ? await listPushableRepositories(userToken, match.id, fetchImpl) : [],
+    repositoriesVerified: selected,
+    githubUserId: user.id,
+    githubLogin: user.login,
   };
 }
 
@@ -267,6 +315,9 @@ export async function storeInstallation(
     accountType: installation.accountType,
     repositorySelection: installation.repositorySelection,
     repositories: installation.repositories,
+    repositoriesVerified: installation.repositoriesVerified,
+    githubUserId: installation.githubUserId,
+    githubLogin: installation.githubLogin,
   };
   await withTenant(app.db, session.userId, (tx) =>
     tx
@@ -290,6 +341,9 @@ export interface InstallationListing {
   accountType: string;
   repositorySelection: string;
   repositories: string[];
+  repositoriesVerified: boolean;
+  githubUserId: number | null;
+  githubLogin: string | null;
   updatedAt: string;
 }
 
@@ -313,6 +367,9 @@ export async function listInstallations(
     accountType: row.accountType,
     repositorySelection: row.repositorySelection,
     repositories: repoList.parse(row.repositories),
+    repositoriesVerified: row.repositoriesVerified,
+    githubUserId: row.githubUserId,
+    githubLogin: row.githubLogin,
     updatedAt: row.updatedAt.toISOString(),
   }));
 }
@@ -341,9 +398,10 @@ export interface RepoInstallation {
   installationId: number;
   accountLogin: string;
   repositorySelection: "all" | "selected";
+  githubLogin: string | null;
 }
 
-const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const OWNER_PATTERN = LOGIN_PATTERN;
 const REPO_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
 
 export async function findInstallationForRepo(
@@ -376,6 +434,8 @@ export async function findInstallationForRepo(
         installationId: row.installationId,
         accountLogin: row.accountLogin,
         repositorySelection: row.repositorySelection === "all" ? "all" : "selected",
+        githubLogin:
+          row.githubLogin !== null && LOGIN_PATTERN.test(row.githubLogin) ? row.githubLogin : null,
       };
   }
   return null;
@@ -389,6 +449,8 @@ export function connectedInstallations(
       app: await getApp(),
       userId,
     });
-    return found === null ? null : { installationId: found.installationId };
+    return found === null
+      ? null
+      : { installationId: found.installationId, collaborator: found.githubLogin };
   };
 }

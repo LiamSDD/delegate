@@ -102,6 +102,9 @@ export const githubInstallations = pgTable(
     accountType: text("account_type").notNull(),
     repositorySelection: text("repository_selection").notNull(),
     repositories: jsonb("repositories").$type<string[]>().notNull().default([]),
+    repositoriesVerified: boolean("repositories_verified").notNull().default(false),
+    githubUserId: bigint("github_user_id", { mode: "number" }),
+    githubLogin: text("github_login"),
     connectedBy: uuid("connected_by")
       .default(currentUserId)
       .references(() => users.id, { onDelete: "set null" }),
@@ -118,6 +121,10 @@ export const githubInstallations = pgTable(
       sql`${t.repositorySelection} in ('all', 'selected')`,
     ),
     check("github_installations_id_positive", sql`${t.installationId} > 0`),
+    check(
+      "github_installations_login_format",
+      sql`${t.githubLogin} is null or ${t.githubLogin} ~ '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'`,
+    ),
     ...tenantPolicies("github_installations", t.workspaceId, {
       select: readers,
       insert: admins,

@@ -36,6 +36,7 @@ function fakeGitHub(pushes: PushRecord[]): GitHubAppClient {
       Promise.resolve({
         repo,
         defaultBranch: () => Promise.resolve("main"),
+        pushAccess: () => Promise.resolve({ allowed: true, permission: "admin" }),
         openPullRequest: (change) => {
           pushes.push({ repo: `${repo.owner}/${repo.name}`, change });
           return Promise.resolve({

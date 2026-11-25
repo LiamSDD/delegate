@@ -167,7 +167,7 @@ describe("POST /api/ship", () => {
     const api = deps(runner, {
       shipInstallations: (workspaceId) => {
         workspaces.push(workspaceId);
-        return () => Promise.resolve({ installationId: 9 });
+        return () => Promise.resolve({ installationId: 9, collaborator: "acme-dev" });
       },
     });
     const response = await handleCreateShipRun(
@@ -179,6 +179,7 @@ describe("POST /api/ship", () => {
     expect(workspaces).toHaveLength(1);
     await expect(seen[0]?.findInstallation?.("acme", "widgets")).resolves.toEqual({
       installationId: 9,
+      collaborator: "acme-dev",
     });
   });
 });

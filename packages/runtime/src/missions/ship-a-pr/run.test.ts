@@ -73,7 +73,7 @@ interface GitHubCall {
   body: unknown;
 }
 
-function fakeGitHub(installed: boolean) {
+function fakeGitHub(installed: boolean, permission = "write") {
   const calls: GitHubCall[] = [];
   const sha = (char: string) => char.repeat(40);
   const fetchImpl: typeof fetch = (request, init) => {
@@ -91,6 +91,8 @@ function fakeGitHub(installed: boolean) {
       return installed ? reply(200, { id: 7 }) : reply(404, { message: "Not Found" });
     if (key === "POST /app/installations/7/access_tokens") return reply(201, { token: TOKEN });
     if (key === "GET /repos/acme/widgets") return reply(200, { default_branch: "main" });
+    if (key === "GET /repos/acme/widgets/collaborators/octo-visitor/permission")
+      return reply(200, { permission, role_name: permission, user: { login: "octo-visitor" } });
     if (method === "GET" && url.pathname.startsWith("/repos/acme/widgets/git/commits/"))
       return reply(200, { sha: sha("1"), tree: { sha: sha("2") } });
     if (key === "POST /repos/acme/widgets/git/blobs") return reply(201, { sha: sha("3") });
@@ -343,16 +345,48 @@ describe("Ship-a-PR mission", { timeout: 60_000 }, () => {
       github: github.client,
       connected: (owner, repo) => {
         asked.push(`${owner}/${repo}`);
-        return Promise.resolve({ installationId: 7 });
+        return Promise.resolve({ installationId: 7, collaborator: "octo-visitor" });
       },
       decision: { decision: "approved", approvedBy: { type: "guest", id: "visitor" } },
     });
     expect(asked).toEqual(["acme/widgets"]);
     expect(run.requests[0]?.mode).toBe("pull_request");
+    expect(github.calls.map((call) => call.path)).toContain(
+      "/repos/acme/widgets/collaborators/octo-visitor/permission",
+    );
     expect(github.calls.map((call) => call.path)).not.toContain("/repos/acme/widgets/installation");
     expect(github.calls[0]?.path).toBe("/app/installations/7/access_tokens");
     expect(run.result?.status).toBe("opened");
     expect(JSON.stringify(run.events)).not.toContain(TOKEN);
+  });
+
+  it("gives a connected visitor a patch when the connecting GitHub user cannot push to the repository", async () => {
+    const github = fakeGitHub(false, "read");
+    const run = await ship({
+      audience: "public-demo",
+      github: github.client,
+      connected: () => Promise.resolve({ installationId: 7, collaborator: "octo-visitor" }),
+      decision: { decision: "approved" },
+    });
+    expect(run.requests[0]?.mode).toBe("patch");
+    expect(run.requests[0]?.reason).toContain(
+      "@octo-visitor (who connected GitHub) does not have push access",
+    );
+    expect(writes(github.calls).filter((call) => call.path.startsWith("/repos/"))).toEqual([]);
+    expect(run.result?.status).toBe("patch_ready");
+  });
+
+  it("gives a connected visitor a patch when the installation has no recorded GitHub user", async () => {
+    const github = fakeGitHub(false);
+    const run = await ship({
+      audience: "public-demo",
+      github: github.client,
+      connected: () => Promise.resolve({ installationId: 7, collaborator: null }),
+      decision: { decision: "approved" },
+    });
+    expect(github.calls).toEqual([]);
+    expect(run.requests[0]?.mode).toBe("patch");
+    expect(run.requests[0]?.reason).toContain("reconnect GitHub");
   });
 
   it("gives a connected visitor a patch when their installation does not cover the repository", async () => {

@@ -78,6 +78,9 @@ const CommitSchema = z
   .object({ sha: z.string(), tree: z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/) }) })
   .loose();
 const RepositorySchema = z.object({ default_branch: z.string().min(1) }).loose();
+const CollaboratorPermissionSchema = z
+  .object({ permission: z.string().min(1).max(40), role_name: z.string().max(100).optional() })
+  .loose();
 const PullSchema = z.object({ number: z.number().int().positive(), html_url: z.url() }).loose();
 
 export type FileMode = "100644" | "100755";
@@ -104,9 +107,18 @@ export interface PullRequestResult {
   commitSha: string;
 }
 
+export interface PushAccess {
+  allowed: boolean;
+  permission: string;
+}
+
+export const GITHUB_LOGIN_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const PUSH_PERMISSIONS: ReadonlySet<string> = new Set(["admin", "maintain", "write"]);
+
 export interface RepoSession {
   readonly repo: RepoRef;
   defaultBranch(): Promise<string>;
+  pushAccess(login: string): Promise<PushAccess>;
   openPullRequest(change: PullRequestChange): Promise<PullRequestResult>;
 }
 
@@ -223,6 +235,24 @@ export function createGitHubAppClient(options: GitHubAppClientOptions): GitHubAp
         async defaultBranch() {
           const repository = must(await call("repository", "GET", base, token, RepositorySchema));
           return repository.default_branch;
+        },
+        async pushAccess(login) {
+          if (!GITHUB_LOGIN_PATTERN.test(login)) return { allowed: false, permission: "none" };
+          const found = await call(
+            "collaborator permission",
+            "GET",
+            `${base}/collaborators/${encodeURIComponent(login)}/permission`,
+            token,
+            CollaboratorPermissionSchema,
+            undefined,
+            true,
+          );
+          if (found === null) return { allowed: false, permission: "none" };
+          const role = found.role_name ?? found.permission;
+          return {
+            allowed: PUSH_PERMISSIONS.has(found.permission) || PUSH_PERMISSIONS.has(role),
+            permission: role,
+          };
         },
         async openPullRequest(change) {
           const commit = must(

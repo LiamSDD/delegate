@@ -38,7 +38,11 @@ interface FakeGithub {
   calls: string[];
 }
 
-function fakeGithub(installations: unknown[], repositories: string[] = []): FakeGithub {
+function fakeGithub(
+  installations: unknown[],
+  repositories: string[] = [],
+  readOnly: string[] = [],
+): FakeGithub {
   const calls: string[] = [];
   const impl: typeof fetch = (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -54,13 +58,24 @@ function fakeGithub(installations: unknown[], repositories: string[] = []): Fake
           : Response.json({ error: "bad_verification_code" }),
       );
     }
+    if (url === "https://api.github.com/user")
+      return Promise.resolve(Response.json({ id: 4242, login: "octo-admin" }));
     if (url.startsWith("https://api.github.com/user/installations?"))
       return Promise.resolve(Response.json({ total_count: installations.length, installations }));
     if (/\/user\/installations\/\d+\/repositories/.test(url))
       return Promise.resolve(
         Response.json({
-          total_count: repositories.length,
-          repositories: repositories.map((full_name) => ({ full_name })),
+          total_count: repositories.length + readOnly.length,
+          repositories: [
+            ...repositories.map((full_name) => ({
+              full_name,
+              permissions: { admin: false, maintain: false, push: true, pull: true },
+            })),
+            ...readOnly.map((full_name) => ({
+              full_name,
+              permissions: { admin: false, maintain: false, push: false, pull: true },
+            })),
+          ],
         }),
       );
     return Promise.resolve(new Response("not found", { status: 404 }));
@@ -182,7 +197,7 @@ describe("GitHub connect flow", () => {
 
   it("stores an installation the authorizing user can access, without keeping the user token", async () => {
     const session = await guest();
-    const github = fakeGithub([mine], ["Octo-Org/api", "Octo-Org/web"]);
+    const github = fakeGithub([mine], ["Octo-Org/api", "Octo-Org/web"], ["Octo-Org/docs"]);
     const { state, nonce } = issueGithubState(session, secret, { installationId: 101 });
     const response = await handleGithubCallback(
       callback({ code: "good", state }, cookieHeader(session, nonce)),
@@ -198,6 +213,9 @@ describe("GitHub connect flow", () => {
       accountLogin: "Octo-Org",
       repositorySelection: "selected",
       repositories: ["Octo-Org/api", "Octo-Org/web"],
+      repositoriesVerified: true,
+      githubUserId: 4242,
+      githubLogin: "octo-admin",
     });
     expect(JSON.stringify(stored)).not.toContain("ghu_user");
 
@@ -206,7 +224,11 @@ describe("GitHub connect flow", () => {
       installationId: 101,
       accountLogin: "Octo-Org",
       repositorySelection: "selected",
+      githubLogin: "octo-admin",
     });
+    expect(await findInstallationForRepo(session.workspaceId, "Octo-Org", "docs", scope)).toBe(
+      null,
+    );
     expect(await findInstallationForRepo(session.workspaceId, "Octo-Org", "secret", scope)).toBe(
       null,
     );
@@ -218,6 +240,31 @@ describe("GitHub connect flow", () => {
         userId: stranger.userId,
       }),
     ).toBeNull();
+  });
+
+  it("records an all-repositories installation as unverified so pushes are checked at ship time", async () => {
+    const session = await guest();
+    const github = fakeGithub([{ ...mine, id: 102, repository_selection: "all" }]);
+    const { state, nonce } = issueGithubState(session, secret, { installationId: 102 });
+    await handleGithubCallback(
+      callback({ code: "good", state }, cookieHeader(session, nonce)),
+      deps(github),
+    );
+    const [stored] = await listInstallations(app, session);
+    expect(stored).toMatchObject({
+      installationId: 102,
+      repositorySelection: "all",
+      repositories: [],
+      repositoriesVerified: false,
+      githubLogin: "octo-admin",
+    });
+    const scope = { app, userId: session.userId };
+    expect(await findInstallationForRepo(session.workspaceId, "Octo-Org", "any", scope)).toEqual({
+      installationId: 102,
+      accountLogin: "Octo-Org",
+      repositorySelection: "all",
+      githubLogin: "octo-admin",
+    });
   });
 
   it("refuses an installation id the user cannot access", async () => {

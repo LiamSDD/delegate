@@ -15,6 +15,7 @@ import { FatalStepError, type StepExecutor, type SubAgentResult } from "../../ag
 import { type ExistingArtifact } from "../../durable/checkpoints";
 import { type Actor, type ShipMode } from "../../events";
 import {
+  GITHUB_LOGIN_PATTERN,
   GitHubApiError,
   parseGitHubRepoUrl,
   repoFullName,
@@ -109,9 +110,14 @@ export interface ShipAPrDependencies {
 export type FindInstallation = (
   owner: string,
   repo: string,
-) => Promise<{ installationId: number } | null>;
+) => Promise<{ installationId: number; collaborator: string | null } | null>;
 
-const InstallationSchema = z.object({ installationId: z.number().int().positive() }).nullable();
+const InstallationSchema = z
+  .object({
+    installationId: z.number().int().positive(),
+    collaborator: z.string().regex(GITHUB_LOGIN_PATTERN).nullable(),
+  })
+  .nullable();
 
 function cut(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -532,16 +538,21 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
     },
   };
 
-  const findInstallation = async (): Promise<{
-    installationId: number | null;
-    source: "connected" | "owner";
-  } | null> => {
+  const findInstallation = async (): Promise<
+    | { installationId: number; source: "connected"; collaborator: string | null }
+    | { installationId: null; source: "owner" }
+    | null
+  > => {
     if (deps.findInstallation !== undefined) {
       const found = InstallationSchema.safeParse(
         await deps.findInstallation(repoRef.owner, repoRef.name),
       );
       if (found.success && found.data !== null)
-        return { installationId: found.data.installationId, source: "connected" };
+        return {
+          installationId: found.data.installationId,
+          source: "connected",
+          collaborator: found.data.collaborator,
+        };
     }
     if (ctx.audience === "owner") return { installationId: null, source: "owner" };
     return null;
@@ -571,6 +582,10 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
       );
     if (deps.github === null)
       return patch("No GitHub App is configured (GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY).");
+    if (installation.source === "connected" && installation.collaborator === null)
+      return patch(
+        "The GitHub connection does not record which GitHub user connected it, so push access cannot be checked; reconnect GitHub to open pull requests. The change is offered as a patch.",
+      );
     try {
       const session = await deps.github.sessionFor(
         repoRef,
@@ -580,6 +595,13 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
         return patch(
           `The Delegate GitHub App is not installed on ${repo}, so the change is offered as a patch.`,
         );
+      if (installation.source === "connected" && installation.collaborator !== null) {
+        const access = await session.pushAccess(installation.collaborator);
+        if (!access.allowed)
+          return patch(
+            `@${installation.collaborator} (who connected GitHub) does not have push access to ${repo} (role: ${cut(access.permission, 40)}), so the change is offered as a patch.`,
+          );
+      }
       return {
         mode: "pull_request",
         reason: `Opening a pull request on ${repo} needs your approval.`,

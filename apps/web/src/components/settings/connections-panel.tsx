@@ -535,8 +535,13 @@ export function ConnectionsPanel({
                   <p className="font-mono text-sm text-text">{installation.accountLogin}</p>
                   <p className="font-mono text-2xs text-text-subtle">
                     {installation.repositorySelection === "all"
-                      ? "all repositories"
-                      : `${installation.repositories.length} selected: ${installation.repositories.slice(0, 4).join(", ")}${installation.repositories.length > 4 ? "…" : ""}`}
+                      ? "all repositories, push access checked per repository at ship time"
+                      : `${installation.repositories.length} with push access: ${installation.repositories.slice(0, 4).join(", ")}${installation.repositories.length > 4 ? "…" : ""}`}
+                  </p>
+                  <p className="font-mono text-2xs text-text-subtle">
+                    {installation.githubLogin === null
+                      ? "connected before the GitHub user was recorded; reconnect to open pull requests"
+                      : `connected by @${installation.githubLogin}`}
                   </p>
                 </div>
                 <button
