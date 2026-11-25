@@ -282,7 +282,7 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 - [x] Policy engine fully enforced, audit log, red-team suite in the local gate, PII redaction
 - [x] Deterministic replay, fork-from-step, run compare
 - [x] `/evals` with CIs, Pareto chart and judge calibration
-- [ ] *Done when:* attack success rate is 0% and a fork-and-diff starts in under 10 s
+- [x] *Done when:* attack success rate is 0% and a fork-and-diff starts in under 10 s (live: ASR 0/56; fork first new event 0.2 s on delegate-beryl.vercel.app)
 
 ### M5 · Engineering missions
 - [ ] Repo X-ray
