@@ -352,8 +352,8 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
       "company-xray.researcher@1",
       "company-xray.synthesis@1",
       "planner@2",
-      "critic@1",
-      "editor@1",
+      "critic@2",
+      "editor@2",
     ]);
     const techStack = brief.sections.techStack;
     expect(

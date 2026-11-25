@@ -5,7 +5,7 @@ import { scriptedProvider, testRun, textTurn } from "../testing/fakes";
 import { type ModelRequest } from "../providers/types";
 import { claimVerdict, runCritic, type CriticClaim } from "./critic";
 
-const prompts = { critic: loadPrompt("critic.v1.md"), editor: loadPrompt("editor.v1.md") };
+const prompts = { critic: loadPrompt("critic.v2.md"), editor: loadPrompt("editor.v2.md") };
 
 const evidence = new Map<string, string[]>([
   ["S1", ["Acme ships 1,200 robots a year to grocery warehouses."]],
@@ -132,6 +132,8 @@ describe("runCritic", () => {
       fixLoops: 2,
       citationAccuracy: 0.5,
       draftCitationAccuracy: 0.25,
+      publishedAccuracy: 1,
+      split: 0,
     });
     const flags = events.filter((event) => event.type === "critic.flagged");
     expect(flags.map((event) => event.payload.category)).toEqual([
@@ -144,7 +146,7 @@ describe("runCritic", () => {
     for (const request of provider.requests) expect(request.tools).toBeUndefined();
   });
 
-  it("keeps claims that stay weakly supported, marks them weak and only removes contradicted ones", async () => {
+  it("removes claims that stay only partly supported after a fix, unless asked to keep them weak", async () => {
     const provider = scriptedProvider("fake", (request) => {
       const user = userOf(request);
       if (request.system.includes("You are the editor"))
@@ -164,23 +166,24 @@ describe("runCritic", () => {
       }));
       return textTurn(JSON.stringify({ results }));
     });
+    const claims = [
+      { id: "weak1", text: "Acme probably ships robots weekly.", citations: ["S1"] },
+      { id: "bad1", text: "Acme ships zero robots.", citations: ["S1"] },
+    ];
+    const deps = {
+      stepId: "critic",
+      agent: { agentId: "critic_1", say: () => Promise.resolve() },
+      spawnEditor: () => Promise.resolve({ agentId: "editor_1", say: () => Promise.resolve() }),
+      prompts,
+      deliverable: "test",
+      evidence,
+      canFix: () => true,
+    };
+    const strict = await runCritic(testRun({ provider }).ctx, claims, deps);
+    expect(strict.kept.size).toBe(0);
+    expect(strict.report).toMatchObject({ weak: 0, removed: 2, publishedAccuracy: null });
     const { ctx, events } = testRun({ provider });
-    const outcome = await runCritic(
-      ctx,
-      [
-        { id: "weak1", text: "Acme probably ships robots weekly.", citations: ["S1"] },
-        { id: "bad1", text: "Acme ships zero robots.", citations: ["S1"] },
-      ],
-      {
-        stepId: "critic",
-        agent: { agentId: "critic_1", say: () => Promise.resolve() },
-        spawnEditor: () => Promise.resolve({ agentId: "editor_1", say: () => Promise.resolve() }),
-        prompts,
-        deliverable: "test",
-        evidence,
-        canFix: () => true,
-      },
-    );
+    const outcome = await runCritic(ctx, claims, { ...deps, keepPartialAfterFix: true });
     expect(outcome.kept.get("weak1")).toMatchObject({ support: "weak", text: "weak1 narrowed" });
     expect(outcome.kept.has("bad1")).toBe(false);
     expect(outcome.report).toMatchObject({ weak: 1, removed: 1, citationAccuracy: 0 });

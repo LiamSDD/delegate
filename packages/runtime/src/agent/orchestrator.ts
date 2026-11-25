@@ -174,6 +174,7 @@ export async function orchestrate(
           confidence: result.confidence,
           artifactIds: result.artifacts,
           ...(result.critic === undefined ? {} : { critic: result.critic }),
+          ...(result.research === undefined ? {} : { research: result.research }),
           checkpoint: result,
         },
       });

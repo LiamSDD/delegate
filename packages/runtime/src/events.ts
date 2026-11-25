@@ -169,6 +169,15 @@ export const PLAN_SOURCES = ["planner", "default", "reviewer"] as const;
 export const PlanSourceSchema = z.enum(PLAN_SOURCES);
 export type PlanSource = z.infer<typeof PlanSourceSchema>;
 
+export const SpecificityReportSchema = z.object({
+  score: z.number().min(0).max(1).nullable(),
+  specific: tokenCount,
+  generic: tokenCount,
+  movedToContext: tokenCount,
+  dropped: tokenCount,
+});
+export type SpecificityReport = z.infer<typeof SpecificityReportSchema>;
+
 export const CriticReportSchema = z.object({
   claimsChecked: tokenCount,
   supported: tokenCount,
@@ -179,8 +188,41 @@ export const CriticReportSchema = z.object({
   fixLoops: tokenCount,
   citationAccuracy: z.number().min(0).max(1).nullable(),
   draftCitationAccuracy: z.number().min(0).max(1).nullable(),
+  publishedAccuracy: z.number().min(0).max(1).nullable().optional(),
+  split: tokenCount.optional(),
+  genericRemoved: tokenCount.optional(),
+  specificity: SpecificityReportSchema.optional(),
 });
 export type CriticReport = z.infer<typeof CriticReportSchema>;
+
+export const RESEARCH_STOP_REASONS = [
+  "coverage_met",
+  "deadline",
+  "max_rounds",
+  "no_candidates",
+  "no_new_evidence",
+  "no_gaps",
+] as const;
+export const ResearchStopReasonSchema = z.enum(RESEARCH_STOP_REASONS);
+
+export const ResearchRoundSchema = z.object({
+  round: z.number().int().positive(),
+  thin: z.array(z.string().min(1).max(120)).max(20),
+  targets: z.array(z.string().min(1).max(300)).max(12),
+  selectedBy: z.enum(["planner", "rule"]),
+  fetched: tokenCount,
+  newFacts: tokenCount,
+  coverageBefore: z.number().min(0).max(1),
+  coverageAfter: z.number().min(0).max(1),
+});
+export type ResearchRound = z.infer<typeof ResearchRoundSchema>;
+
+export const ResearchReportSchema = z.object({
+  rounds: z.array(ResearchRoundSchema).max(10),
+  stopReason: ResearchStopReasonSchema,
+  coverage: z.number().min(0).max(1),
+});
+export type ResearchReport = z.infer<typeof ResearchReportSchema>;
 
 export const SANDBOX_COMMAND_PURPOSES = [
   "setup",
@@ -427,6 +469,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       confidence: z.number().min(0).max(1).optional(),
       artifactIds: z.array(id),
       critic: CriticReportSchema.optional(),
+      research: ResearchReportSchema.optional(),
       checkpoint: z.unknown().optional(),
     }),
   ),
