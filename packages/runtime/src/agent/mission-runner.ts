@@ -1,7 +1,13 @@
 import { CAPABILITIES } from "@delegate/policy";
 
 import { BudgetExceededError } from "../budget";
-import { diffPlans, type Actor, type PlanStep, type PlaybookApplied } from "../events";
+import {
+  diffPlans,
+  type Actor,
+  type PlanPhase,
+  type PlanStep,
+  type PlaybookApplied,
+} from "../events";
 import { plannerGuidance, stepGuidance } from "../learning/playbook";
 import { PlanApprovalDecisionSchema, type AwaitPlanApproval } from "../plan-approval";
 import { type PromptFile } from "../prompts";
@@ -12,9 +18,16 @@ import {
   redact,
   type OrchestrationResult,
   type OrchestratorResume,
+  type RevisionGate,
 } from "./orchestrator";
 import { chainHead, projectedCallMs, type MissionClock } from "./pacing";
-import { checkPlanSteps, proposePlan, revisePlan, type PlannerMission } from "./planner";
+import {
+  checkPlanSteps,
+  proposePlan,
+  revisePlan,
+  revisionApproval,
+  type PlannerMission,
+} from "./planner";
 import { StructuredOutputError } from "./structured";
 import { FatalStepError } from "./subagent";
 
@@ -43,6 +56,7 @@ export interface PlannedMission {
 
 export interface ResumePoint extends OrchestratorResume {
   steps: PlanStep[];
+  phases?: PlanPhase[];
   version: number;
   approved: boolean;
 }
@@ -122,6 +136,7 @@ export async function runPlannedMission(
   try {
     let version = 1;
     let steps: PlanStep[];
+    let phases: PlanPhase[] | undefined;
     const resume = options.resume;
     if (resume === undefined) {
       if (playbook !== undefined)
@@ -138,6 +153,7 @@ export async function runPlannedMission(
         ...(planner.reason === undefined ? {} : { skipReason: planner.reason }),
       });
       steps = proposed.steps;
+      phases = proposed.phases;
       const note =
         proposed.source === "default"
           ? `Using the mission's default plan. ${proposed.fallbackReason ?? ""}`.trim()
@@ -148,6 +164,7 @@ export async function runPlannedMission(
         payload: {
           version,
           steps,
+          ...(phases === undefined ? {} : { phases }),
           source: proposed.source,
           ...(note === undefined ? {} : { rationale: note.slice(0, 2000) }),
         },
@@ -174,6 +191,7 @@ export async function runPlannedMission(
     } else {
       version = resume.version;
       steps = resume.steps;
+      phases = resume.phases;
     }
 
     if (resume?.approved === true) {
@@ -193,7 +211,7 @@ export async function runPlannedMission(
           message: redact(decision.reason ?? "The plan was rejected by the reviewer"),
         });
       if (decision.steps !== undefined) {
-        const checked = checkPlanSteps(decision.steps, mission.planner);
+        const checked = checkPlanSteps(decision.steps, mission.planner, phases);
         if (!checked.ok)
           return await fail({ code: "invalid_plan", message: redact(checked.issues.join("; ")) });
         const diff = diffPlans(steps, checked.steps);
@@ -206,6 +224,7 @@ export async function runPlannedMission(
             payload: {
               version,
               steps,
+              ...(phases === undefined ? {} : { phases }),
               reason: "Edited by the reviewer before approval",
               diff,
               source: "reviewer",
@@ -220,9 +239,69 @@ export async function runPlannedMission(
       });
     }
 
+    let approvedSteps: readonly PlanStep[] = steps;
+    const approver = options.approver ?? DEFAULT_PLAN_REVIEWER;
+    const gate: RevisionGate = {
+      requiresApproval: (revision) => revisionApproval(approvedSteps, revision.steps).required,
+      approve: async (revision) => {
+        const needed = revisionApproval(approvedSteps, revision.steps);
+        const what = [
+          ...(needed.addedCapabilities.length === 0
+            ? []
+            : [`adds capabilities ${needed.addedCapabilities.join(", ")}`]),
+          ...(needed.sideEffectSteps.length === 0
+            ? []
+            : [`gives side effects to ${needed.sideEffectSteps.join(", ")}`]),
+        ].join(" and ");
+        if (options.awaitPlanApproval === undefined) {
+          await emit({
+            runId,
+            type: "plan.approved",
+            payload: {
+              version: revision.version,
+              approvedBy: AUTO_APPROVER,
+              reason: `${AUTO_APPROVAL_REASON} The revision ${what}.`.slice(0, 900),
+            },
+          });
+          approvedSteps = revision.steps;
+          return true;
+        }
+        const raw = await options.awaitPlanApproval(
+          { version: revision.version, steps: [...revision.steps] },
+          ctx.signal,
+        );
+        const decision = PlanApprovalDecisionSchema.parse(raw);
+        if (decision.decision === "rejected") return false;
+        await emit({
+          runId,
+          type: "plan.approved",
+          payload: {
+            version: revision.version,
+            approvedBy: approver,
+            reason: `Re-approved: the revision ${what}.`.slice(0, 900),
+          },
+        });
+        approvedSteps = revision.steps;
+        return true;
+      },
+      restored: async (restoredVersion, rejected) => {
+        await emit({
+          runId,
+          type: "plan.approved",
+          payload: {
+            version: restoredVersion,
+            approvedBy: approver,
+            reason: `Revision ${rejected} was not approved; this restores the plan approved earlier.`,
+          },
+        });
+      },
+    };
+
     mission.clock.restart();
     const outcome = await orchestrate(ctx, {
       plan: steps,
+      ...(phases === undefined ? {} : { phases }),
+      approveRevision: gate,
       version,
       executors: mission.planner.executors,
       ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),

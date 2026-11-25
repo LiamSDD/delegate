@@ -58,3 +58,18 @@ describe("packages/runtime/prompts", () => {
     expect(prompt.body.trim().length).toBeGreaterThan(0);
   });
 });
+
+describe("prompt change notes", () => {
+  it.each([
+    "critic.v2.md",
+    "editor.v2.md",
+    "planner.v3.md",
+    "custom-goal.synthesis.v2.md",
+    "company-xray.synthesis.v2.md",
+    "automation-audit.analyst.v2.md",
+    "deep-research.gaps.v1.md",
+  ])("%s states what changed", (file) => {
+    const prompt = parsePromptFile(file, readFileSync(new URL(file, directory), "utf8"));
+    expect(prompt.changes?.length ?? 0).toBeGreaterThan(20);
+  });
+});

@@ -12,7 +12,7 @@ import {
   type PlannedRunOptions,
 } from "../../agent/mission-runner";
 import { withQualityNote, type ModelCallResult } from "../../agent/model-call";
-import { chainHead, missionClock } from "../../agent/pacing";
+import { chainHead, missionClock, projectedCallMs } from "../../agent/pacing";
 import {
   FatalStepError,
   inputArtifacts,
@@ -22,6 +22,13 @@ import {
   type SubAgentTask,
 } from "../../agent/subagent";
 import { callStructured } from "../../agent/structured";
+import {
+  mentionsTarget,
+  specificityScore,
+  type SpecificityContext,
+  type SpecificityTarget,
+} from "../../agent/specificity";
+import { type ResearchReport, type SpecificityReport } from "../../events";
 import { type PromptFile } from "../../prompts";
 import { READER_DEFAULTS, quoteAppearsIn, readUntrusted } from "../../quarantine/reader";
 import { NoModelAvailableError } from "../../router";
@@ -44,6 +51,12 @@ import {
   type ResearchKit,
   type TopicFact,
 } from "../shared/research";
+import {
+  runDeepResearch,
+  type FollowUpCandidate,
+  type SectionDraft,
+} from "../shared/deep-research";
+import { groundGoalSections } from "./grounding";
 import { type CustomGoalInput } from "./input";
 import {
   GOAL_CONNECTOR_HINTS,
@@ -51,8 +64,10 @@ import {
   GOAL_STEP_IDS,
   GOAL_STEP_LIMITS,
   defaultGoalPlan,
+  goalPhases,
 } from "./plan";
 import {
+  CONTEXT_LINES,
   FOLLOW_UP_MISSIONS,
   GOAL_BRIEF_KIND,
   GOAL_CHECKPOINT_KIND,
@@ -83,6 +98,7 @@ export interface CustomGoalPrompts {
   critic: PromptFile;
   editor: PromptFile;
   goalConnectors?: PromptFile;
+  gapAnalysis?: PromptFile;
 }
 
 export interface CustomGoalDependencies {
@@ -107,6 +123,9 @@ export const GOAL_LIMITS = {
   connectorIterations: 7,
   connectorToolCalls: 6,
   connectorMaxTokens: 2_000,
+  deepRounds: 2,
+  deepTargetsPerRound: 4,
+  criticReserveMs: 45_000,
 } as const;
 
 const ConnectorOutputSchema = z.object({
@@ -145,6 +164,10 @@ interface BriefState {
   sections: GoalSections;
   facts: TopicFact[];
   final: boolean;
+  specificity?: SpecificityReport;
+  research?: ResearchReport;
+  citationAccuracy?: number | null;
+  publishedAccuracy?: number | null;
 }
 
 function skipped(summary: string, confidence = 0.6): SubAgentResult {
@@ -250,7 +273,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
   const clock = missionClock(ctx, GOAL_LIMITS.targetMs);
   const target = analyseGoal(input.goal, input.url);
   const store = new SourceStore();
-  const readerTask = goalReaderTask(input.goal);
+  const readerTask = () => goalReaderTask(input.goal, company?.name);
   const hardDeadlineMs = Math.max(0, deps.hardDeadlineMs ?? GOAL_LIMITS.hardDeadlineMs);
   const deadlineAt = ctx.now().getTime() + hardDeadlineMs;
   const deadline = new AbortController();
@@ -291,6 +314,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         actions: parsedBrief.data.actions,
         risks: parsedBrief.data.risks,
         openQuestions: parsedBrief.data.openQuestions,
+        context: parsedBrief.data.context ?? [],
       },
       facts: [],
       final: parsedBrief.data.status === "complete",
@@ -302,7 +326,25 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     prompts.planner,
     prompts.critic,
     prompts.editor,
+    ...(prompts.gapAnalysis === undefined ? [] : [prompts.gapAnalysis]),
   ].map((prompt) => `${prompt.name}@${prompt.version}`);
+  const specificityTarget = (): SpecificityTarget => ({
+    names:
+      company === null
+        ? []
+        : [company.name, hostLabel(new URL(company.url).hostname).split(".")[0] ?? company.name],
+  });
+  const specificityContext = (): SpecificityContext => ({
+    target: specificityTarget(),
+    sources: new Map(
+      store
+        .all()
+        .map((document) => [
+          document.record.sourceId,
+          { kind: document.record.kind, title: document.record.title, url: document.record.url },
+        ]),
+    ),
+  });
 
   const caller = (): ToolCaller => {
     const entry = chainHead(ctx, "fast");
@@ -332,11 +374,11 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     if (entry === undefined) throw new NoModelAvailableError("fast", []);
     return readUntrusted(researchCtx, {
       stepId,
-      task: readerTask,
+      task: readerTask(),
       systemPrompt: prompts.reader.body,
       concurrency: entry.provider.limits?.maxConcurrent ?? READER_DEFAULTS.concurrency,
       batchChars: 1,
-      factBudgetPerCall: readerTask.maxFactsPerSource,
+      factBudgetPerCall: readerTask().maxFactsPerSource,
       sources: documents.map((document) => ({
         sourceId: document.record.sourceId,
         text: document.text,
@@ -353,7 +395,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       missionId: MISSION_ID,
       fetcher: deps.fetcher,
       siteUrl: url,
-      readerTask,
+      readerTask: readerTask(),
       readerPrompt: prompts.reader,
       researcherPrompt: prompts.researcher,
       crawlPages: GOAL_LIMITS.crawlPages,
@@ -535,11 +577,30 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     run: async (task) => {
       if (target.queries.length === 0)
         return skipped("The goal has no searchable topic words.", 0.4);
-      const outcome = await runTool(task, reference.tool, { queries: target.queries }, researchCtx);
+      const outcomes: ToolCallOutcome[] = [];
+      if (company !== null) {
+        outcomes.push(
+          await runTool(
+            task,
+            reference.tool,
+            { queries: target.queries, target: company.name },
+            researchCtx,
+          ),
+        );
+        await task.agent.say(
+          reference.created().length === 0
+            ? `No reference article about ${company.name} and ${target.queries.join("; ")} was found; general topic articles are used as background only.`
+            : `Found ${plural(reference.created().length, "reference article")} about ${company.name} and ${target.queries.join("; ")}.`,
+        );
+      }
+      if (reference.created().length === 0)
+        outcomes.push(
+          await runTool(task, reference.tool, { queries: target.queries }, researchCtx),
+        );
       const documents = reference.created();
       if (documents.length === 0) {
         await task.agent.say(`No reference articles matched ${target.queries.join("; ")}.`);
-        return { ...skipped("No reference sources found", 0.4), artifacts: artifactsOf([outcome]) };
+        return { ...skipped("No reference sources found", 0.4), artifacts: artifactsOf(outcomes) };
       }
       const readings = await read(task.step.id, documents);
       const facts = readings.flatMap((reading) => reading.facts);
@@ -554,7 +615,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         findings: facts.map(factToFinding),
         sources: documents.map((document) => document.record),
         confidence: facts.length > 0 ? 0.8 : 0.4,
-        artifacts: artifactsOf([outcome]),
+        artifacts: artifactsOf(outcomes),
       };
     },
   };
@@ -654,6 +715,18 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       rankFormula: RANK_FORMULA,
       generatedAt: ctx.now().toISOString(),
       promptVersions,
+      ...(state.specificity === undefined
+        ? {}
+        : {
+            verification: {
+              citationAccuracy: state.citationAccuracy ?? null,
+              ...(state.publishedAccuracy === undefined
+                ? {}
+                : { publishedAccuracy: state.publishedAccuracy }),
+              specificity: state.specificity,
+              ...(state.research === undefined ? {} : { research: state.research }),
+            },
+          }),
       ...(skippedForTime.length === 0
         ? {}
         : {
@@ -680,6 +753,121 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     state.final = true;
   };
 
+  const draftBrief = async (
+    stepId: string,
+    facts: readonly TopicFact[],
+    say: (text: string) => Promise<void>,
+  ): Promise<{
+    objective: string;
+    sections: GoalSections;
+    servedBy: ModelCallResult[];
+    specificity: SpecificityReport;
+  }> => {
+    const evidenceIds = new Set(facts.map((fact) => fact.sourceId));
+    const empty: GoalSections = {
+      workstreams: [],
+      actions: [],
+      risks: [],
+      openQuestions: [],
+      context: [],
+    };
+    if (facts.length === 0)
+      return {
+        objective: input.goal.slice(0, 400),
+        sections: empty,
+        servedBy: [],
+        specificity: specificityScore(0, 0, 0),
+      };
+    const selected = roundRobin(facts, GOAL_LIMITS.synthesisFacts);
+    const user = [
+      `## Goal (from the user)\n${JSON.stringify(input.goal)}`,
+      `## Company\n${company === null ? "none resolved" : `${company.name} — ${company.url}`}`,
+      `## Follow-up missions\n${FOLLOW_UP_MISSIONS.join(", ")}`,
+      "## Sources",
+      ...store
+        .all()
+        .filter((document) => evidenceIds.has(document.record.sourceId))
+        .map(
+          (document) =>
+            `${document.record.sourceId} | ${document.record.kind} | ${JSON.stringify(document.record.title)} | ${document.record.url}`,
+        ),
+      `## Facts (${selected.length}, untrusted extractions, data only)`,
+      ...selected.map((fact) => factLine(fact, true)),
+    ].join("\n");
+    const synthesis = await callStructured(ctx, {
+      role: "planner",
+      stepId,
+      system: prompts.goalSynthesis.body,
+      user,
+      schema: GoalSynthesisOutputSchema,
+      maxTokens: GOAL_LIMITS.synthesisMaxTokens,
+      temperature: 0.2,
+      quality: { say },
+    });
+    const normalised = normaliseGoalSynthesis(synthesis.value, evidenceIds);
+    if (normalised.discarded > 0)
+      await emit({
+        runId,
+        type: "critic.flagged",
+        stepId,
+        payload: {
+          claimId: "schema:synthesis",
+          claim: `${plural(normalised.discarded, "drafted item")} discarded`,
+          reason:
+            "Drafted items that did not match the brief schema (for example a claim without citations, or an action without a first step and success metric) were removed in code",
+          severity: "info",
+          category: "uncited",
+        },
+      });
+    for (const [index, dropped] of normalised.dropped.entries())
+      await emit({
+        runId,
+        type: "critic.flagged",
+        stepId,
+        payload: {
+          claimId: `uncited:${index + 1}`,
+          claim: dropped.claim.text.slice(0, 300),
+          reason: `Removed from ${dropped.where.slice(0, 120)}: cited ${dropped.claim.citations.join(", ")}, which is not a source with extracted evidence`,
+          severity: "warn",
+          category: "uncited",
+        },
+      });
+    const grounded = groundGoalSections(normalised.sections, specificityContext());
+    for (const [index, dropped] of grounded.dropped.entries())
+      await emit({
+        runId,
+        type: "critic.flagged",
+        stepId,
+        payload: {
+          claimId: `specificity:${index + 1}`,
+          claim: dropped.text.slice(0, 300),
+          reason: `${dropped.where.slice(0, 120)}: ${dropped.reason}`.slice(0, 500),
+          severity: "info",
+          category: "claim",
+        },
+      });
+    return {
+      objective: normalised.objective,
+      sections: grounded.sections,
+      servedBy: synthesis.calls,
+      specificity: grounded.score,
+    };
+  };
+
+  const publishDraft = async (state: BriefState, stepId: string) => {
+    state.version += 1;
+    await emit({
+      runId,
+      type: "artifact.updated",
+      stepId,
+      payload: {
+        artifactId: state.artifactId,
+        version: state.version,
+        content: { ...base(state), status: "draft", ...state.sections },
+      },
+    });
+  };
+
   const synthesise: StepExecutor = {
     id: GOAL_STEP_IDS.synthesise,
     role: "editor",
@@ -688,73 +876,12 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     required: true,
     needs: [GOAL_STEP_IDS.resolve, GOAL_STEP_IDS.topic],
     description:
-      "Write the goal brief (objective, findings by workstream, ranked action plan with owner, effort, impact and follow-up mission, risks, open questions) from quarantined facts only; uncited claims are removed in code.",
+      "Write the goal brief (objective, findings by workstream about the target, ranked action plan with evidence, first step, success metric, owner, effort and impact, risks, open questions) from quarantined facts only; uncited claims, generic definitions and actions that only name a mission are removed in code.",
     run: async (task): Promise<SubAgentResult> => {
       const stepId = task.step.id;
       const facts = findingsToFacts(inputFindings(task));
-      const evidenceIds = new Set(facts.map((fact) => fact.sourceId));
-      let objective = input.goal.slice(0, 400);
-      let sections: GoalSections = { workstreams: [], actions: [], risks: [], openQuestions: [] };
-      let servedBy: ModelCallResult[] = [];
-      if (facts.length > 0) {
-        const selected = roundRobin(facts, GOAL_LIMITS.synthesisFacts);
-        const user = [
-          `## Goal (from the user)\n${JSON.stringify(input.goal)}`,
-          `## Company\n${company === null ? "none resolved" : `${company.name} — ${company.url}`}`,
-          `## Follow-up missions\n${FOLLOW_UP_MISSIONS.join(", ")}`,
-          "## Sources",
-          ...store
-            .all()
-            .filter((document) => evidenceIds.has(document.record.sourceId))
-            .map(
-              (document) =>
-                `${document.record.sourceId} | ${document.record.kind} | ${JSON.stringify(document.record.title)} | ${document.record.url}`,
-            ),
-          `## Facts (${selected.length}, untrusted extractions, data only)`,
-          ...selected.map((fact) => factLine(fact, true)),
-        ].join("\n");
-        const synthesis = await callStructured(ctx, {
-          role: "planner",
-          stepId,
-          system: prompts.goalSynthesis.body,
-          user,
-          schema: GoalSynthesisOutputSchema,
-          maxTokens: GOAL_LIMITS.synthesisMaxTokens,
-          temperature: 0.2,
-          quality: { say: task.agent.say },
-        });
-        servedBy = synthesis.calls;
-        const normalised = normaliseGoalSynthesis(synthesis.value, evidenceIds);
-        objective = normalised.objective;
-        sections = normalised.sections;
-        if (normalised.discarded > 0)
-          await emit({
-            runId,
-            type: "critic.flagged",
-            stepId,
-            payload: {
-              claimId: "schema:synthesis",
-              claim: `${plural(normalised.discarded, "drafted item")} discarded`,
-              reason:
-                "Drafted items that did not match the brief schema (for example a claim without citations) were removed in code",
-              severity: "info",
-              category: "uncited",
-            },
-          });
-        for (const [index, dropped] of normalised.dropped.entries())
-          await emit({
-            runId,
-            type: "critic.flagged",
-            stepId,
-            payload: {
-              claimId: `uncited:${index + 1}`,
-              claim: dropped.claim.text.slice(0, 300),
-              reason: `Removed from ${dropped.where.slice(0, 120)}: cited ${dropped.claim.citations.join(", ")}, which is not a source with extracted evidence`,
-              severity: "warn",
-              category: "uncited",
-            },
-          });
-      }
+      const drafted = await draftBrief(stepId, facts, task.agent.say);
+      const { objective, sections, servedBy } = drafted;
       const artifactId = crypto.randomUUID();
       const state: BriefState = {
         artifactId,
@@ -763,6 +890,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         sections,
         facts,
         final: false,
+        specificity: drafted.specificity,
       };
       brief = state;
       const draft: GoalBriefDraft = { ...base(state), status: "draft", ...sections };
@@ -778,10 +906,11 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
           content: draft,
         },
       });
+      const moved = drafted.specificity.movedToContext + drafted.specificity.dropped;
       await task.agent.say(
         facts.length === 0
           ? "No usable facts were extracted, so the brief has no findings or actions; it says so instead of guessing."
-          : `Drafted ${plural(sections.workstreams.length, "workstream")}, ${plural(sections.actions.length, "ranked action")} and ${plural(sections.risks.length, "risk")}. The critic checks every cited claim next.`,
+          : `Drafted ${plural(sections.workstreams.length, "workstream")}, ${plural(sections.actions.length, "ranked action")} and ${plural(sections.risks.length, "risk")}${moved === 0 ? "" : `; ${plural(moved, "generic background claim")} moved to the context note or dropped`}. The critic checks every cited claim next.`,
       );
       const cited = goalCitedSources(sections);
       return {
@@ -797,6 +926,116 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     },
   };
 
+  const sectionDrafts = (state: BriefState): SectionDraft[] => {
+    const goalWords = target.queries
+      .join(" ")
+      .split(/\s+/)
+      .filter((word) => word.length > 2);
+    const streams: SectionDraft[] = state.sections.workstreams.map((stream, index) => ({
+      key: `workstream.${index}`,
+      title: stream.name,
+      claims: stream.findings.length,
+      keywords: stream.name.split(/\s+/),
+    }));
+    const covered = new Set(
+      state.sections.workstreams.flatMap((stream) => stream.name.toLowerCase().split(/\s+/)),
+    );
+    const missing = goalWords
+      .filter((word) => !covered.has(word.toLowerCase()))
+      .map((word) => ({ key: `goal.${word}`, title: word, claims: 0, keywords: [word] }));
+    return [...streams, ...missing];
+  };
+
+  const goalCandidates = (task: SubAgentTask, state: BriefState): FollowUpCandidate[] => {
+    const leads: FollowUpCandidate[] =
+      company === null || kit === undefined ? [] : kit.followUps(task);
+    const topics = [
+      ...new Set([...state.sections.workstreams.map((stream) => stream.name), ...target.queries]),
+    ].slice(0, 6);
+    for (const topicName of topics)
+      leads.push({
+        key: `reference:${topicName}`,
+        kind: "reference",
+        label: company === null ? topicName : `${company.name} ${topicName}`,
+        hints: topicName,
+        execute: async () => {
+          const before = new Set(reference.created().map((document) => document.record.sourceId));
+          await runTool(
+            task,
+            reference.tool,
+            {
+              queries: [topicName.slice(0, 120)],
+              ...(company === null ? {} : { target: company.name }),
+            },
+            researchCtx,
+          );
+          const fresh = reference
+            .created()
+            .filter((document) => !before.has(document.record.sourceId));
+          if (fresh.length === 0) return [];
+          const readings = await read(task.step.id, fresh);
+          return readings.flatMap((reading) => reading.facts);
+        },
+      });
+    return leads;
+  };
+
+  const deepen: StepExecutor = {
+    id: GOAL_STEP_IDS.deepen,
+    role: "researcher",
+    modelRole: "planner",
+    capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
+    needs: [GOAL_STEP_IDS.synthesise],
+    description:
+      "Deep research after the first draft: a planner-role gap analysis picks follow-up leads (unread company pages from the crawl frontier, feeds, GitHub, Wikipedia, target-plus-topic reference searches) for thin workstreams; new pages are read in quarantine and the brief is redrafted, for up to two rounds while the time budget allows.",
+    run: async (task): Promise<SubAgentResult> => {
+      const state = brief;
+      if (state === undefined || !inputArtifacts(task).includes(state.artifactId))
+        return skipped("No drafted brief to deepen.", 0.5);
+      if (overtime()) return timeSkip(task);
+      const stopAt = deadlineAt - GOAL_LIMITS.criticReserveMs;
+      const outcome = await runDeepResearch({
+        ctx: researchCtx,
+        stepId: task.step.id,
+        agent: task.agent,
+        prompt: prompts.gapAnalysis,
+        objective: state.objective,
+        maxRounds: GOAL_LIMITS.deepRounds,
+        targetsPerRound: GOAL_LIMITS.deepTargetsPerRound,
+        canContinue: () =>
+          !overtime() &&
+          ctx.now().getTime() + 2 * projectedCallMs(ctx, "planner") < stopAt &&
+          clock.fits(["planner", "fast", "planner", "fast", "worker"]),
+        canRedraft: () =>
+          !overtime() && ctx.now().getTime() + projectedCallMs(ctx, "planner") < stopAt,
+        deadlineReached: () => deadline.signal.aborted && ctx.signal?.aborted !== true,
+        usePlanner: () => clock.fits(["planner", "planner", "fast", "worker"]),
+        sections: () => sectionDrafts(state),
+        candidates: () => goalCandidates(task, state),
+        redraft: async (fresh) => {
+          const facts = [...state.facts, ...fresh];
+          const drafted = await draftBrief(task.step.id, facts, task.agent.say);
+          if (drafted.sections.workstreams.length + drafted.sections.actions.length === 0) return;
+          state.facts = facts;
+          state.objective = drafted.objective;
+          state.sections = drafted.sections;
+          state.specificity = drafted.specificity;
+          await publishDraft(state, task.step.id);
+        },
+      });
+      state.research = outcome.report;
+      const cited = goalCitedSources(state.sections);
+      return {
+        summary: `Deep research: ${plural(outcome.report.rounds.length, "round")}, ${plural(outcome.facts.length, "new fact")}, coverage ${Math.round(outcome.report.coverage * 100)}% (stop: ${outcome.report.stopReason.replace(/_/g, " ")})`,
+        findings: state.facts.filter((fact) => cited.has(fact.sourceId)).map(factToFinding),
+        sources: [],
+        confidence: outcome.report.coverage,
+        artifacts: [state.artifactId],
+        research: outcome.report,
+      };
+    },
+  };
+
   const critic: StepExecutor = {
     id: GOAL_STEP_IDS.critic,
     role: "critic",
@@ -805,12 +1044,13 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     required: true,
     needs: [GOAL_STEP_IDS.synthesise],
     description:
-      "Check every finding, action basis and risk against its cited quotes (entailment), send unsupported claims to an editor sub-agent, remove what stays unsupported and report citation accuracy.",
+      "Check every finding, action basis and risk against its cited quotes (entailment) and whether it is about the target, send unsupported claims to an editor sub-agent with the exact supporting span, split compound claims, remove what stays unsupported and report citation accuracy and specificity.",
     run: async (task): Promise<SubAgentResult> => {
       const state = brief;
       if (state === undefined || !inputArtifacts(task).includes(state.artifactId))
         throw new Error("The critic has no drafted brief to check");
       if (state.facts.length === 0) state.facts = findingsToFacts(inputFindings(task));
+      const targetNames = specificityTarget();
       const outcome = await runCriticSafely(ctx, listGoalClaims(state.sections), {
         stepId: task.step.id,
         agent: task.agent,
@@ -819,10 +1059,38 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         deliverable: `Goal brief for: ${state.objective}`,
         evidence: quotesBySource(state.facts),
         canFix: () => clock.fits(["worker", "fast"]),
+        ...(company === null
+          ? {}
+          : {
+              specificity: {
+                target: company.name,
+                mentionsTarget: (text: string) => mentionsTarget(text, targetNames),
+              },
+            }),
       });
-      state.sections = applyGoalClaims(state.sections, outcome.kept);
+      const applied = applyGoalClaims(state.sections, outcome.kept);
+      const contextIds = new Set(
+        (state.sections.context ?? []).map((_, index) => `context.${index}`),
+      );
+      const demoted = outcome.generic.filter((claim) => !contextIds.has(claim.id));
+      const context = [
+        ...(applied.context ?? []),
+        ...demoted.map((claim) => ({ text: claim.text, citations: claim.citations })),
+      ].slice(0, CONTEXT_LINES);
+      state.sections = { ...applied, context };
+      const drafted = state.specificity ?? specificityScore(0, 0, 0);
+      const movedNow = Math.max(0, context.length - (applied.context?.length ?? 0));
+      const specificity = specificityScore(
+        Math.max(0, drafted.specific - demoted.length),
+        drafted.generic + demoted.length,
+        drafted.movedToContext + movedNow,
+      );
+      state.specificity = specificity;
+      state.citationAccuracy = outcome.report.citationAccuracy;
+      state.publishedAccuracy = outcome.report.publishedAccuracy ?? null;
+      const report = { ...outcome.report, specificity };
       await publishFinal(state, task.step.id);
-      const accuracy = formatAccuracy(outcome.report);
+      const accuracy = formatAccuracy(report);
       await task.agent.say(
         `Checked ${plural(outcome.report.claimsChecked, "claim")}: ${accuracy}.`,
       );
@@ -832,14 +1100,19 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         sources: [],
         confidence: outcome.report.citationAccuracy ?? 0.5,
         artifacts: [state.artifactId],
-        critic: outcome.report,
+        critic: report,
       };
     },
   };
 
+  const defaultPlan = defaultGoalPlan(
+    target.domain !== null || target.brands.length > 0,
+    hasConnectors,
+  );
   return {
     planner: {
       missionId: MISSION_ID,
+      defaultPhases: goalPhases(defaultPlan),
       title: "Custom goal",
       objective:
         "A cited goal brief: the objective restated, findings by workstream, a ranked action plan (owner role, effort, impact, follow-up Delegate mission), risks and open questions. Every factual claim cites a fetched source.",
@@ -870,6 +1143,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         bounded(readSite, withDocuments),
         ...(hasConnectors ? [bounded(connectorStep, withDocuments)] : []),
         synthesise,
+        deepen,
         critic,
       ],
       allowedCapabilities: [
@@ -879,7 +1153,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       ],
       stepLimits: GOAL_STEP_LIMITS,
     },
-    defaultPlan: defaultGoalPlan(target.domain !== null || target.brands.length > 0, hasConnectors),
+    defaultPlan,
     clock,
     finish: async (outcome) => {
       clearTimeout(deadlineTimer);

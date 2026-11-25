@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-import { CriticReportSchema, type AgentRole, type ModelRole, type PlanStep } from "../events";
+import {
+  CriticReportSchema,
+  ResearchReportSchema,
+  type AgentRole,
+  type ModelRole,
+  type PlanStep,
+} from "../events";
 import { SourceRecordSchema } from "../tools/sources";
 import { type StepGrant } from "../tools/registry";
 
@@ -21,6 +27,7 @@ export const SubAgentResultSchema = z.object({
   artifacts: z.array(z.string().min(1)).max(50),
   needsReplan: z.object({ reason: z.string().min(1).max(500) }).optional(),
   critic: CriticReportSchema.optional(),
+  research: ResearchReportSchema.optional(),
 });
 export type SubAgentResult = z.infer<typeof SubAgentResultSchema>;
 

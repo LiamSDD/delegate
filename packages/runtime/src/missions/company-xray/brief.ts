@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { DeliverableVerificationSchema } from "../../events";
 import { SOURCE_KINDS, SourceIdSchema, SourceRecordSchema } from "../../tools/sources";
 
 export const SECTION_KEYS = [
@@ -277,6 +278,7 @@ const briefShape = {
   sourceMix: SourceMixSchema,
   generatedAt: z.iso.datetime({ offset: true }),
   promptVersions: z.array(z.string().min(1)),
+  verification: DeliverableVerificationSchema.optional(),
 };
 
 function citationIntegrity(

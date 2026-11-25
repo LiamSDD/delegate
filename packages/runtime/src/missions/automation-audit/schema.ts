@@ -37,6 +37,8 @@ export const OpportunitySchema = z.object({
   risks: z.array(z.string().trim().min(1).max(300)).max(6),
   integrations: z.array(z.string().trim().min(1).max(80)).max(10),
   firstStep: z.string().trim().min(1).max(500),
+  owner: z.string().trim().min(1).max(60).optional(),
+  successMetric: z.string().trim().min(1).max(200).optional(),
   evidence: z.array(AuditEvidenceSchema).min(1).max(6),
   assumptions: z.array(z.string().trim().min(1).max(300)).max(10),
   verification: VerificationStatusSchema.optional(),

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { type RunContext } from "../../agent/context";
 import {
   formatAccuracy,
+  keptParts,
   runCriticSafely,
   type ClaimSupport,
   type CriticClaim,
@@ -39,9 +40,11 @@ import {
   roundRobin,
   type TopicFact,
 } from "../shared/research";
+import { checkActionConcreteness, isMeasurable } from "../shared/actions";
+import { runDeepResearch } from "../shared/deep-research";
 import { checkSpecificity } from "./genericity";
 import { type AutomationAuditInput } from "./input";
-import { AUDIT_LENSES, type AuditLens } from "./lenses";
+import { AUDIT_LENSES, lensesFor, type AuditLens } from "./lenses";
 import { AUDIT_PLANNING_HINTS, AUDIT_STEP_IDS, auditPlan } from "./plan";
 import { AUDIT_FORMULA, estimateRoi } from "./roi";
 import {
@@ -66,6 +69,7 @@ export interface AutomationAuditPrompts {
   editor: PromptFile;
   analyst: PromptFile;
   auditEditor: PromptFile;
+  gapAnalysis?: PromptFile;
 }
 
 export interface AutomationAuditDependencies {
@@ -88,6 +92,8 @@ export const AUDIT_LIMITS = {
   candidatesPerLens: 4,
   candidatesSingleLens: 8,
   titleSimilarity: 0.6,
+  deepRounds: 2,
+  deepMinFactsPerLens: 3,
 } as const;
 
 export const MAX_HOURS_PER_PERSON = 80;
@@ -129,6 +135,8 @@ const CandidateDraftSchema = z.object({
   risks: looseStrings,
   integrations: looseStrings,
   firstStep: z.string().trim().min(1).catch("Map the current process with the team that owns it."),
+  owner: z.string().trim().min(1).max(60).optional().catch(undefined),
+  successMetric: z.string().trim().min(1).max(200).optional().catch(undefined),
   evidence: z
     .array(
       z.object({
@@ -277,6 +285,13 @@ export function normaliseCandidate(
       .filter((name) => name !== "")
       .slice(0, 10),
     firstStep: cut(draft.firstStep, 500),
+    owner: cut(draft.owner ?? `${department} lead`, 60),
+    successMetric: cut(
+      draft.successMetric !== undefined && isMeasurable(draft.successMetric)
+        ? draft.successMetric
+        : `Save about ${Math.max(1, Math.round(estimateRoi({ ...values }).hoursPerMonth))} hours a month once adopted (estimate from the ROI model)`,
+      200,
+    ),
     evidence,
     assumptions: [
       ...draft.assumptions.map((note) => cut(note.trim(), 300)).filter((note) => note !== ""),
@@ -488,7 +503,16 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
             `${lens.id}-${counter}`,
             input.department ?? lens.department,
           );
-          const verdict = checkSpecificity(candidate, { companyName: companyGuess(), quotes });
+          const checked = checkSpecificity(candidate, { companyName: companyGuess(), quotes });
+          const vague = checkActionConcreteness({
+            title: candidate.title,
+            firstStep: candidate.firstStep,
+            successMetric: candidate.successMetric,
+          });
+          const verdict =
+            vague.length === 0
+              ? checked
+              : { ok: false as const, reasons: [...(checked.ok ? [] : checked.reasons), ...vague] };
           if (verdict.ok) {
             if (
               !accepted.some(
@@ -735,13 +759,24 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
       const supportOf = (support: ClaimSupport) => (support === "supported" ? {} : { support });
       const dropped: string[] = [];
       const survivors = state.opportunities.flatMap((opportunity): Opportunity[] => {
-        const workflow = outcome.kept.get(`${opportunity.id}.workflow`);
-        const evidence = opportunity.evidence.flatMap((_, index) => {
-          const kept = outcome.kept.get(`${opportunity.id}.evidence.${index}`);
-          return kept === undefined
-            ? []
-            : [{ text: kept.text, citations: kept.citations, ...supportOf(kept.support) }];
-        });
+        const workflowParts = keptParts(outcome.kept, `${opportunity.id}.workflow`);
+        const workflow =
+          workflowParts.length === 0
+            ? undefined
+            : {
+                text: workflowParts.map((part) => part.text).join(" "),
+                support: workflowParts.every((part) => part.support === "supported")
+                  ? ("supported" as const)
+                  : ("weak" as const),
+              };
+        const evidence = opportunity.evidence
+          .flatMap((_, index) => keptParts(outcome.kept, `${opportunity.id}.evidence.${index}`))
+          .slice(0, 6)
+          .map((kept) => ({
+            text: kept.text,
+            citations: kept.citations,
+            ...supportOf(kept.support),
+          }));
         if (workflow === undefined || evidence.length === 0) {
           dropped.push(opportunity.title);
           return [];
@@ -837,6 +872,56 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
     },
   };
 
+  const deepen: StepExecutor = {
+    id: AUDIT_STEP_IDS.deepen,
+    role: "researcher",
+    modelRole: "planner",
+    capabilities: [CAPABILITIES.webFetch],
+    needs: [AUDIT_STEP_IDS.read],
+    description:
+      "Deep research before the analysts: a planner-role gap analysis finds department lenses with too few facts and picks follow-up leads (unread careers, help, docs, customer and pricing pages from the crawl frontier, the feed, GitHub, Wikipedia); new pages are read in quarantine, for at most two rounds within the time target.",
+    run: async (task): Promise<SubAgentResult> => {
+      const facts = findingsToFacts(inputFindings(task));
+      const found: TopicFact[] = [];
+      const lensesInPlay = lensesFor(input.department);
+      const before = new Set(kit.documents().map((document) => document.record.sourceId));
+      const outcome = await runDeepResearch({
+        ctx,
+        stepId: task.step.id,
+        agent: task.agent,
+        prompt: prompts.gapAnalysis,
+        objective: `AI Automation Audit of ${companyGuess()} (${input.url}): evidence about how each department works today${input.focus === undefined ? "" : `, focus: ${input.focus}`}`,
+        maxRounds: AUDIT_LIMITS.deepRounds,
+        minClaimsPerSection: AUDIT_LIMITS.deepMinFactsPerLens,
+        canContinue: () =>
+          clock.elapsed() < AUDIT_LIMITS.gapFillEndsAtMs &&
+          clock.fits(["planner", "fast", "worker", "planner", "fast"]),
+        usePlanner: () => clock.fits(["planner", "fast", "worker", "planner", "fast"]),
+        sections: () =>
+          lensesInPlay.map((lens) => ({
+            key: lens.id,
+            title: lens.department,
+            claims: [...facts, ...found].filter((fact) => lens.topics.includes(fact.topic)).length,
+            keywords: [...lens.topics, ...lens.focus.split(/[\s,]+/)],
+          })),
+        candidates: () => kit.followUps(task),
+        redraft: (fresh) => {
+          found.push(...fresh);
+          return Promise.resolve();
+        },
+      });
+      const fresh = kit.documents().filter((document) => !before.has(document.record.sourceId));
+      return {
+        summary: `Deep research: ${plural(outcome.report.rounds.length, "round")}, ${plural(outcome.facts.length, "new fact")}, lens coverage ${Math.round(outcome.report.coverage * 100)}% (stop: ${outcome.report.stopReason.replace(/_/g, " ")})`,
+        findings: outcome.facts.map(factToFinding),
+        sources: fresh.map((document) => document.record),
+        confidence: outcome.report.coverage,
+        artifacts: [],
+        research: outcome.report,
+      };
+    },
+  };
+
   const lenses = AUDIT_LENSES.map(analyst);
   return {
     planner: {
@@ -846,7 +931,7 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
         "5–8 workflows specific to this company that AI agents could automate, each with evidence about this company, an explicit ROI model (frequency × minutes × people × adoption → hours and € per month) with stated assumptions, difficulty, risks, integrations and a first step. Generic answers count as failures.",
       input,
       planningHints: AUDIT_PLANNING_HINTS,
-      executors: [...kit.executors, ...lenses, rank, critic],
+      executors: [...kit.executors, deepen, ...lenses, rank, critic],
       allowedCapabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
     },
     defaultPlan,

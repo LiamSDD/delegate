@@ -146,7 +146,15 @@ function synthesisReply(user: string): Response {
             }
           : offering,
       customers: claims("customers"),
-      market: { status: "insufficient_evidence", note: "No market sizing in sources." },
+      market: {
+        status: "ok",
+        claims: [
+          {
+            text: "Warehouse automation is the use of machines to move and pick goods in storage.",
+            citations: [facts[0]?.sourceId ?? "S1"],
+          },
+        ],
+      },
       competitors:
         cite("competitors").length === 0
           ? { status: "insufficient_evidence", note: "No named competitors." }
@@ -308,6 +316,7 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
       ["read", "succeeded"],
       ["fill_gaps", "succeeded"],
       ["synthesise", "succeeded"],
+      ["deepen_research", "succeeded"],
       ["critic", "succeeded"],
     ]);
     expect(events.find((event) => event.type === "plan.proposed")).toMatchObject({
@@ -347,13 +356,29 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
       ),
     ).toBe(true);
     expect(brief.sources.every((source) => source.quotes.length > 0)).toBe(true);
+    expect(brief.sections.market).toMatchObject({ status: "insufficient_evidence" });
+    expect(JSON.stringify(brief.sections)).not.toMatch(/Warehouse automation is the use/);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "critic.flagged" &&
+          event.payload.claimId.startsWith("specificity:") &&
+          event.payload.claim.startsWith("Warehouse automation is"),
+      ),
+    ).toBe(true);
+    expect(brief.verification?.specificity.generic).toBeGreaterThanOrEqual(1);
+    const deepened = events.find(
+      (event) => event.type === "step.completed" && event.stepId === "deepen_research",
+    );
+    expect(deepened?.type === "step.completed" && deepened.payload.research).toBeTruthy();
     expect(brief.promptVersions).toEqual([
       "quarantine-reader@1",
       "company-xray.researcher@1",
-      "company-xray.synthesis@1",
-      "planner@2",
-      "critic@1",
-      "editor@1",
+      "company-xray.synthesis@2",
+      "planner@3",
+      "critic@2",
+      "editor@2",
+      "deep-research.gaps@1",
     ]);
     const techStack = brief.sections.techStack;
     expect(

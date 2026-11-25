@@ -1,6 +1,7 @@
 import { CAPABILITIES } from "@delegate/policy";
 import { z } from "zod";
 
+import { mentionsTarget } from "../../agent/specificity";
 import { FetchBlockedError, type Fetcher } from "../../tools/fetch";
 import { defineTool, type RegisteredTool } from "../../tools/registry";
 import { type SourceDocument, type SourceStore } from "../../tools/sources";
@@ -179,16 +180,20 @@ export function createReferenceSearch(
   const tool = defineTool({
     name: "search_reference",
     description:
-      "Search English Wikipedia for the goal's topics and keep the introductions of the best matches as sources for the quarantined reader.",
+      "Search English Wikipedia for the goal's topics and keep the introductions of the best matches as sources for the quarantined reader. With a target, each query is combined with the target's name and only articles that mention the target are kept.",
     capability: CAPABILITIES.webFetch,
     inputSchema: z.object({
       queries: z.array(z.string().trim().min(2).max(120)).min(1).max(3),
+      target: z.string().trim().min(2).max(120).optional(),
     }),
     targetDomain: () => "en.wikipedia.org",
-    summariseArgs: (input) => `Wikipedia search for ${input.queries.join("; ")}`,
+    summariseArgs: (input) =>
+      `Wikipedia search for ${input.queries.map((query) => (input.target === undefined ? query : `${input.target} ${query}`)).join("; ")}`,
     execute: async (input) => {
       const titles: string[] = [];
-      for (const query of input.queries) {
+      const target = input.target === undefined ? undefined : { names: [input.target] };
+      for (const raw of input.queries) {
+        const query = input.target === undefined ? raw : `${input.target} ${raw}`;
         const search = await getJson(
           fetcher,
           WIKIPEDIA_API,
@@ -222,9 +227,11 @@ export function createReferenceSearch(
         WikipediaExtractsSchema,
         signal,
       );
+      let createdNow = 0;
       for (const page of Object.values(extracts.value.query?.pages ?? {})) {
         const text = page.extract?.trim() ?? "";
         if (text.length < GOAL_TOOL_LIMITS.minExtractChars) continue;
+        if (target !== undefined && !mentionsTarget(`${page.title} ${text}`, target)) continue;
         const added = store.add({
           url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`,
           title: `Wikipedia: ${page.title}`,
@@ -232,9 +239,14 @@ export function createReferenceSearch(
           fetchedAt: extracts.fetchedAt,
           text,
         });
-        if (added.created) created.push(added.document);
+        if (added.created) {
+          created.push(added.document);
+          createdNow += 1;
+        }
       }
-      const ids = created.map((document) => document.record.sourceId);
+      const ids = created
+        .slice(created.length - createdNow)
+        .map((document) => document.record.sourceId);
       return {
         summary: `Collected ${created.length} reference article(s) for ${input.queries.length} topic(s)`,
         forModel:

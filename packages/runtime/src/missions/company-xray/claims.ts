@@ -1,8 +1,11 @@
-import { type CriticClaim, type KeptClaim } from "../../agent/critic";
+import { keptParts, type CriticClaim, type KeptClaim } from "../../agent/critic";
+import { classifyClaim, type SpecificityContext } from "../../agent/specificity";
 import { SECTION_KEYS, type Claim, type CompanyXraySections } from "./brief";
 
 export const CRITIC_REMOVED_NOTE =
   "The critic removed this section's claims because their cited sources did not support them.";
+export const GENERIC_REMOVED_NOTE =
+  "Only general background, not findings about this company, was drafted for this section, so it was removed.";
 
 type ClaimsKey = "offering" | "customers" | "market" | "positioning" | "techStack";
 const CLAIM_KEYS: readonly ClaimsKey[] = [
@@ -49,22 +52,21 @@ export function applyBriefClaims(
   sections: CompanyXraySections,
   oneLiner: Claim | null,
   kept: ReadonlyMap<string, KeptClaim>,
+  note: string = CRITIC_REMOVED_NOTE,
 ): { sections: CompanyXraySections; oneLiner: Claim | null } {
-  const pick = (id: string): Claim | undefined => {
-    const claim = kept.get(id);
-    if (claim === undefined) return undefined;
-    return {
-      text: claim.text,
-      citations: claim.citations,
-      ...(claim.support === "supported" ? {} : { support: claim.support }),
-    };
-  };
-  const removed = { status: "insufficient_evidence" as const, note: CRITIC_REMOVED_NOTE };
+  const toClaim = (claim: KeptClaim): Claim => ({
+    text: claim.text,
+    citations: claim.citations,
+    ...(claim.support === "supported" ? {} : { support: claim.support }),
+  });
+  const pickAll = (id: string): Claim[] => keptParts(kept, id).map(toClaim);
+  const pick = (id: string): Claim | undefined => pickAll(id)[0];
+  const removed = { status: "insufficient_evidence" as const, note };
   const next = { ...sections };
   for (const key of CLAIM_KEYS) {
     const value = sections[key];
     if (value.status !== "ok") continue;
-    const claims = value.claims.flatMap((_, index) => pick(`${key}.${index}`) ?? []);
+    const claims = value.claims.flatMap((_, index) => pickAll(`${key}.${index}`));
     next[key] = claims.length === 0 ? removed : { status: "ok", claims };
   }
   const competitors = sections.competitors;
@@ -90,11 +92,35 @@ export function applyBriefClaims(
     const lists = Object.fromEntries(
       SWOT_LISTS.map((list) => [
         list,
-        swot[list].flatMap((_, index) => pick(`swot.${list}.${index}`) ?? []),
+        swot[list].flatMap((_, index) => pickAll(`swot.${list}.${index}`)),
       ]),
     ) as Record<(typeof SWOT_LISTS)[number], Claim[]>;
     const total = SWOT_LISTS.reduce((sum, list) => sum + lists[list].length, 0);
     next.swot = total === 0 ? removed : { status: "ok", ...lists };
   }
   return { sections: next, oneLiner: oneLiner === null ? null : (pick("oneLiner") ?? null) };
+}
+
+export interface BriefSpecificity {
+  sections: CompanyXraySections;
+  oneLiner: Claim | null;
+  generic: CriticClaim[];
+  specific: number;
+}
+
+export function dropGenericBriefClaims(
+  sections: CompanyXraySections,
+  oneLiner: Claim | null,
+  context: SpecificityContext,
+): BriefSpecificity {
+  const claims = listBriefClaims(sections, oneLiner);
+  const kept = new Map<string, KeptClaim>();
+  const generic: CriticClaim[] = [];
+  for (const claim of claims) {
+    if (classifyClaim(claim, context).label === "generic") generic.push(claim);
+    else kept.set(claim.id, { ...claim, support: "supported" });
+  }
+  if (generic.length === 0) return { sections, oneLiner, generic, specific: claims.length };
+  const applied = applyBriefClaims(sections, oneLiner, kept, GENERIC_REMOVED_NOTE);
+  return { ...applied, generic, specific: kept.size };
 }

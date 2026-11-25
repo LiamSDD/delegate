@@ -33,6 +33,7 @@ output: Plan
 | `intent` | Why the prompt exists, in one line. Reviewers judge changes against it. |
 | `inputs` | Template variables the runtime fills, in `{{snake_case}}`. Nothing else is interpolated. |
 | `output` | Name of the zod schema in the runtime that parses the model's answer (structured outputs where the provider supports them, one repair attempt otherwise). `text` for free-form prose. |
+| `changes` | Optional. For version 2 and later: what changed against the previous version and why, in one or two sentences. |
 
 ## Rules
 

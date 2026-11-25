@@ -143,11 +143,11 @@ export function githubAppFromEnv(
 export const RUNTIME_PROMPT_FILES = {
   reader: "quarantine-reader.v1.md",
   researcher: "company-xray.researcher.v1.md",
-  synthesis: "company-xray.synthesis.v1.md",
-  planner: "planner.v2.md",
-  critic: "critic.v1.md",
-  editor: "editor.v1.md",
-  analyst: "automation-audit.analyst.v1.md",
+  synthesis: "company-xray.synthesis.v2.md",
+  planner: "planner.v3.md",
+  critic: "critic.v2.md",
+  editor: "editor.v2.md",
+  analyst: "automation-audit.analyst.v2.md",
   auditEditor: "automation-audit.editor.v1.md",
   designer: "build-agent.designer.v1.md",
   evalgen: "build-agent.evalgen.v1.md",
@@ -157,10 +157,11 @@ export const RUNTIME_PROMPT_FILES = {
   rerank: "retrieval.rerank.v1.md",
   reflect: "reflect.v1.md",
   engineer: "ship-a-pr.engineer.v1.md",
-  goalSynthesis: "custom-goal.synthesis.v1.md",
+  goalSynthesis: "custom-goal.synthesis.v2.md",
   goalConnectors: "custom-goal.connectors.v1.md",
   repoArchitect: "repo-xray.architect.v1.md",
   repoImprover: "repo-xray.improver.v1.md",
+  gapAnalysis: "deep-research.gaps.v1.md",
 } as const;
 
 export const REFLECT_BUDGET: RunBudgetLimits = { maxTokens: 20_000, maxMicroUsd: 0 };

@@ -7,6 +7,7 @@ export const PromptHeaderSchema = z.strictObject({
   intent: z.string().min(1),
   inputs: z.array(z.string().min(1)),
   output: z.string().min(1),
+  changes: z.string().min(1).optional(),
 });
 
 export type PromptHeader = z.infer<typeof PromptHeaderSchema>;

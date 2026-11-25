@@ -1,7 +1,7 @@
 import { BudgetExceededError } from "../budget";
-import { diffPlans, type PlanStep } from "../events";
+import { diffPlans, type PlanPhase, type PlanStep } from "../events";
 import { RunAbortedError, type RunContext } from "./context";
-import { executorFor, type ReplanState, type StepStatusView } from "./planner";
+import { executorFor, type ReplanState, type RevisedPlan, type StepStatusView } from "./planner";
 import {
   FatalStepError,
   SubAgentResultSchema,
@@ -27,15 +27,28 @@ export function grantedCapabilities(step: PlanStep, executor: StepExecutor): str
   return step.capabilities.filter((capability) => executor.capabilities.includes(capability));
 }
 
-export type Replanner = (
-  state: ReplanState,
-) => Promise<{ steps: PlanStep[]; reason: string } | null>;
+export type Replanner = (state: ReplanState) => Promise<RevisedPlan | null>;
+
+export interface Revision {
+  version: number;
+  steps: PlanStep[];
+  phases?: PlanPhase[];
+  previous: readonly PlanStep[];
+}
+
+export interface RevisionGate {
+  requiresApproval: (revision: Revision) => boolean;
+  approve: (revision: Revision) => Promise<boolean>;
+  restored: (version: number, rejected: number) => Promise<void>;
+}
 
 export interface OrchestrateOptions {
   plan: readonly PlanStep[];
+  phases?: readonly PlanPhase[];
   version: number;
   executors: readonly StepExecutor[];
   concurrency?: number;
+  approveRevision?: RevisionGate;
   confidenceThreshold?: number;
   maxRevisions?: number;
   replan?: Replanner;
@@ -54,6 +67,7 @@ export class StepFailedBeforeResumeError extends Error {
 
 export interface OrchestrationResult {
   plan: PlanStep[];
+  phases?: PlanPhase[];
   version: number;
   revisions: number;
   statuses: Map<string, StepStatusView>;
@@ -94,7 +108,10 @@ export async function orchestrate(
   const runId = ctx.runId;
 
   let plan = [...options.plan];
+  let phases: PlanPhase[] | undefined =
+    options.phases === undefined || options.phases.length === 0 ? undefined : [...options.phases];
   let version = options.version;
+  const reviewedPhases = new Set<string>();
   let revisions = 0;
   let replanAttempts = 0;
   const statuses = new Map<string, StepStatusView>(plan.map((step) => [step.id, "pending"]));
@@ -174,6 +191,7 @@ export async function orchestrate(
           confidence: result.confidence,
           artifactIds: result.artifacts,
           ...(result.critic === undefined ? {} : { critic: result.critic }),
+          ...(result.research === undefined ? {} : { research: result.research }),
           checkpoint: result,
         },
       });
@@ -198,8 +216,98 @@ export async function orchestrate(
     );
   };
 
-  const maybeReplan = async (stepId: string) => {
+  const phaseIndex = (step: PlanStep): number => {
+    if (phases === undefined || step.phase === undefined) return 0;
+    const index = phases.findIndex((phase) => phase.id === step.phase);
+    return index === -1 ? 0 : index;
+  };
+  const done = (stepId: string) => {
+    const status = statuses.get(stepId);
+    return status === "succeeded" || status === "failed";
+  };
+  const currentPhase = (): number => {
+    if (phases === undefined) return 0;
+    for (let index = 0; index < phases.length; index += 1)
+      if (plan.some((step) => phaseIndex(step) === index && !done(step.id))) return index;
+    return phases.length;
+  };
+
+  const applyRevision = async (revised: RevisedPlan, trigger: string) => {
+    const diff = diffPlans(plan, revised.steps);
+    if (diff.added.length + diff.removed.length + diff.changed.length === 0) return;
+    const previous = plan;
+    const previousPhases = phases;
+    const previousStatuses = new Map(statuses);
+    version += 1;
+    revisions += 1;
+    plan = revised.steps;
+    phases = revised.phases ?? phases;
+    for (const step of plan) if (!statuses.has(step.id)) statuses.set(step.id, "pending");
+    for (const id of diff.removed) statuses.delete(id);
+    ctx.budget.allocate(plan, ORCHESTRATOR_DEFAULTS.minStepShare);
+    const gate = options.approveRevision;
+    const revision: Revision = {
+      version,
+      steps: plan,
+      ...(phases === undefined ? {} : { phases }),
+      previous,
+    };
+    const requiresApproval = gate?.requiresApproval(revision) === true;
+    await emit({
+      runId,
+      type: "plan.revised",
+      payload: {
+        version,
+        steps: plan,
+        ...(phases === undefined ? {} : { phases }),
+        reason: revised.reason,
+        diff,
+        source: "planner",
+        ...(requiresApproval ? { requiresApproval: true } : {}),
+      },
+    });
+    if (gate === undefined || !requiresApproval || (await gate.approve(revision))) return;
+    version += 1;
+    revisions += 1;
+    const revertDiff = diffPlans(plan, previous);
+    plan = [...previous];
+    phases = previousPhases;
+    statuses.clear();
+    for (const [id, status] of previousStatuses) statuses.set(id, status);
+    ctx.budget.allocate(plan, ORCHESTRATOR_DEFAULTS.minStepShare);
+    await emit({
+      runId,
+      type: "plan.revised",
+      payload: {
+        version,
+        steps: plan,
+        ...(phases === undefined ? {} : { phases }),
+        reason: redact(
+          `The revision for ${trigger} needed approval and was not approved; the approved plan continues unchanged.`,
+        ),
+        diff: revertDiff,
+        source: "reviewer",
+      },
+    });
+    await gate.restored(version, revision.version);
+  };
+
+  const requestRevision = async (stepId: string, reason: string) => {
     if (options.replan === undefined || replanAttempts >= maxRevisions) return;
+    if (!plan.some((step) => statuses.get(step.id) === "pending")) return;
+    replanAttempts += 1;
+    const revised = await options.replan({
+      plan,
+      ...(phases === undefined ? {} : { phases }),
+      version,
+      statuses,
+      results,
+      trigger: { stepId, reason },
+    });
+    if (revised !== null) await applyRevision(revised, stepId);
+  };
+
+  const maybeReplan = async (stepId: string) => {
     const status = statuses.get(stepId);
     const result = results.get(stepId);
     const reason =
@@ -209,29 +317,30 @@ export async function orchestrate(
           ? `Low confidence (${result.confidence.toFixed(2)}): ${result.needsReplan.reason}`
           : undefined;
     if (reason === undefined) return;
-    if (!plan.some((step) => statuses.get(step.id) === "pending")) return;
-    replanAttempts += 1;
-    const revised = await options.replan({
-      plan,
-      version,
-      statuses,
-      results,
-      trigger: { stepId, reason },
-    });
-    if (revised === null) return;
-    const diff = diffPlans(plan, revised.steps);
-    if (diff.added.length + diff.removed.length + diff.changed.length === 0) return;
-    version += 1;
-    revisions += 1;
-    plan = revised.steps;
-    for (const step of plan) if (!statuses.has(step.id)) statuses.set(step.id, "pending");
-    for (const id of diff.removed) statuses.delete(id);
-    ctx.budget.allocate(plan, ORCHESTRATOR_DEFAULTS.minStepShare);
-    await emit({
-      runId,
-      type: "plan.revised",
-      payload: { version, steps: plan, reason: revised.reason, diff, source: "planner" },
-    });
+    await requestRevision(stepId, reason);
+  };
+
+  const reviewPhaseBoundary = async () => {
+    if (phases === undefined) return;
+    const index = currentPhase();
+    for (
+      let finishedIndex = 0;
+      finishedIndex < Math.min(index, phases.length);
+      finishedIndex += 1
+    ) {
+      const phase = phases[finishedIndex];
+      if (phase === undefined || reviewedPhases.has(phase.id)) continue;
+      reviewedPhases.add(phase.id);
+      if (index >= phases.length) continue;
+      const members = plan.filter((step) => phaseIndex(step) === finishedIndex);
+      const broken = members.find((step) => results.get(step.id)?.needsReplan !== undefined);
+      const signal = broken === undefined ? undefined : results.get(broken.id)?.needsReplan;
+      if (broken === undefined || signal === undefined) continue;
+      await requestRevision(
+        broken.id,
+        `Phase ${phase.id} finished, but its assumptions need review: ${signal.reason}`,
+      );
+    }
   };
 
   for (;;) {
@@ -244,6 +353,7 @@ export async function orchestrate(
       const stepId = finished.shift();
       if (stepId !== undefined && !stopped()) await maybeReplan(stepId);
     }
+    if (!stopped() && running.size === 0) await reviewPhaseBoundary();
     for (const step of plan) {
       if (statuses.get(step.id) !== "pending") continue;
       const executor = executorFor(options.executors, step.id);
@@ -259,9 +369,11 @@ export async function orchestrate(
       if (blocked !== undefined)
         await fail(step, `Not run: needs ${blocked}, which failed`, errors.get(blocked));
     }
+    const phaseNow = currentPhase();
     const ready = plan.filter(
       (step) =>
         statuses.get(step.id) === "pending" &&
+        phaseIndex(step) <= phaseNow &&
         step.inputs.every((input) => {
           const status = statuses.get(input);
           return status === "succeeded" || status === "failed";
@@ -284,6 +396,7 @@ export async function orchestrate(
   await Promise.allSettled(running.values());
   return {
     plan,
+    ...(phases === undefined ? {} : { phases }),
     version,
     revisions,
     statuses,
