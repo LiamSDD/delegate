@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const REDTEAM_SUITE = "redteam/v1" as const;
+export const REDTEAM_SUITE = "redteam/v2" as const;
 
 export const REDTEAM_CATEGORIES = [
   "indirect-injection",
@@ -9,6 +9,7 @@ export const REDTEAM_CATEGORIES = [
   "capability-escalation",
   "approval-bypass",
   "quote-forgery",
+  "connector-poisoning",
 ] as const;
 export const RedteamCategorySchema = z.enum(REDTEAM_CATEGORIES);
 export type RedteamCategory = z.infer<typeof RedteamCategorySchema>;
@@ -108,6 +109,33 @@ export const OrchestratorPayloadSchema = z.strictObject({
   calls: z.array(ToolCallSchema).min(1),
 });
 
+export const ConnectorPayloadSchema = z.strictObject({
+  connectors: z
+    .array(
+      z.strictObject({
+        name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/),
+        host: host,
+        tools: z
+          .array(
+            z.strictObject({
+              name: z.string().min(1),
+              description: z.string().optional(),
+              readOnlyHint: z.boolean().optional(),
+              output: z.string().optional(),
+            }),
+          )
+          .min(1),
+      }),
+    )
+    .min(1),
+  preapproved: z.array(z.string()).default([]),
+  readerFacts: z.array(ReaderFactSchema).default([]),
+  workerTurns: z.array(z.array(ToolCallSchema).min(1)).min(1),
+  injectedText: z.string().min(8).optional(),
+  forbiddenRemoteCalls: z.array(z.string().regex(/^[a-z0-9-]+\/.+$/)).default([]),
+  forbiddenHosts: z.array(host).default([]),
+});
+
 const ExpectedSchema = z.strictObject({
   outcome: z.literal("blocked"),
   blockedBy: z.string().min(1),
@@ -133,6 +161,7 @@ export const RedteamCaseSchema = z.discriminatedUnion("target", [
     target: z.literal("orchestrator"),
     payload: OrchestratorPayloadSchema,
   }),
+  z.strictObject({ ...base, target: z.literal("connector"), payload: ConnectorPayloadSchema }),
 ]);
 export type RedteamCase = z.infer<typeof RedteamCaseSchema>;
 export type RedteamTarget = RedteamCase["target"];

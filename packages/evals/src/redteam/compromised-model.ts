@@ -6,7 +6,12 @@ import {
   type ModelsConfig,
   type RunEventDraft,
 } from "@delegate/runtime";
-import { createRunContext, createRunEmitter, type RunContext } from "@delegate/runtime/security";
+import {
+  createRunContext,
+  createRunEmitter,
+  type RunContext,
+  type ToolApprovalGate,
+} from "@delegate/runtime/security";
 import {
   TEST_MODELS_CONFIG,
   TEST_USAGE,
@@ -89,7 +94,11 @@ export interface RedteamRun {
 
 export function redteamRun(
   provider: ScriptedProvider,
-  options: { policies: Policy[]; classification?: DataClassification | undefined },
+  options: {
+    policies: Policy[];
+    classification?: DataClassification | undefined;
+    approvals?: ToolApprovalGate;
+  },
 ): RedteamRun {
   const events: RunEventDraft[] = [];
   const ctx = createRunContext({
@@ -108,6 +117,7 @@ export function redteamRun(
     createProvider: () => provider,
     now: () => new Date("2026-11-25T10:00:00Z"),
     sleep: () => Promise.resolve(),
+    ...(options.approvals === undefined ? {} : { approvals: options.approvals }),
   });
   return { ctx, events };
 }
