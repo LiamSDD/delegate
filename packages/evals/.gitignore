@@ -10,3 +10,6 @@ results/*
 !results/baseline.*.json
 !results/evolution/
 results/evolution/runs/
+!results/training/
+results/training/runs/
+results/training/pending/
