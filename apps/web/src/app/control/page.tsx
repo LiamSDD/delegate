@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { ArrivalPage } from "@/components/arrival-page";
 
@@ -18,6 +19,17 @@ export default function ControlPage() {
         "Standing missions and the triggers that start them",
         "Estimated ROI delivered, labelled as an estimate with its formula",
       ]}
-    />
+    >
+      <p className="border-l-2 border-border-strong pl-4 text-sm text-text-muted">
+        Available now:{" "}
+        <Link
+          href="/control/audit"
+          className="text-text underline underline-offset-4 hover:text-accent"
+        >
+          the audit log
+        </Link>
+        , every allowed, denied and approval-gated tool call in your workspace.
+      </p>
+    </ArrivalPage>
   );
 }
