@@ -5,6 +5,8 @@ export * from "./types";
 export * from "./datasets/xray";
 export * from "./event-log";
 export * from "./graders/xray";
+export * from "./datasets/repo-xray";
+export * from "./graders/repo-xray";
 export * from "./graders/links";
 export * from "./judge/xray-judge";
 export * from "./judge/calibration";
