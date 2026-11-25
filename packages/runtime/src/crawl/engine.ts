@@ -280,6 +280,9 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
   const feedsSeen = new Set<string>();
   let stats = emptyStats();
   let discovered = false;
+  let sitemapFetchBase = 0;
+  let sitemapUrlBase = 0;
+  const sitemapFetches = () => stats.sitemapsFetched - sitemapFetchBase;
   let languages: Set<string> | undefined =
     options.languages === undefined || options.languages === "auto"
       ? undefined
@@ -367,9 +370,10 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
       ...inFlight.values(),
       ...frontier.entries(CRAWL_DEFAULTS.checkpointFrontier),
     ];
+    const truncated = inFlight.size + frontier.size > CRAWL_DEFAULTS.checkpointFrontier;
     return {
       version: 1,
-      discovered,
+      discovered: discovered && !truncated,
       ...(languages === undefined ? {} : { languages: [...languages] }),
       pages: [...pages],
       done: [...done],
@@ -429,7 +433,11 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
         entry.url,
       );
     traps.restore(restored.patterns);
-    for (const sitemap of restored.sitemaps) sitemapsSeen.add(sitemap);
+    if (restored.discovered) for (const sitemap of restored.sitemaps) sitemapsSeen.add(sitemap);
+    else {
+      sitemapFetchBase = stats.sitemapsFetched;
+      sitemapUrlBase = stats.sitemapUrls;
+    }
     for (const entry of restored.frontier) {
       if (done.has(entry.key) || frontier.has(entry.key)) continue;
       frontier.add({
@@ -476,7 +484,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
     );
     while (
       sitemapActive < CRAWL_DEFAULTS.sitemapParallelism &&
-      stats.sitemapsFetched < budget.maxSitemapFetches &&
+      sitemapFetches() < budget.maxSitemapFetches &&
       sitemapQueue.length > 0 &&
       !signal.aborted
     ) {
@@ -501,7 +509,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
       skip(url, "scope", "sitemap outside the crawl scope");
       return;
     }
-    if (stats.sitemapsFetched + sitemapQueue.length >= budget.maxSitemapFetches) {
+    if (sitemapFetches() + sitemapQueue.length >= budget.maxSitemapFetches) {
       skip(url, "sitemap_cap", `more than ${budget.maxSitemapFetches} sitemaps`);
       return;
     }
@@ -528,7 +536,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
     }
     if (document.truncated === true)
       skip(url, "truncated", `sitemap cut at ${document.bytes} bytes`);
-    const room = Math.max(0, budget.maxSitemapUrls - stats.sitemapUrls);
+    const room = Math.max(0, budget.maxSitemapUrls - (stats.sitemapUrls - sitemapUrlBase));
     const entries = parseSitemapEntries(document.text, room + 1);
     for (const child of entries.sitemaps) queueSitemap(child.loc, child.lastmod);
     let taken = 0;
@@ -929,7 +937,8 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
       ...background,
       ...(deadlineState.pending ? [deadlineTimer] : []),
     ];
-    if (Number.isFinite(wait) && running.size < concurrency) wakers.push(sleep(Math.max(1, wait)));
+    if (Number.isFinite(wait) && running.size < concurrency)
+      wakers.push(sleep(Math.max(1, Math.min(wait, deadline - now()))));
     await Promise.race(wakers);
   }
 
