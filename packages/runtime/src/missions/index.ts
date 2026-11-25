@@ -9,6 +9,9 @@ import { CompanyXrayInputSchema } from "./company-xray/input";
 import { XRAY_PLAN } from "./company-xray/plan";
 import { CustomGoalInputSchema } from "./custom-goal/input";
 import { GOAL_BRIEF_KIND, GoalBriefSchema } from "./custom-goal/schema";
+import { RepoXrayInputSchema } from "./repo-xray/input";
+import { REPO_PLAN } from "./repo-xray/plan";
+import { REPO_XRAY_KIND, RepoXraySchema } from "./repo-xray/schema";
 
 export const MISSIONS = {
   "company-xray": {
@@ -51,6 +54,16 @@ export const MISSIONS = {
     deliverableKind: GOAL_BRIEF_KIND,
     capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
   },
+  "repo-xray": {
+    id: "repo-xray",
+    title: "Repo X-ray",
+    description:
+      "Architecture map, module responsibilities, onboarding guide, dependency and security hotspots, test-coverage gaps and 5–8 ranked, testable improvements for a public GitHub repository. The repository is fetched once as a tarball, analysed in code first, its documentation read in quarantine, and every claim cites path:line ranges the critic verifies against the stored snapshot.",
+    inputSchema: RepoXrayInputSchema,
+    deliverableSchema: RepoXraySchema,
+    deliverableKind: REPO_XRAY_KIND,
+    capabilities: [...new Set(REPO_PLAN.flatMap((step) => step.capabilities))],
+  },
 } as const;
 
 export type MissionId = keyof typeof MISSIONS;
@@ -61,3 +74,4 @@ export * from "./automation-audit";
 export * from "./next-actions";
 export * from "./build-agent";
 export * from "./custom-goal";
+export * from "./repo-xray";

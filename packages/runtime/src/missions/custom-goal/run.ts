@@ -119,9 +119,17 @@ function hostLabel(host: string): string {
   return host.replace(/^www\./, "");
 }
 
-export function goalNextActions(sections: GoalSections, company: GoalCompany | null): NextAction[] {
+export function goalNextActions(
+  sections: GoalSections,
+  company: GoalCompany | null,
+  repo: string | null = null,
+): NextAction[] {
   const actions: NextAction[] = [];
   const seen = new Set<string>();
+  const urlFor = (mission: FollowUpMission): string | undefined => {
+    if (mission === "repo-xray") return repo ?? undefined;
+    return URL_MISSIONS.has(mission) ? company?.url : undefined;
+  };
   for (const action of sections.actions) {
     const mission = action.mission;
     if (mission === null) continue;
@@ -140,14 +148,25 @@ export function goalNextActions(sections: GoalSections, company: GoalCompany | n
     }
     if (seen.has(mission)) continue;
     seen.add(mission);
-    const needsUrl = URL_MISSIONS.has(mission);
+    const url = urlFor(mission);
     actions.push({
       id: `run-${mission}`,
       label: FOLLOW_UP_LABELS[mission],
       description: `From action ${action.rank}: ${action.title}`.slice(0, 300),
       missionId: mission,
-      input: needsUrl && company !== null ? { url: company.url } : {},
-      available: needsUrl && company !== null,
+      input: url === undefined ? {} : { url },
+      available: url !== undefined,
+    });
+  }
+  if (repo !== null && !seen.has("repo-xray")) {
+    seen.add("repo-xray");
+    actions.push({
+      id: "run-repo-xray",
+      label: FOLLOW_UP_LABELS["repo-xray"],
+      description: `Map the architecture, hotspots and test gaps of ${repo.replace("https://github.com/", "")}.`,
+      missionId: "repo-xray",
+      input: { url: repo },
+      available: true,
     });
   }
   if (company !== null)
@@ -607,7 +626,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       }
       const actions: NextActions = {
         missionId: MISSION_ID,
-        actions: goalNextActions(state.sections, company),
+        actions: goalNextActions(state.sections, company, target.repo),
       };
       if (actions.actions.length > 0)
         await emit({

@@ -11,7 +11,7 @@ import { fixtureDns, fixtureFetch } from "../../testing/fixture-site";
 import { scriptedProvider, testRun, textTurn } from "../../testing/fakes";
 import { NextActionsSchema } from "../next-actions";
 import { defaultGoalPlan } from "./plan";
-import { createCustomGoalMission } from "./run";
+import { createCustomGoalMission, goalNextActions } from "./run";
 import { GoalBriefSchema, type GoalBrief } from "./schema";
 
 const POLLINATIONS = "https://text.pollinations.ai/openai";
@@ -413,5 +413,22 @@ describe("custom-goal plan validation", () => {
     );
     const checked = checkPlanSteps(plan, mission.planner);
     expect(checked.ok).toBe(false);
+  });
+});
+
+describe("goalNextActions", () => {
+  it("offers Repo X-ray with the repository named in the goal", () => {
+    const actions = goalNextActions(
+      { workstreams: [], actions: [], risks: [], openQuestions: [] },
+      null,
+      "https://github.com/vercel/next.js",
+    );
+    expect(actions).toEqual([
+      expect.objectContaining({
+        missionId: "repo-xray",
+        available: true,
+        input: { url: "https://github.com/vercel/next.js" },
+      }),
+    ]);
   });
 });

@@ -31,6 +31,7 @@ export const RUNNABLE_MISSION_IDS = [
   "automation-audit",
   "build-agent",
   "custom-goal",
+  "repo-xray",
 ] as const;
 export type RunnableMissionId = (typeof RUNNABLE_MISSION_IDS)[number];
 
@@ -49,6 +50,7 @@ export const MISSION_LABELS: Record<string, string> = {
   "automation-audit": "Automation Audit",
   "build-agent": "Build-an-Agent",
   "custom-goal": "Custom goal",
+  "repo-xray": "Repo X-ray",
 };
 
 export function missionLabel(id: string): string {

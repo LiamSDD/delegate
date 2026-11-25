@@ -77,8 +77,28 @@ export interface FetchedDocument {
   fetchedAt: string;
 }
 
+export interface DownloadRequest {
+  url: string;
+  accept: string;
+  contentTypes: readonly RegExp[];
+  maxBytes: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  respectRobots?: boolean;
+}
+
+export interface DownloadedFile {
+  url: string;
+  finalUrl: string;
+  status: number;
+  contentType: string;
+  bytes: Uint8Array;
+  fetchedAt: string;
+}
+
 export interface Fetcher {
   fetch(request: FetchRequest): Promise<FetchedDocument>;
+  download(request: DownloadRequest): Promise<DownloadedFile>;
   pagesFetched(): number;
   sitemapsFor(url: string): Promise<string[]>;
 }
@@ -281,8 +301,7 @@ export function createFetcher(options: FetcherOptions): Fetcher {
             accept: "text/plain",
             ...(signal === undefined ? {} : { signal }),
           },
-          false,
-          true,
+          { countsAsPage: false, contentTypes: "any" },
         );
         return parseRobots(document.text);
       } catch (error) {
@@ -312,11 +331,42 @@ export function createFetcher(options: FetcherOptions): Fetcher {
     }
   }
 
-  async function request(
-    input: FetchRequest,
-    countsAsPage: boolean,
-    anyContentType = false,
-  ): Promise<FetchedDocument> {
+  interface TransferOptions {
+    countsAsPage: boolean;
+    contentTypes: readonly RegExp[] | "any";
+    maxBytes?: number;
+    timeoutMs?: number;
+  }
+
+  interface Transfer {
+    url: string;
+    finalUrl: string;
+    status: number;
+    contentType: string;
+    header: string | null;
+    bytes: Uint8Array;
+    truncated: boolean;
+    fetchedAt: string;
+  }
+
+  async function request(input: FetchRequest, mode: TransferOptions): Promise<FetchedDocument> {
+    const transfer = await transferBytes(input, mode);
+    return {
+      url: transfer.url,
+      finalUrl: transfer.finalUrl,
+      status: transfer.status,
+      contentType: transfer.contentType,
+      text: decode(transfer.bytes, charsetOf(transfer.header)),
+      bytes: transfer.bytes.byteLength,
+      ...(transfer.truncated ? { truncated: true } : {}),
+      fetchedAt: transfer.fetchedAt,
+    };
+  }
+
+  async function transferBytes(input: FetchRequest, mode: TransferOptions): Promise<Transfer> {
+    const countsAsPage = mode.countsAsPage;
+    const limit = mode.maxBytes ?? maxBytes;
+    const timeLimit = mode.timeoutMs ?? timeoutMs;
     if (input.signal?.aborted === true) {
       throw new FetchBlockedError("aborted", input.url, "The run was cancelled");
     }
@@ -326,11 +376,11 @@ export function createFetcher(options: FetcherOptions): Fetcher {
       }
       pages += 1;
     }
-    const deadline = new Deadline(timeoutMs, input.signal);
+    const deadline = new Deadline(timeLimit, input.signal);
     const fail = (url: string, error: unknown): never => {
       if (error instanceof FetchBlockedError) throw error;
       if (deadline.timedOut) {
-        throw new FetchBlockedError("timeout", url, `No complete response within ${timeoutMs} ms`);
+        throw new FetchBlockedError("timeout", url, `No complete response within ${timeLimit} ms`);
       }
       if (input.signal?.aborted === true) {
         throw new FetchBlockedError("aborted", url, "The run was cancelled");
@@ -391,7 +441,8 @@ export function createFetcher(options: FetcherOptions): Fetcher {
         }
         const header = response.headers.get("content-type");
         const type = mediaType(header);
-        if (!anyContentType && !ALLOWED_CONTENT_TYPES.some((pattern) => pattern.test(type))) {
+        const allowed = mode.contentTypes;
+        if (allowed !== "any" && !allowed.some((pattern) => pattern.test(type))) {
           await response.body?.cancel().catch(() => undefined);
           throw new FetchBlockedError(
             "content_type",
@@ -402,7 +453,7 @@ export function createFetcher(options: FetcherOptions): Fetcher {
         const { bytes, truncated } =
           response.body === null
             ? { bytes: new Uint8Array(), truncated: false }
-            : await readCapped(response.body, maxBytes, deadline).catch((error: unknown) =>
+            : await readCapped(response.body, limit, deadline).catch((error: unknown) =>
                 fail(url.href, error),
               );
         return {
@@ -410,9 +461,9 @@ export function createFetcher(options: FetcherOptions): Fetcher {
           finalUrl: url.href,
           status: response.status,
           contentType: type,
-          text: decode(bytes, charsetOf(header)),
-          bytes: bytes.byteLength,
-          ...(truncated ? { truncated: true } : {}),
+          header,
+          bytes,
+          truncated,
           fetchedAt: now().toISOString(),
         };
       }
@@ -424,7 +475,37 @@ export function createFetcher(options: FetcherOptions): Fetcher {
   }
 
   return {
-    fetch: (input) => request(input, true),
+    fetch: (input) => request(input, { countsAsPage: true, contentTypes: ALLOWED_CONTENT_TYPES }),
+    download: async (input) => {
+      const transfer = await transferBytes(
+        {
+          url: input.url,
+          accept: input.accept,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          ...(input.respectRobots === undefined ? {} : { respectRobots: input.respectRobots }),
+        },
+        {
+          countsAsPage: true,
+          contentTypes: input.contentTypes,
+          maxBytes: input.maxBytes + 1,
+          ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        },
+      );
+      if (transfer.truncated || transfer.bytes.byteLength > input.maxBytes)
+        throw new FetchBlockedError(
+          "too_large",
+          input.url,
+          `Response exceeds the ${input.maxBytes}-byte cap`,
+        );
+      return {
+        url: transfer.url,
+        finalUrl: transfer.finalUrl,
+        status: transfer.status,
+        contentType: transfer.contentType,
+        bytes: transfer.bytes,
+        fetchedAt: transfer.fetchedAt,
+      };
+    },
     pagesFetched: () => pages,
     sitemapsFor: async (url) => {
       const robots = await robotsFor(validateFetchUrl(url, allowLiterals), undefined);

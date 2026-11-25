@@ -80,6 +80,7 @@ export interface GoalTarget {
   domain: DomainMention | null;
   brands: string[];
   queries: string[];
+  repo: string | null;
 }
 
 function cleanHost(host: string): string {
@@ -138,6 +139,18 @@ function isCandidate(word: string): boolean {
     !GENERIC_CAPITALISED.has(lower) &&
     !/^\d+$/.test(word)
   );
+}
+
+export function extractRepo(goal: string): string | null {
+  for (const { host, path } of domainMatches(goal)) {
+    if (host !== "github.com" || path === undefined) continue;
+    const [owner, rawRepo] = path.split("/").filter((segment) => segment !== "");
+    const repo = rawRepo?.replace(/\.git$/i, "");
+    if (owner === undefined || repo === undefined || repoOwner(host, path) === undefined) continue;
+    if (!/^[\w.-]{1,100}$/.test(repo) || repo === "." || repo === "..") continue;
+    return `https://github.com/${owner}/${repo}`;
+  }
+  return null;
 }
 
 export function brandCandidates(goal: string): string[] {
@@ -202,5 +215,5 @@ export function analyseGoal(goal: string, url?: string): GoalTarget {
   const brands = domain === null ? brandCandidates(goal) : [];
   const label = domain?.host.split(".")[0];
   const queries = topicQueries(goal, [...brands, ...(label === undefined ? [] : [label])]);
-  return { domain, brands, queries };
+  return { domain, brands, queries, repo: extractRepo(goal) };
 }

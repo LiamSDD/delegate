@@ -36,12 +36,18 @@ describe("runRequestFor", () => {
     expect(runLabelFor(detected, { companyMission: "company-xray" })).toBe("Run X-ray");
   });
 
-  it("starts a run for a GitHub URL instead of a dead end", () => {
-    const request = runRequestFor(detect("github.com/vercel/next.js"), {
-      companyMission: "automation-audit",
+  it("routes GitHub URLs to Repo X-ray, keeping a tree ref from the raw input", () => {
+    const raw = "https://github.com/vercel/next.js/tree/canary";
+    const detected = detect(raw);
+    expect(runRequestFor(detected, { companyMission: "automation-audit", rawInput: raw })).toEqual({
+      missionId: "repo-xray",
+      input: { url: raw },
     });
-    expect(request.missionId).toBe("custom-goal");
-    expect(request.input.goal).toContain("https://github.com/vercel/next.js");
+    expect(runRequestFor(detected, { companyMission: "automation-audit" })).toEqual({
+      missionId: "repo-xray",
+      input: { url: "https://github.com/vercel/next.js" },
+    });
+    expect(runLabelFor(detected, { companyMission: "automation-audit" })).toBe("Run Repo X-ray");
   });
 
   it("caps very long goals at the runtime limit", () => {

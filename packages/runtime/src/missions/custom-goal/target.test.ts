@@ -32,8 +32,12 @@ describe("brandCandidates", () => {
     expect(brandCandidates("Reduce churn for our SaaS product")).toEqual([]);
   });
 
-  it("uses a repository owner as a brand", () => {
+  it("uses a repository owner as a brand and keeps the GitHub repository", () => {
     expect(brandCandidates("Review https://github.com/vercel/next.js")).toEqual(["vercel"]);
+    expect(analyseGoal("Harden github.com/vercel/next.js.git before launch").repo).toBe(
+      "https://github.com/vercel/next.js",
+    );
+    expect(analyseGoal("Grow sales at github.com").repo).toBeNull();
   });
 });
 
@@ -65,6 +69,7 @@ describe("analyseGoal", () => {
       domain: null,
       brands: [],
       queries: ["AI"],
+      repo: null,
     });
     expect(analyseGoal("Speed up CI for our monorepo").brands).toEqual([]);
     expect(analyseGoal("Make our weekly planning less painful")).toMatchObject({

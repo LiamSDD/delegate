@@ -46,7 +46,12 @@ export default async function NewRunPage({ searchParams }: PageProps<"/runs/new"
 
   const { detected } = draft;
   const company = detected.kind === "company";
-  const request = company ? null : runRequestFor(detected, { companyMission: "automation-audit" });
+  const request = company
+    ? null
+    : runRequestFor(detected, {
+        companyMission: "automation-audit",
+        rawInput: draft.input,
+      });
 
   return (
     <div className="mx-auto flex max-w-content flex-col gap-12 px-6 pt-16 pb-24 md:pt-24">
@@ -77,7 +82,7 @@ export default async function NewRunPage({ searchParams }: PageProps<"/runs/new"
         ) : (
           <>
             <h1 className="font-serif text-display-md tracking-display text-balance">
-              Working on your goal
+              {detected.kind === "repo" ? `X-ray ${detected.target}` : "Working on your goal"}
             </h1>
             <p className="max-w-xl text-md text-text-muted text-pretty">
               The planner splits it into research, reading and verification steps; you see the plan

@@ -8,6 +8,7 @@ export type CompanyMission = "automation-audit" | "company-xray";
 export interface RunChoice {
   companyMission: CompanyMission;
   department?: string;
+  rawInput?: string;
 }
 
 function goalRequest(goal: string): StartRunRequest {
@@ -27,13 +28,17 @@ export function runRequestFor(detected: DetectedMission, choice: RunChoice): Sta
       };
     }
     case "repo":
-      return goalRequest(`Assess the open-source project ${detected.target} (${detected.url})`);
+      return {
+        missionId: "repo-xray",
+        input: { url: choice.rawInput?.trim() ?? detected.url },
+      };
     case "goal":
       return goalRequest(detected.target);
   }
 }
 
 export function runLabelFor(detected: DetectedMission | null, choice: RunChoice): string {
+  if (detected?.kind === "repo") return "Run Repo X-ray";
   if (detected?.kind !== "company") return "Run goal";
   return choice.companyMission === "automation-audit" ? "Run audit" : "Run X-ray";
 }

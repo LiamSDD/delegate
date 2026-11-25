@@ -61,17 +61,17 @@ export function MissionInput({
           if (starting) return;
           setStarting(true);
           setStartError(null);
-          void startRun(runRequestFor(detected, { companyMission: mission, department })).then(
-            (result) => {
-              if (result.ok) {
-                router.push(`/runs/${result.runId}`);
-                return;
-              }
-              setStarting(false);
-              setStartError(result.message);
-              inputRef.current?.focus();
-            },
-          );
+          void startRun(
+            runRequestFor(detected, { companyMission: mission, department, rawInput: value }),
+          ).then((result) => {
+            if (result.ok) {
+              router.push(`/runs/${result.runId}`);
+              return;
+            }
+            setStarting(false);
+            setStartError(result.message);
+            inputRef.current?.focus();
+          });
         }}
         className="group rounded-xl border border-border-strong bg-surface shadow-md transition-[border-color,box-shadow] focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-soft),var(--elevation-md)]"
       >
@@ -170,6 +170,7 @@ export function MissionInput({
         <div
           role="radiogroup"
           aria-label="Mission for a company URL"
+          hidden={detected?.kind === "repo"}
           className="flex rounded-lg border border-border bg-surface-2 p-0.5"
         >
           {(
@@ -197,7 +198,7 @@ export function MissionInput({
             </button>
           ))}
         </div>
-        {mission === "automation-audit" ? (
+        {mission === "automation-audit" && detected?.kind !== "repo" ? (
           <div className="flex items-center gap-2">
             <label htmlFor={departmentId} className="text-xs text-text-muted">
               Department

@@ -40,6 +40,7 @@ import { runBuildAgent } from "./missions/build-agent/run";
 import { createMemoryAssistantStore, type AssistantStore } from "./missions/build-agent/schema";
 import { runCompanyXray } from "./missions/company-xray/run";
 import { runCustomGoal } from "./missions/custom-goal/run";
+import { runRepoXray } from "./missions/repo-xray/run";
 import { type AwaitPlanApproval } from "./plan-approval";
 import { parsePromptFile, type PromptFile } from "./prompts";
 import { createAnthropicProvider } from "./providers/anthropic";
@@ -49,6 +50,15 @@ import { createFetcher, type ResolveDns } from "./tools/fetch";
 import { createPinnedFetch } from "./tools/node-fetch";
 
 export * from "./index";
+export {
+  createRepoXrayMission,
+  runRepoXray,
+  snapshotArtifact,
+  REPO_XRAY_LIMITS,
+  type RepoXrayDependencies,
+  type RepoXrayPrompts,
+} from "./missions/repo-xray/run";
+export { REPO_ARCHIVE_HOST, archiveUrl } from "./missions/repo-xray/archive";
 
 export interface RunMissionOptions {
   runId: string;
@@ -93,6 +103,8 @@ export const RUNTIME_PROMPT_FILES = {
   answer: "assistant.answer.v1.md",
   rerank: "retrieval.rerank.v1.md",
   goalSynthesis: "custom-goal.synthesis.v1.md",
+  repoArchitect: "repo-xray.architect.v1.md",
+  repoImprover: "repo-xray.improver.v1.md",
 } as const;
 
 export const BUILD_AGENT_FETCH_PAGES = 80;
@@ -325,6 +337,9 @@ async function executeMission(
   } else if (mission.id === "custom-goal") {
     const input = MISSIONS["custom-goal"].inputSchema.parse(parsed.data);
     status = await runCustomGoal({ ctx, input, fetcher, prompts, run });
+  } else if (mission.id === "repo-xray") {
+    const input = MISSIONS["repo-xray"].inputSchema.parse(options.input);
+    status = await runRepoXray({ ctx, input, fetcher, prompts, run });
   } else {
     const input = MISSIONS["company-xray"].inputSchema.parse(parsed.data);
     status = await runCompanyXray({ ctx, input, fetcher, prompts, run });

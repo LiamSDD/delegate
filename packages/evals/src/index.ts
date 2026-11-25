@@ -7,6 +7,8 @@ export * from "./datasets/custom-goal";
 export * from "./event-log";
 export * from "./graders/xray";
 export * from "./graders/custom-goal";
+export * from "./datasets/repo-xray";
+export * from "./graders/repo-xray";
 export * from "./graders/links";
 export * from "./judge/xray-judge";
 export * from "./judge/calibration";

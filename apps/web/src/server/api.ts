@@ -1,4 +1,4 @@
-import { type ForkPlan, MAX_FORK_OBJECTIVE_CHARS } from "@delegate/runtime";
+import { type ForkPlan, MAX_FORK_OBJECTIVE_CHARS, parseGithubRepoUrl } from "@delegate/runtime";
 import { z } from "zod";
 
 import { RUNNABLE_MISSION_IDS } from "@/lib/m2-contract";
@@ -102,6 +102,11 @@ export const CreateRunRequestSchema = z
       name: z.string().trim().min(1).max(80).optional(),
       opportunityId: z.string().trim().min(1).max(40).optional(),
       fromAuditRunId: z.string().max(100).optional(),
+      ref: z
+        .string()
+        .trim()
+        .regex(/^(?!.*\.\.)(?!\/)[\w./-]{1,200}$/)
+        .optional(),
     }),
     parentRunId: z.uuid().optional(),
   })
@@ -115,7 +120,14 @@ export const CreateRunRequestSchema = z
       if (request.missionId === "build-agent") return;
       if (request.input.goal !== undefined && request.input.goal.length < 3)
         ctx.addIssue({ code: "custom", path: ["input", "goal"], message: "The goal is too short" });
-      for (const key of ["focus", "department", "name", "opportunityId", "fromAuditRunId"] as const)
+      for (const key of [
+        "focus",
+        "department",
+        "name",
+        "opportunityId",
+        "fromAuditRunId",
+        "ref",
+      ] as const)
         if (request.input[key] !== undefined)
           ctx.addIssue({ code: "custom", path: ["input", key], message: "Not for custom-goal" });
       return;
@@ -123,7 +135,33 @@ export const CreateRunRequestSchema = z
     for (const key of buildOnly)
       if (request.input[key] !== undefined)
         ctx.addIssue({ code: "custom", path: ["input", key], message: "Only for build-agent" });
+    if (request.missionId !== "repo-xray" && request.input.ref !== undefined)
+      ctx.addIssue({ code: "custom", path: ["input", "ref"], message: "Only for repo-xray" });
+    if (
+      request.missionId === "repo-xray" &&
+      (request.input.focus !== undefined || request.input.department !== undefined)
+    )
+      ctx.addIssue({ code: "custom", path: ["input"], message: "Repo X-ray takes a URL and ref" });
   });
+
+export const GITHUB_URL_REJECTION =
+  "Enter a public GitHub repository, for example github.com/owner/repo.";
+
+function normaliseRunUrl(
+  request: CreateRunRequest,
+): { ok: true; url: string | undefined } | { ok: false; message: string } {
+  if (request.input.url === undefined) return { ok: true, url: undefined };
+  if (request.missionId === "repo-xray") {
+    const repo = parseGithubRepoUrl(request.input.url);
+    return repo === null
+      ? { ok: false, message: GITHUB_URL_REJECTION }
+      : { ok: true, url: `https://github.com/${repo.owner}/${repo.repo}` };
+  }
+  const url = normaliseCompanyUrl(request.input.url);
+  return url.ok
+    ? { ok: true, url: url.url }
+    : { ok: false, message: COMPANY_URL_REJECTION_MESSAGES[url.reason] };
+}
 
 export const PlanDecisionRequestSchema = z.discriminatedUnion("decision", [
   z.strictObject({
@@ -229,10 +267,8 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
       ),
     });
   }
-  const rawUrl = parsed.data.input.url;
-  const url = rawUrl === undefined ? undefined : normaliseCompanyUrl(rawUrl);
-  if (url !== undefined && !url.ok)
-    return apiError(400, "invalid_url", COMPANY_URL_REJECTION_MESSAGES[url.reason]);
+  const url = normaliseRunUrl(parsed.data);
+  if (!url.ok) return apiError(400, "invalid_url", url.message);
 
   const ipQuota = deps.ipLimiter.take(clientIp(request));
   if (!ipQuota.ok) {
@@ -268,7 +304,7 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
         headers: cookieHeaders,
       });
     }
-    const input = missionInput(parsed.data, url?.url, parentRunId);
+    const input = missionInput(parsed.data, url.url, parentRunId);
     const runner = deps.runner();
     const { runId } = await createRunRecord(app, session, {
       missionId: parsed.data.missionId,
@@ -302,8 +338,14 @@ export function missionInput(
   url: string | undefined,
   parentRunId: string | undefined,
 ): Record<string, unknown> {
-  const { focus, department, goal, name, opportunityId } = request.input;
+  const { focus, department, goal, name, opportunityId, ref } = request.input;
   if (request.missionId === "custom-goal") return { goal, ...(url === undefined ? {} : { url }) };
+  if (request.missionId === "repo-xray") {
+    const tree =
+      request.input.url === undefined ? undefined : parseGithubRepoUrl(request.input.url)?.ref;
+    const chosen = ref ?? tree;
+    return { url, ...(chosen === undefined ? {} : { ref: chosen }) };
+  }
   if (request.missionId === "build-agent") {
     return {
       url,
