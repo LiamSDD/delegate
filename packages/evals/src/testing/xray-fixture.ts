@@ -50,7 +50,7 @@ export function fixtureBrief(): CompanyXrayBrief {
           ? ["Founded in 2009 in Lisbon", "Example serves 4,000 firms across Europe"]
           : ["headquartered in Lisbon"],
     })),
-    sourceMix: { company_site: 1, wikipedia: 1, wikidata: 0, github: 0, feed: 0 },
+    sourceMix: { company_site: 1, wikipedia: 1, wikidata: 0, github: 0, feed: 0, connector: 0 },
     generatedAt: "2026-11-24T10:01:00.000Z",
     promptVersions: [
       "quarantine-reader@1",

@@ -120,7 +120,7 @@ export async function handleCreateShipRun(request: Request, deps: ApiDeps): Prom
         lease: createDbLease(app, ctx),
         ...(deps.shipInstallations === undefined
           ? {}
-          : { findInstallation: deps.shipInstallations(session.workspaceId) }),
+          : { findInstallation: deps.shipInstallations(session.workspaceId, session.userId) }),
       }),
     );
     return Response.json({ runId }, { status: 201, headers: { ...NO_STORE, ...cookieHeaders } });

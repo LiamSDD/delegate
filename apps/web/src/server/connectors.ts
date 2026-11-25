@@ -13,6 +13,7 @@ import {
   ScreenedToolSchema,
   screenRemoteTools,
   systemResolveDns,
+  type ToolApprovalGate,
   validateConnectorUrl,
 } from "@delegate/runtime/server";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -301,7 +302,7 @@ export async function loadConnectorSources(
 export async function loadMissionConnections(
   app: AppDatabase,
   session: GuestSession,
-  deps: ConnectorDeps & { readerPrompt: string },
+  deps: ConnectorDeps & { readerPrompt: string; fallback?: ToolApprovalGate },
 ): Promise<MissionConnections | undefined> {
   const sources = await loadConnectorSources(app, session, deps);
   if (sources.length === 0) return undefined;
@@ -309,6 +310,6 @@ export async function loadMissionConnections(
   return {
     tools: createConnectorTools({ connectors: sources, readerPrompt: deps.readerPrompt }),
     hosts: [...new Set(sources.map((source) => source.host))],
-    approvals: createPreapprovalGate(automation.preapprovedTools),
+    approvals: createPreapprovalGate(automation.preapprovedTools, deps.fallback),
   };
 }

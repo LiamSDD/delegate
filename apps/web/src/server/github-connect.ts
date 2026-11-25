@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { githubInstallations, withTenant } from "@delegate/db";
+import type { FindInstallation } from "@delegate/runtime/server";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -378,4 +379,16 @@ export async function findInstallationForRepo(
       };
   }
   return null;
+}
+
+export function connectedInstallations(
+  getApp: () => Promise<AppDatabase>,
+): (workspaceId: string, userId: string) => FindInstallation {
+  return (workspaceId, userId) => async (owner, repo) => {
+    const found = await findInstallationForRepo(workspaceId, owner, repo, {
+      app: await getApp(),
+      userId,
+    });
+    return found === null ? null : { installationId: found.installationId };
+  };
 }

@@ -29,6 +29,7 @@ import {
   readAllEvents,
   readEvents,
   RunAlreadyTerminalError,
+  type RunContext,
   type RunRecord,
 } from "./runs";
 import {
@@ -55,12 +56,9 @@ export interface ApiDeps {
   production: boolean;
   now?: () => Date;
   stream?: Pick<RunStreamOptions, "pollMs" | "heartbeatMs" | "idleHookMs">;
-  connections?: (
-    app: AppDatabase,
-    session: GuestSession,
-  ) => Promise<MissionConnections | undefined>;
+  connections?: (app: AppDatabase, ctx: RunContext) => Promise<MissionConnections | undefined>;
   shipEnabled?: boolean;
-  shipInstallations?: (workspaceId: string) => FindInstallation;
+  shipInstallations?: (workspaceId: string, userId: string) => FindInstallation;
 }
 
 export type ApiErrorCode =
@@ -320,9 +318,10 @@ export async function startRunForSession(
   });
   const automation = await readAutomation(app, session);
   const autoApprovePlan = options.autoApprovePlan || automation.autoApprovePlans;
+  const ctx = { runId, workspaceId: session.workspaceId, userId: session.userId };
   const connections =
     runner.execution === "live" && deps.connections !== undefined
-      ? await deps.connections(app, session).catch((error: unknown) => {
+      ? await deps.connections(app, ctx).catch((error: unknown) => {
           console.error(
             "loading connectors failed",
             runId,
@@ -331,7 +330,6 @@ export async function startRunForSession(
           return undefined;
         })
       : undefined;
-  const ctx = { runId, workspaceId: session.workspaceId, userId: session.userId };
   deps.schedule(() =>
     executeRun({
       app,

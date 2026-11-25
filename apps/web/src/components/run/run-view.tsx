@@ -31,6 +31,7 @@ import { RepoXrayPanel } from "./repo-xray-panel";
 import { Eyebrow, useNow } from "./primitives";
 import { ReplayBar, ReplayButton } from "./replay-bar";
 import { ShipPanel } from "./ship-panel";
+import { ToolApprovalCards } from "./tool-approval-card";
 import { OutcomeBanner, ResumedBanner, StreamBanner } from "./run-status";
 import { RunTopBar } from "./run-top-bar";
 import { SummaryStrip } from "./summary-strip";
@@ -444,6 +445,7 @@ export function RunView({
               tab === "brief" && "flex",
             )}
           >
+            <ToolApprovalCards runId={runId} events={events} running={running} />
             <NextActions runId={runId} actions={actions} />
             {isShip ? (
               <ShipPanel runId={runId} events={events} running={running} />

@@ -7,7 +7,7 @@ import { isFakeRunnerEnabled, isShipAPrEnabled } from "@/flags";
 import type { ApiDeps } from "./api";
 import type { ConnectionsDeps } from "./connections-api";
 import { defaultOpenEndpoint, loadMissionConnections } from "./connectors";
-import { githubAppConfig } from "./github-connect";
+import { connectedInstallations, githubAppConfig } from "./github-connect";
 import { getAppDatabase } from "./db";
 import { createFakeRunner } from "./fake-runner";
 import type { MissionRunner } from "./mission-runner";
@@ -16,6 +16,7 @@ import { createRuntimeRunner, loadRepoPrompts } from "./runtime-runner";
 import type { Execution } from "./runs";
 import { secretBoxFromEnv } from "./secrets";
 import { guestRunLimiter, networkRunLimiter, sessionSecret } from "./session";
+import { createToolApprovalGate } from "./tool-approval";
 
 export function selectRunner(env: Record<string, string | undefined>): {
   execution: Execution;
@@ -46,7 +47,12 @@ export function apiDeps(): ApiDeps {
     },
     production: process.env.NODE_ENV === "production",
     shipEnabled: isShipAPrEnabled(process.env),
-    connections: (app, session) => loadMissionConnections(app, session, connectorDeps(process.env)),
+    shipInstallations: connectedInstallations(getAppDatabase),
+    connections: (app, ctx) =>
+      loadMissionConnections(app, ctx, {
+        ...connectorDeps(process.env),
+        fallback: createToolApprovalGate({ app, ctx }),
+      }),
   };
 }
 

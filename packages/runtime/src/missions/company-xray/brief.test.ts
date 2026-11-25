@@ -128,7 +128,7 @@ describe("enforceCitations", () => {
       company: { name: "Acme Robotics", url: "https://acme.example/", oneLiner: result.oneLiner },
       sections: result.sections,
       sources,
-      sourceMix: { company_site: 3, wikipedia: 0, wikidata: 0, github: 0, feed: 0 },
+      sourceMix: { company_site: 3, wikipedia: 0, wikidata: 0, github: 0, feed: 0, connector: 0 },
       generatedAt: "2026-11-24T10:01:00.000Z",
       promptVersions: ["company-xray.synthesis@1"],
     };

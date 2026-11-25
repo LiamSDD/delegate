@@ -84,7 +84,7 @@ export function simulatedScript(runId: string, homepage: string): EventDraft[] {
     missionId: "company-xray" as const,
     company: { name: host, url: homepage, oneLiner: null },
     sources,
-    sourceMix: { company_site: 2, wikipedia: 0, wikidata: 0, github: 0, feed: 0 },
+    sourceMix: { company_site: 2, wikipedia: 0, wikidata: 0, github: 0, feed: 0, connector: 0 },
     generatedAt: at,
     promptVersions: ["simulated@1"],
   };

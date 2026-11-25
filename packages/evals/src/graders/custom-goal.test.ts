@@ -55,7 +55,7 @@ const brief: GoalBrief = {
       quotes: ["footwear"],
     },
   ],
-  sourceMix: { company_site: 1, wikipedia: 0, wikidata: 0, github: 0, feed: 0 },
+  sourceMix: { company_site: 1, wikipedia: 0, wikidata: 0, github: 0, feed: 0, connector: 0 },
   rankFormula: "score = impact ÷ effort",
   generatedAt: AT,
   promptVersions: [],

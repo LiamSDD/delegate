@@ -5,6 +5,7 @@ import { MAX_RESUMES, resumeDecision, resumeMarkerDraft, resumeNotices } from "@
 
 import type { AppDatabase } from "./db";
 import { executeRun } from "./execute-run";
+import type { MissionConnections } from "./mission-runner";
 import { createDbLease } from "./leases";
 import type { MissionRunner } from "./mission-runner";
 import type { RunRegistry } from "./run-registry";
@@ -15,6 +16,7 @@ import {
   isTerminalEventType,
   readAllEvents,
   RunAlreadyTerminalError,
+  type RunContext,
   type RunRecord,
   sweepIfStale,
 } from "./runs";
@@ -23,7 +25,8 @@ export interface DurableDeps {
   registry: RunRegistry;
   runner: () => { execution: Execution; run: MissionRunner };
   schedule: (task: () => Promise<void>) => void;
-  shipInstallations?: (workspaceId: string) => FindInstallation;
+  shipInstallations?: (workspaceId: string, userId: string) => FindInstallation;
+  connections?: (app: AppDatabase, ctx: RunContext) => Promise<MissionConnections | undefined>;
   now?: () => Date;
 }
 
@@ -84,6 +87,10 @@ async function resumeRun(
   await appendEvent(app, ctx, marker);
   const resumeFrom = await readAllEvents(app, userId, record.id);
   const missionId = record.mission;
+  const connections =
+    deps.connections === undefined
+      ? undefined
+      : await deps.connections(app, ctx).catch(() => undefined);
   deps.schedule(() =>
     executeRun({
       app,
@@ -94,8 +101,9 @@ async function resumeRun(
       registry: deps.registry,
       lease,
       resumeFrom,
+      ...(connections === undefined ? {} : { connections }),
       ...(missionId === "ship-a-pr" && deps.shipInstallations !== undefined
-        ? { findInstallation: deps.shipInstallations(record.workspaceId) }
+        ? { findInstallation: deps.shipInstallations(record.workspaceId, userId) }
         : {}),
     }),
   );
