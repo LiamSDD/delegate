@@ -57,19 +57,23 @@ export function MissionInput({
             inputRef.current?.focus();
             return;
           }
-          if (detected.kind !== "company") return;
+          if (detected.kind === "goal") return;
           event.preventDefault();
           if (starting) return;
           setStarting(true);
           setStartError(null);
           const trimmed = department.trim();
-          void startRun({
-            missionId: mission,
-            input:
-              mission === "automation-audit" && trimmed !== ""
-                ? { url: detected.url, department: trimmed }
-                : { url: detected.url },
-          }).then((result) => {
+          void startRun(
+            detected.kind === "repo"
+              ? { missionId: "repo-xray", input: { url: value.trim() } }
+              : {
+                  missionId: mission,
+                  input:
+                    mission === "automation-audit" && trimmed !== ""
+                      ? { url: detected.url, department: trimmed }
+                      : { url: detected.url },
+                },
+          ).then((result) => {
             if (result.ok) {
               router.push(`/runs/${result.runId}`);
               return;
@@ -173,7 +177,9 @@ export function MissionInput({
                 ? mission === "automation-audit"
                   ? "Run audit"
                   : "Run X-ray"
-                : "Draft run"}
+                : detected?.kind === "repo"
+                  ? "Run Repo X-ray"
+                  : "Draft run"}
             <CornerDownLeft className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
@@ -182,6 +188,7 @@ export function MissionInput({
         <div
           role="radiogroup"
           aria-label="Mission for a company URL"
+          hidden={detected?.kind === "repo"}
           className="flex rounded-lg border border-border bg-surface-2 p-0.5"
         >
           {(
@@ -209,7 +216,7 @@ export function MissionInput({
             </button>
           ))}
         </div>
-        {mission === "automation-audit" ? (
+        {mission === "automation-audit" && detected?.kind !== "repo" ? (
           <div className="flex items-center gap-2">
             <label htmlFor={departmentId} className="text-xs text-text-muted">
               Department

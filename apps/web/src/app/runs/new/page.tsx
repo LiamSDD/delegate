@@ -44,7 +44,7 @@ export default async function NewRunPage({ searchParams }: PageProps<"/runs/new"
   }
 
   const { detected } = draft;
-  const live = detected.kind === "company";
+  const live = detected.kind !== "goal";
   const spec = {
     kind: detected.kind,
     missions: detected.missionIds,
@@ -60,7 +60,24 @@ export default async function NewRunPage({ searchParams }: PageProps<"/runs/new"
           <p className="font-mono text-2xs tracking-label text-text-subtle uppercase">
             New run <span aria-hidden="true">·</span> {live ? "ready" : "draft"}
           </p>
-          {live ? (
+          {detected.kind === "repo" ? (
+            <>
+              <h1 className="font-serif text-display-md tracking-display text-balance">
+                X-ray {detected.target}
+              </h1>
+              <p className="max-w-xl text-md text-text-muted text-pretty">
+                Nothing has started yet. The Repo X-ray downloads the repository once as an archive,
+                analyses it in code, reads its documentation in quarantine and cites every claim to
+                lines in the snapshot.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <RunAgainButton
+                  input={{ missionId: "repo-xray", input: { url: draft.input } }}
+                  label="Start Repo X-ray"
+                />
+              </div>
+            </>
+          ) : live ? (
             <>
               <h1 className="font-serif text-display-md tracking-display text-balance">
                 Analyse {detected.target}
@@ -119,7 +136,7 @@ export default async function NewRunPage({ searchParams }: PageProps<"/runs/new"
                   <li key={mission.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="font-mono text-xs text-text-subtle tabular">{index + 1}</span>
                     <span className="font-medium">{mission.name}</span>
-                    <MilestoneBadge id={mission.arrives} />
+                    <MilestoneBadge id={mission.arrives} live={mission.live === true} />
                     {mission.durationTarget === null ? null : (
                       <span className="font-mono text-xs text-text-muted">
                         target {mission.durationTarget}

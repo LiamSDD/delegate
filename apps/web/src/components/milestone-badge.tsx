@@ -6,8 +6,16 @@ function isNext(id: MilestoneId): boolean {
   return MILESTONES[current + 1]?.id === id;
 }
 
-export function MilestoneBadge({ id, className }: { id: MilestoneId; className?: string }) {
-  if (isShipped(id)) {
+export function MilestoneBadge({
+  id,
+  live = false,
+  className,
+}: {
+  id: MilestoneId;
+  live?: boolean;
+  className?: string;
+}) {
+  if (live || isShipped(id)) {
     return (
       <span
         className={cn(

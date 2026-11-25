@@ -12,7 +12,7 @@ const EXAMPLES: readonly ExampleTarget[] = [
   { label: "stripe.com", value: "https://stripe.com" },
   { label: "linear.app", value: "https://linear.app" },
   { label: "datadoghq.com", value: "https://www.datadoghq.com" },
-  { label: "github.com/vercel/next.js", value: "https://github.com/vercel/next.js" },
+  { label: "github.com/sindresorhus/ky", value: "https://github.com/sindresorhus/ky" },
   {
     label: "Map where our docs contradict the pricing page",
     value: "Map where our public docs contradict the pricing page",

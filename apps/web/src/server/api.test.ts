@@ -3,11 +3,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   type ApiDeps,
+  CreateRunRequestSchema,
   handleCancelRun,
   handleCreateRun,
   handleGetArtifact,
   handleGetRun,
   handleRunEvents,
+  missionInput,
 } from "./api";
 import { type AppDatabase, createPgliteAppDatabase } from "./db";
 import { createFakeRunner } from "./fake-runner";
@@ -102,6 +104,24 @@ describe("POST /api/runs", () => {
     expect(d.tasks).toHaveLength(1);
   });
 
+  it("starts a Repo X-ray from a GitHub URL and keeps a tree ref", async () => {
+    const d = deps();
+    const response = await handleCreateRun(
+      post({ missionId: "repo-xray", input: { url: "github.com/pallets/click/tree/8.1.x" } }),
+      d,
+    );
+    expect(response.status).toBe(201);
+    expect(d.tasks).toHaveLength(1);
+    const request = CreateRunRequestSchema.parse({
+      missionId: "repo-xray",
+      input: { url: "https://github.com/sindresorhus/ky", ref: "v1.0.0" },
+    });
+    expect(missionInput(request, "https://github.com/sindresorhus/ky", undefined)).toEqual({
+      url: "https://github.com/sindresorhus/ky",
+      ref: "v1.0.0",
+    });
+  });
+
   it("rejects cross-origin and origin-less requests (CSRF)", async () => {
     const d = deps();
     const evil = await handleCreateRun(post(validBody, { origin: "https://evil.example" }), d);
@@ -120,7 +140,18 @@ describe("POST /api/runs", () => {
     const d = deps();
     const cases: [unknown, number, string][] = [
       ["{not json", 400, "invalid_json"],
-      [{ missionId: "repo-xray", input: { url: "acme.com" } }, 400, "invalid_request"],
+      [{ missionId: "repo-xray", input: { url: "acme.com" } }, 400, "invalid_url"],
+      [{ missionId: "ship-a-pr", input: { url: "github.com/a/b" } }, 400, "invalid_request"],
+      [
+        { missionId: "company-xray", input: { url: "acme.com", ref: "main" } },
+        400,
+        "invalid_request",
+      ],
+      [
+        { missionId: "repo-xray", input: { url: "github.com/a/b", ref: "../x" } },
+        400,
+        "invalid_request",
+      ],
       [{ missionId: "company-xray", input: { url: "acme.com", extra: 1 } }, 400, "invalid_request"],
       [{ missionId: "company-xray", input: { url: "http://127.0.0.1" } }, 400, "invalid_url"],
       [{ missionId: "company-xray", input: { url: "localhost" } }, 400, "invalid_url"],

@@ -354,6 +354,18 @@ export function createFakeRunner(options: { delayMs?: number } = {}): MissionRun
         ? { status: "completed" }
         : { status: "failed" };
     }
+    if (missionId === "repo-xray") {
+      await emit({
+        type: "run.failed",
+        payload: {
+          error: {
+            code: "not_simulated",
+            message: "Repo X-ray has no simulated script; turn the fake runner off to run it live.",
+          },
+        },
+      });
+      return { status: "failed" };
+    }
     if (
       !(await play([
         { type: "plan.proposed", payload: { version: 1, steps: AUDIT_SIMULATED_PLAN } },

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MILESTONES } from "./roadmap";
-import { MISSION_GROUPS, MISSIONS, missionById, missionsInGroup } from "./missions";
+import { isMissionLive, MISSION_GROUPS, MISSIONS, missionById, missionsInGroup } from "./missions";
 
 describe("mission catalogue", () => {
   it("lists every mission from the spec exactly once", () => {
@@ -51,6 +51,14 @@ describe("mission catalogue", () => {
       expect(mission.outcome.length).toBeLessThanOrEqual(96);
       expect(mission.outcome).not.toMatch(/\n/);
     }
+  });
+
+  it("marks Repo X-ray live ahead of its milestone, and nothing else in M5", () => {
+    expect(isMissionLive(missionById("repo-xray"))).toBe(true);
+    expect(isMissionLive(missionById("ship-a-pr"))).toBe(false);
+    expect(
+      MISSIONS.filter((mission) => mission.live === true).map((mission) => mission.id),
+    ).toEqual(["repo-xray"]);
   });
 
   it("looks missions up by id", () => {

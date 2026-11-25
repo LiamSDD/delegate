@@ -20,6 +20,7 @@ export interface StartRunRequest {
     goal?: string;
     name?: string;
     opportunityId?: string;
+    ref?: string;
   };
   parentRunId?: string;
 }

@@ -14,7 +14,7 @@ import {
 import { buildRunView, elapsedMs } from "@/lib/runs/run-view";
 import { cn } from "@/lib/utils";
 
-import { missionLabel, type RunnableMissionId } from "@/lib/m2-contract";
+import { missionLabel, RUNNABLE_MISSION_IDS, type RunnableMissionId } from "@/lib/m2-contract";
 
 import { AgentLanes } from "./agent-lanes";
 import { AuditPanel } from "./audit-panel";
@@ -25,6 +25,7 @@ import { ForkButton, ForkPanel } from "./fork-panel";
 import { NextActions, nextActionsFor } from "./next-actions";
 import { PlanApprovalCard } from "./plan-approval-card";
 import { PlanPanel } from "./plan-panel";
+import { RepoXrayPanel } from "./repo-xray-panel";
 import { Eyebrow, useNow } from "./primitives";
 import { ReplayBar, ReplayButton } from "./replay-bar";
 import { OutcomeBanner, ResumedBanner, StreamBanner } from "./run-status";
@@ -96,7 +97,7 @@ function Skeleton({
 }
 
 function isRunnable(id: string): id is RunnableMissionId {
-  return id === "company-xray" || id === "automation-audit" || id === "build-agent";
+  return (RUNNABLE_MISSION_IDS as readonly string[]).includes(id);
 }
 
 function optionalText(raw: Record<string, unknown>, key: string): string | undefined {
@@ -150,16 +151,18 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
       : parseBrief(ready.brief.content);
   const isAudit = (ready?.missionId ?? missionId) === "automation-audit";
   const isBuild = (ready?.missionId ?? missionId) === "build-agent";
+  const isRepo = (ready?.missionId ?? missionId) === "repo-xray";
   const hasBrief =
     (ready?.brief !== null && ready?.brief !== undefined) ||
     (ready?.audit !== null && ready?.audit !== undefined) ||
-    (isBuild && Object.values(ready?.state.artifacts ?? {}).some((a) => a.kind === "assistant"));
+    (isBuild && Object.values(ready?.state.artifacts ?? {}).some((a) => a.kind === "assistant")) ||
+    (isRepo && Object.values(ready?.state.artifacts ?? {}).some((a) => a.kind === "repo-xray"));
   const pendingPlan = replay.active ? null : (ready?.pendingPlan ?? null);
   const tab: TabId = chosenTab ?? (pendingPlan !== null ? "plan" : hasBrief ? "brief" : "activity");
   const TABS: { id: TabId; label: string }[] = [
     { id: "plan", label: pendingPlan === null ? "Plan" : "Approve plan" },
     { id: "activity", label: "Agents" },
-    { id: "brief", label: isAudit ? "Audit" : isBuild ? "Assistant" : "Brief" },
+    { id: "brief", label: isAudit ? "Audit" : isBuild ? "Assistant" : isRepo ? "X-ray" : "Brief" },
   ];
   const actions =
     ready === null
@@ -202,7 +205,7 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
       : (() => {
           const created = events[0];
           const raw = created?.type === "run.created" ? created.payload.input : {};
-          const fields = ["focus", "department", "goal", "name", "opportunityId"] as const;
+          const fields = ["focus", "department", "goal", "name", "opportunityId", "ref"] as const;
           const extra = Object.fromEntries(
             fields.flatMap((key) => {
               const value = optionalText(raw, key);
@@ -399,7 +402,9 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
             )}
           >
             <NextActions runId={runId} actions={actions} />
-            {isBuild ? (
+            {isRepo ? (
+              <RepoXrayPanel events={events} running={running} />
+            ) : isBuild ? (
               <BuildAgentPanel events={events} running={running} />
             ) : isAudit ? (
               <AuditPanel

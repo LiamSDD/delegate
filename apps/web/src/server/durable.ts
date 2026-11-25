@@ -1,6 +1,6 @@
 import { analyseForResume } from "@delegate/runtime/server";
 
-import type { RunnableMissionId } from "@/lib/m2-contract";
+import { RUNNABLE_MISSION_IDS, type RunnableMissionId } from "@/lib/m2-contract";
 import { MAX_RESUMES, resumeDecision, resumeMarkerDraft, resumeNotices } from "@/lib/runs/resume";
 
 import type { AppDatabase } from "./db";
@@ -34,7 +34,7 @@ function resuming(): Set<string> {
 }
 
 function isRunnable(mission: string): mission is RunnableMissionId {
-  return mission === "company-xray" || mission === "automation-audit" || mission === "build-agent";
+  return (RUNNABLE_MISSION_IDS as readonly string[]).includes(mission);
 }
 
 async function failWorkerLost(

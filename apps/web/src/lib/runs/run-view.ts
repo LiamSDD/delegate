@@ -404,7 +404,7 @@ function latestBrief(events: readonly RunEvent[], state: RunState): BriefArtifac
   return latestArtifact(
     events,
     state,
-    (kind) => /brief|xray/i.test(kind) && kind !== "source-snapshot",
+    (kind) => /brief|xray/i.test(kind) && kind !== "source-snapshot" && !kind.startsWith("repo-"),
   );
 }
 
