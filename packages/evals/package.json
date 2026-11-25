@@ -12,6 +12,10 @@
     "./results": {
       "types": "./src/results.ts",
       "default": "./src/results.ts"
+    },
+    "./evolution": {
+      "types": "./src/evolve/log.ts",
+      "default": "./src/evolve/log.ts"
     }
   },
   "scripts": {
@@ -22,7 +26,8 @@
     "eval": "tsx src/run-eval.ts",
     "gate": "tsx src/gate.ts",
     "agreement": "tsx src/agreement.ts",
-    "redteam": "tsx src/redteam/cli.ts"
+    "redteam": "tsx src/redteam/cli.ts",
+    "evolve": "tsx src/evolve/cli.ts"
   },
   "dependencies": {
     "@delegate/policy": "workspace:*",

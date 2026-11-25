@@ -81,6 +81,7 @@ export interface RunEvalDeps {
   judgeCompleter?: JudgeCompleter;
   checkLinks?: (urls: readonly string[]) => Promise<Map<string, LinkStatus>>;
   log: (line: string) => void;
+  onTrial?: (record: TrialRecord) => void;
 }
 
 const JudgeRecordSchema = z.object({
@@ -632,6 +633,7 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
       trialPath(outDir, evalCase.id, trial, "trial.json"),
       JSON.stringify(record, null, 2),
     );
+    deps.onTrial?.(record);
     deps.log(
       `  ${evalCase.id}#${trial}: ${record.outcome}${record.failureCode === undefined ? "" : ` (${record.failureCode})`}, score ${record.score.toFixed(2)}, ${(record.metrics.latencyMs / 1000).toFixed(1)} s${record.hardFailures.length === 0 ? "" : `, hard failures: ${record.hardFailures.join(", ")}`}`,
     );
