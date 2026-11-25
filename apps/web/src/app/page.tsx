@@ -5,7 +5,7 @@ import { type ExampleTarget, MissionInput } from "@/components/mission-input";
 import { SectionHeading } from "@/components/section-heading";
 import { SystemStatus } from "@/components/system-status";
 import { TrustStrip } from "@/components/trust-strip";
-import { loadKeylessChain } from "@/lib/model-chain-file";
+import { loadLiveChain } from "@/lib/model-chain-file";
 import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 
 const EXAMPLES: readonly ExampleTarget[] = [
@@ -20,7 +20,7 @@ const EXAMPLES: readonly ExampleTarget[] = [
 ];
 
 export default async function HomePage() {
-  const chain = loadKeylessChain();
+  const chain = loadLiveChain();
   const autoApprove = (await cookies()).get(AUTO_APPROVE_COOKIE)?.value === "1";
   return (
     <div className="mx-auto flex max-w-content flex-col px-6">
@@ -30,7 +30,7 @@ export default async function HomePage() {
       >
         <div className="flex max-w-3xl flex-col gap-5">
           <p className="font-mono text-2xs tracking-label text-text-subtle uppercase">
-            Preview <span aria-hidden="true">·</span> multi-agent runs, M2
+            Live <span aria-hidden="true">·</span> X-ray, Automation Audit, Build it
           </p>
           <h1
             id="hero-title"
@@ -47,7 +47,7 @@ export default async function HomePage() {
         </div>
         <div className="flex max-w-3xl flex-col gap-6">
           <MissionInput examples={EXAMPLES} initialAutoApprove={autoApprove} />
-          <SystemStatus summary={chain} />
+          <SystemStatus chain={chain} />
         </div>
       </section>
 
@@ -62,7 +62,7 @@ export default async function HomePage() {
           id="missions-title"
         >
           Each mission is one folder: input schema, allowed tools, policies, deliverable schema and
-          an eval dataset. Nothing here runs yet; every row says when it arrives.
+          an eval dataset. Rows marked Live run today; the rest say when they arrive.
         </SectionHeading>
         <MissionCatalogue />
       </section>

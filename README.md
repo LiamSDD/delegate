@@ -7,10 +7,12 @@ Paste a company URL, a GitHub repo or a goal. Delegate plans the work, runs spec
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/home-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/images/home-light.png">
-  <img alt="Delegate home page: one input for a company URL, a GitHub repo or a goal, with the keyless default model chain" src="docs/images/home-dark.png" width="100%">
+  <img alt="Delegate home page: one input for a company URL, a GitHub repo or a goal, with the live model chain" src="docs/images/home-dark.png" width="100%">
 </picture>
 
-> **Status: in active development.** Milestone 0 (foundation) is complete: the multi-tenant data model, the typed event log, the model router, the policy engine, eval statistics and the web shell, with 642 tests. Live agent runs arrive in M1. Every number on this page comes from code in this repo; see [`docs/PROGRESS.md`](docs/PROGRESS.md).
+**Live demo: [delegate-beryl.vercel.app](https://delegate-beryl.vercel.app)**. Paste a company URL and watch the agents work. Free models, $0, no sign-up.
+
+> **Status: M3 shipped.** Company X-ray, AI Automation Audit and Build it run live end to end on free NVIDIA-hosted models with a keyless fallback, with durable resume from the event log and 1,171 tests. Next is M4, the trust layer: red-team suite, replay and fork-from-step. Every number on this page comes from code in this repo; see [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 ## Why it exists
 

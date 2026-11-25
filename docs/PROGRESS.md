@@ -62,3 +62,11 @@ Append one entry per completed task: date, shipped, next, known issues, metrics.
 - **Metrics (live):** Build-an-Agent on plausible.io (owner chain) 150 s, 60 pages, 491 chunks, evals 12/12, resume after kill skipped finished steps and refetched nothing; full web flow Audit → Build it → assistant on the keyless chain: Audit ~7 min, build 24 min, evals 11/15 with all refusal cases passing, cited answers and correct refusal; Kimi K3.1 Pro served the max-quality design step in 204 s. Bake-off: MiniMax M3.1 Flash 1.000, Step 5 0.988, Kimi K3.1 Pro 0.975, Mistral Large 4 0.750, Nemotron Super 0.725, Nemotron Ultra 0.675. `pnpm check` 34/34; tests: runtime 497, web 268, db 178, evals 77, policy 72.
 - **Next:** full Demo A pass in the browser, deploy, then M4 trust layer.
 - **Known issues:** keyless chain is slow for Build it (about 24 min); assistant retrieval stores are in memory per process, so chat refuses after a restart until a Postgres-backed store lands; real kill-and-restart resume of the web server not exercised (decision logic unit-tested); max-quality end-to-end run on the final config not yet completed; live rotation now waits ~5–11 s for MiniMax's first token on high-volume calls.
+
+## 2026-11-25 · Deployed
+
+- Live at https://delegate-beryl.vercel.app (Vercel Hobby + Neon free tier).
+- `scripts/neon-setup.sh` runs migrations as the Neon owner, sets the `delegate_app_login` password and writes the Vercel variables to a private gitignored file.
+- Two migration fixes found on real Postgres (non-superuser owner): `GRANT delegate_definer ... WITH SET TRUE`, and a temporary `CREATE ON SCHEMA public` for `delegate_definer` around each `OWNER TO`, revoked straight after.
+- First live run: Company X-ray on plausible.io finished in 2m41s, 21/21 citations resolved, citation accuracy 86%, $0. MiniMax returned server errors from Vercel's region and every call fell back to Nemotron 3.5 Super VL.
+- Home page now shows the live model chain and marks shipped missions as Live.

@@ -1,32 +1,41 @@
-import type { ChainSummary } from "@/lib/model-chain";
+import type { LiveChain } from "@/lib/model-chain";
 import { repoFileUrl } from "@/lib/site";
 
-const PLACEMENT_LABEL = { hosted: "hosted", "in-browser": "in-browser" } as const;
+const SHOWN = 4;
 
-export function SystemStatus({ summary }: { summary: ChainSummary }) {
+export function SystemStatus({ chain }: { chain: LiveChain }) {
   return (
     <section
-      aria-label="Default model chain"
+      aria-label="Live model chain"
       className="flex flex-col gap-2 font-mono text-xs text-text-muted sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4"
     >
       <span className="flex items-center gap-2 text-text-subtle">
-        <span aria-hidden="true" className="size-1.5 rounded-full bg-text-subtle" />
-        Default chain
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
+        Model chain
       </span>
-      {summary.status === "ok" ? (
-        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          {summary.providers.map((provider) => (
-            <li key={provider.id} className="flex items-center gap-1.5">
-              <span className="text-text">{provider.name}</span>
-              <span className="text-text-subtle">{PLACEMENT_LABEL[provider.placement]}</span>
-              <span className="rounded-xs border border-border px-1 text-2xs text-success">
-                keyless
-              </span>
+      {chain.status === "ok" ? (
+        <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {chain.models.slice(0, SHOWN).map((model, index) => (
+            <li key={model.name} className="flex items-center gap-1.5">
+              {index > 0 ? (
+                <span aria-hidden="true" className="text-text-subtle">
+                  →
+                </span>
+              ) : null}
+              <span className={index === 0 ? "text-text" : undefined}>{model.name}</span>
+              {model.keyless ? (
+                <span className="rounded-xs border border-border px-1 text-2xs text-success">
+                  keyless
+                </span>
+              ) : null}
             </li>
           ))}
-        </ul>
+          {chain.models.length > SHOWN ? (
+            <li className="text-text-subtle">+{chain.models.length - SHOWN} fallbacks</li>
+          ) : null}
+        </ol>
       ) : (
-        <span className="text-text">{summary.reason}</span>
+        <span className="text-text">{chain.reason}</span>
       )}
       <a
         href={repoFileUrl("config/models.json")}
@@ -34,7 +43,7 @@ export function SystemStatus({ summary }: { summary: ChainSummary }) {
         rel="noreferrer"
         className="text-text-subtle underline-offset-4 hover:text-text hover:underline sm:ml-auto"
       >
-        Configured, not health-checked · config/models.json
+        $0 · free models · config/models.json
       </a>
     </section>
   );

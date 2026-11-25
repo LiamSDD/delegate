@@ -17,10 +17,16 @@ export const MILESTONES: readonly Milestone[] = [
   { id: "M8", title: "Launch polish" },
 ];
 
-export const CURRENT_MILESTONE: MilestoneId = "M0";
+export const CURRENT_MILESTONE: MilestoneId = "M3";
 
 export function milestoneById(id: MilestoneId): Milestone {
   const milestone = MILESTONES.find((candidate) => candidate.id === id);
   if (milestone === undefined) throw new Error(`Unknown milestone ${id}`);
   return milestone;
+}
+
+export function isShipped(id: MilestoneId): boolean {
+  const index = MILESTONES.findIndex((milestone) => milestone.id === id);
+  const current = MILESTONES.findIndex((milestone) => milestone.id === CURRENT_MILESTONE);
+  return index <= current;
 }
