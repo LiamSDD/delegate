@@ -40,6 +40,7 @@ export const ResultTrialSchema = z.strictObject({
   latencyMs: count,
   costMicroUsd: count,
   tokens: count,
+  metrics: z.record(z.string(), z.number()).optional(),
 });
 export type ResultTrial = z.infer<typeof ResultTrialSchema>;
 
@@ -48,6 +49,14 @@ export const ResultCaseSchema = z.strictObject({
   company: z.string().min(1),
   trials: z.array(ResultTrialSchema),
 });
+
+export const ResultMetricSchema = z.strictObject({
+  mean: z.number(),
+  lower: z.number().nullable(),
+  upper: z.number().nullable(),
+  n: z.number().int().positive(),
+});
+export type ResultMetric = z.infer<typeof ResultMetricSchema>;
 
 export const ResultCriterionAgreementSchema = z.strictObject({
   criterion: z.string().min(1),
@@ -94,8 +103,22 @@ export const EvalResultFileSchema = z.strictObject({
   totals: z.strictObject({ trials: count, costMicroUsd: count, tokens: count }),
   cases: z.array(ResultCaseSchema),
   agreement: ResultAgreementSchema,
+  judgeCriteria: z.record(z.string(), ResultMetricSchema).optional(),
+  missionMetrics: z.record(z.string(), ResultMetricSchema).optional(),
 });
 export type EvalResultFile = z.infer<typeof EvalResultFileSchema>;
+
+export const CALIBRATION_FILE_VERSION = 1;
+
+export const CalibrationFileSchema = z.strictObject({
+  version: z.literal(CALIBRATION_FILE_VERSION),
+  mission: slug,
+  generatedAt: z.iso.datetime({ offset: true }),
+  labelsFile: z.string().min(1),
+  criteria: z.array(z.string().min(1)).min(1),
+  agreement: ResultAgreementSchema,
+});
+export type CalibrationFile = z.infer<typeof CalibrationFileSchema>;
 
 export interface MeanInterval {
   mean: number;

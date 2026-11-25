@@ -2,5 +2,11 @@ results/*
 !results/baseline.json
 !results/redteam.json
 !results/xray/
+!results/audit/
+!results/build/
+!results/repo/
+!results/goal/
+!results/calibration/
+!results/baseline.*.json
 !results/evolution/
 results/evolution/runs/

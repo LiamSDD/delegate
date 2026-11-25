@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 import { z } from "zod";
 
 import { normalQuantile } from "../stats";
-import { JUDGE_CRITERIA, type JudgeCriterion, type JudgeVerdict } from "./xray-judge";
+import { JUDGE_CRITERIA } from "./xray-judge";
 
 const score = z.number().int().min(1).max(5);
 
@@ -11,31 +12,64 @@ export const HumanLabelSchema = z.strictObject({
   caseId: z.string().min(1),
   run: z.string().min(1),
   trial: z.number().int().nonnegative(),
-  labeller: z.string().min(1),
+  labeller: z.string().min(1).max(80),
   labelledAt: z.iso.date(),
-  scores: z.strictObject({
-    accuracy: score,
-    specificity: score,
-    actionability: score,
-    citationFaithfulness: score,
-  }),
-  notes: z.string().optional(),
+  scores: z.record(z.string().min(1), score),
+  notes: z.string().max(1_000).optional(),
 });
 export type HumanLabel = z.infer<typeof HumanLabelSchema>;
 
-export function parseHumanLabels(text: string): HumanLabel[] {
+function labelFor(criteria: readonly string[] | undefined) {
+  if (criteria === undefined) return HumanLabelSchema;
+  return HumanLabelSchema.refine(
+    (label) =>
+      Object.keys(label.scores).length === criteria.length &&
+      criteria.every((criterion) => label.scores[criterion] !== undefined),
+    { error: `scores must cover exactly: ${criteria.join(", ")}` },
+  );
+}
+
+export function parseHumanLabels(text: string, criteria?: readonly string[]): HumanLabel[] {
+  const schema = labelFor(criteria);
   return text
     .split(/\r?\n/)
     .filter((line) => line.trim() !== "")
     .map((line, index) => {
-      const parsed = HumanLabelSchema.safeParse(JSON.parse(line) as unknown);
-      if (!parsed.success) throw new Error(`Human label line ${index + 1} is invalid`);
+      const parsed = schema.safeParse(JSON.parse(line) as unknown);
+      if (!parsed.success)
+        throw new Error(
+          `Human label line ${index + 1} is invalid: ${z.prettifyError(parsed.error)}`,
+        );
       return parsed.data;
     });
 }
 
-export function loadHumanLabels(path: string): HumanLabel[] {
-  return existsSync(path) ? parseHumanLabels(readFileSync(path, "utf8")) : [];
+export function loadHumanLabels(path: string, criteria?: readonly string[]): HumanLabel[] {
+  return existsSync(path) ? parseHumanLabels(readFileSync(path, "utf8"), criteria) : [];
+}
+
+export function appendHumanLabel(
+  path: string,
+  label: HumanLabel,
+  criteria: readonly string[],
+): HumanLabel {
+  const parsed = labelFor(criteria).parse(label);
+  const existing = loadHumanLabels(path, criteria);
+  if (
+    existing.some(
+      (entry) =>
+        entry.run === parsed.run &&
+        entry.caseId === parsed.caseId &&
+        entry.trial === parsed.trial &&
+        entry.labeller === parsed.labeller,
+    )
+  )
+    throw new Error(
+      `${parsed.labeller} already labelled ${parsed.run}/${parsed.caseId}/${parsed.trial}`,
+    );
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, `${JSON.stringify(parsed)}\n`);
+  return parsed;
 }
 
 export function cohenKappa(a: readonly number[], b: readonly number[]): number | undefined {
@@ -88,7 +122,7 @@ export function cohenKappaInterval(
 }
 
 export interface CriterionAgreement {
-  criterion: JudgeCriterion;
+  criterion: string;
   n: number;
   exactMatchRate: number;
   withinOneRate: number;
@@ -105,12 +139,13 @@ export interface JudgedTrial {
   caseId: string;
   run: string;
   trial: number;
-  verdict: JudgeVerdict;
+  scores: Readonly<Record<string, number>>;
 }
 
 export function agreementReport(
   labels: readonly HumanLabel[],
   judged: readonly JudgedTrial[],
+  criteria: readonly string[] = JUDGE_CRITERIA,
 ): AgreementReport {
   if (labels.length === 0) return { status: "no_human_labels", labels: 0 };
   const byKey = new Map(
@@ -118,7 +153,7 @@ export function agreementReport(
   );
   const pairs = labels.flatMap((label) => {
     const match = byKey.get(`${label.run}/${label.caseId}/${label.trial}`);
-    return match === undefined ? [] : [{ label, verdict: match.verdict }];
+    return match === undefined ? [] : [{ label, scores: match.scores }];
   });
   if (pairs.length === 0)
     return { status: "no_matching_judgements", labels: labels.length, matched: 0 };
@@ -126,38 +161,48 @@ export function agreementReport(
     status: "ok",
     labels: labels.length,
     matched: pairs.length,
-    criteria: JUDGE_CRITERIA.map((criterion) => {
-      const human = pairs.map((pair) => pair.label.scores[criterion]);
-      const judge = pairs.map((pair) => pair.verdict[criterion].score);
-      const n = pairs.length;
-      return {
-        criterion,
-        n,
-        exactMatchRate: human.filter((value, index) => value === judge[index]).length / n,
-        withinOneRate:
-          human.filter((value, index) => Math.abs(value - (judge[index] ?? 0)) <= 1).length / n,
-        kappa: cohenKappa(human, judge),
-        kappaInterval: cohenKappaInterval(human, judge),
-      };
+    criteria: criteria.flatMap((criterion) => {
+      const scored = pairs.filter(
+        (pair) =>
+          pair.label.scores[criterion] !== undefined && pair.scores[criterion] !== undefined,
+      );
+      if (scored.length === 0) return [];
+      const human = scored.map((pair) => pair.label.scores[criterion] ?? 0);
+      const judge = scored.map((pair) => pair.scores[criterion] ?? 0);
+      const n = scored.length;
+      return [
+        {
+          criterion,
+          n,
+          exactMatchRate: human.filter((value, index) => value === judge[index]).length / n,
+          withinOneRate:
+            human.filter((value, index) => Math.abs(value - (judge[index] ?? 0)) <= 1).length / n,
+          kappa: cohenKappa(human, judge),
+          kappaInterval: cohenKappaInterval(human, judge),
+        },
+      ];
     }),
   };
 }
 
-export function renderAgreement(report: AgreementReport): string {
+export function renderAgreement(
+  report: AgreementReport,
+  labelsFile = "datasets/company-xray/human-labels.v1.jsonl",
+): string {
   switch (report.status) {
     case "no_human_labels":
-      return "No human labels yet: judge-human agreement is not measured. Add labels to `datasets/company-xray/human-labels.v1.jsonl`.";
+      return `No human labels yet: judge-human agreement is not measured. Label stored trials with \`pnpm label\`; labels go to \`${labelsFile}\`.`;
     case "no_matching_judgements":
       return `${report.labels} human labels found, but none match a judged trial in the results.`;
     case "ok":
       return [
         `${report.matched} of ${report.labels} human labels matched a judged trial.`,
         "",
-        "| Criterion | n | Exact match | Within 1 | Cohen's kappa |",
+        "| Criterion | n | Exact match | Within 1 | Cohen's kappa (95% CI) |",
         "|---|---|---|---|---|",
         ...report.criteria.map(
           (row) =>
-            `| ${row.criterion} | ${row.n} | ${(row.exactMatchRate * 100).toFixed(0)}% | ${(row.withinOneRate * 100).toFixed(0)}% | ${row.kappa === undefined ? "n/a" : row.kappa.toFixed(2)} |`,
+            `| ${row.criterion} | ${row.n} | ${(row.exactMatchRate * 100).toFixed(0)}% | ${(row.withinOneRate * 100).toFixed(0)}% | ${row.kappa === undefined ? "n/a" : `${row.kappa.toFixed(2)}${row.kappaInterval === undefined ? "" : ` [${row.kappaInterval.lower.toFixed(2)}, ${row.kappaInterval.upper.toFixed(2)}]`}`} |`,
         ),
       ].join("\n");
   }
