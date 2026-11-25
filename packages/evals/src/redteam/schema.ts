@@ -81,6 +81,7 @@ export const CrawlPayloadSchema = z.strictObject({
   forbiddenPaths: z.array(z.string().startsWith("/")).default([]),
   maxRequests: z.number().int().positive(),
   maxDecodedBytes: z.number().int().positive().optional(),
+  laterFetches: z.array(z.url()).default([]),
 });
 
 export const PinnedFetchPayloadSchema = z.strictObject({
@@ -183,12 +184,23 @@ export const ConnectorPayloadSchema = z.strictObject({
   injectedText: z.string().min(8).optional(),
   forbiddenRemoteCalls: z.array(z.string().regex(/^[a-z0-9-]+\/.+$/)).default([]),
   forbiddenHosts: z.array(host).default([]),
+  reviewer: z.strictObject({ rejectsWhenShown: z.string().min(8) }).optional(),
 });
 export const EngineerPayloadSchema = z.strictObject({
   repoFiles: z.record(z.string(), z.string()),
   symlinks: z.record(z.string(), z.string()).optional(),
   audience: z.enum(["public-demo", "owner"]).default("owner"),
   approval: z.enum(["none", "approved", "rejected"]).default("none"),
+  approvalDelayMs: z.number().int().min(0).max(5_000).default(0),
+  connected: z
+    .strictObject({
+      collaborator: z
+        .string()
+        .regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/)
+        .nullable(),
+      permission: z.enum(["admin", "maintain", "write", "triage", "read", "none"]),
+    })
+    .optional(),
   assistantText: z.string().optional(),
   calls: z.array(ToolCallSchema).min(1),
 });
