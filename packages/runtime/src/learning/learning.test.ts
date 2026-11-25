@@ -89,6 +89,75 @@ describe("lessons for the newer missions", () => {
   });
 });
 
+describe("specificity and deep research lessons", () => {
+  it("learns that generic claims were dropped and whether deep research rounds helped", () => {
+    const [created, ...rest] = xrayRunLog();
+    if (created === undefined) throw new Error("empty log");
+    const at = "2026-11-24T10:05:00.000Z";
+    const deepen = {
+      runId: created.runId,
+      at,
+      type: "step.completed" as const,
+      stepId: "deepen_research",
+      payload: {
+        outcome: "succeeded" as const,
+        summary: POISON,
+        artifactIds: [],
+        research: {
+          rounds: [
+            {
+              round: 1,
+              thin: [POISON.slice(0, 100)],
+              targets: ["/newsroom"],
+              selectedBy: "planner" as const,
+              fetched: 2,
+              newFacts: 5,
+              coverageBefore: 0.25,
+              coverageAfter: 0.75,
+            },
+          ],
+          stopReason: "coverage_met" as const,
+          coverage: 0.75,
+        },
+      },
+    };
+    const critic = {
+      runId: created.runId,
+      at,
+      type: "step.completed" as const,
+      stepId: "critic",
+      payload: {
+        outcome: "succeeded" as const,
+        summary: "ok",
+        artifactIds: [],
+        critic: {
+          claimsChecked: 10,
+          supported: 9,
+          fixed: 1,
+          removed: 0,
+          unverified: 0,
+          fixLoops: 1,
+          citationAccuracy: 1,
+          draftCitationAccuracy: 0.9,
+          specificity: { score: 0.8, specific: 8, generic: 2, movedToContext: 2, dropped: 0 },
+        },
+      },
+    };
+    const lessons = extractLessonCandidates([created, ...rest, deepen, critic], frame);
+    expect(lessons.find((lesson) => lesson.kind === "research")).toMatchObject({
+      key: "research:rounds_helped",
+      polarity: "keep",
+      stepId: "deepen_research",
+      text: "Deep research added 5 facts in 1 round; coverage 25% to 75%.",
+    });
+    expect(lessons.find((lesson) => lesson.kind === "specificity")).toMatchObject({
+      key: "specificity:generic_dropped",
+      polarity: "avoid",
+    });
+    for (const lesson of lessons) expect(poisonFragments(lesson.text)).toEqual([]);
+  });
+});
+
 describe("lesson extraction", () => {
   const events = xrayRunLog();
   const lessons = extractLessonCandidates(events, frame);

@@ -15,6 +15,8 @@ export const LESSON_KINDS = [
   "tool",
   "sandbox",
   "approval",
+  "specificity",
+  "research",
 ] as const;
 export const LessonKindSchema = z.enum(LESSON_KINDS);
 export type LessonKind = z.infer<typeof LessonKindSchema>;
@@ -509,6 +511,48 @@ function approvals(events: readonly LoggedEvent[]): Lesson[] {
   return made === undefined ? [] : [made];
 }
 
+function specificity(events: readonly LoggedEvent[]): Lesson[] {
+  const out: Lesson[] = [];
+  for (const event of events) {
+    if (event.type !== "step.completed") continue;
+    const report = event.payload.critic?.specificity;
+    if (report === undefined || report.generic === 0) continue;
+    const stepId = safeIdent(event.stepId);
+    const made = lesson({
+      key: "specificity:generic_dropped",
+      kind: "specificity",
+      polarity: "avoid",
+      text: `${plural(report.generic, "generic background claim")} (definitions or topic-only sources) were moved to context or dropped; specificity ${report.score === null ? "n/a" : percent(report.score)}. Prefer the target's own pages: newsroom, careers, investors, help.`,
+      ...(stepId === undefined ? {} : { stepId }),
+    });
+    if (made !== undefined) out.push(made);
+  }
+  return out.slice(0, 1);
+}
+
+function research(events: readonly LoggedEvent[]): Lesson[] {
+  const out: Lesson[] = [];
+  for (const event of events) {
+    if (event.type !== "step.completed" || event.payload.research === undefined) continue;
+    const report = event.payload.research;
+    const stepId = safeIdent(event.stepId);
+    const facts = report.rounds.reduce((sum, round) => sum + round.newFacts, 0);
+    const first = report.rounds[0];
+    const helped = facts > 0 && first !== undefined;
+    const made = lesson({
+      key: helped ? "research:rounds_helped" : `research:stopped_${report.stopReason}`,
+      kind: "research",
+      polarity: helped ? "keep" : "avoid",
+      text: helped
+        ? `Deep research added ${plural(facts, "fact")} in ${plural(report.rounds.length, "round")}; coverage ${percent(first.coverageBefore)} to ${percent(report.coverage)}.`
+        : `Deep research stopped (${report.stopReason.replace(/_/g, " ")}) after ${plural(report.rounds.length, "round")} with coverage ${percent(report.coverage)}.`,
+      ...(stepId === undefined ? {} : { stepId }),
+    });
+    if (made !== undefined) out.push(made);
+  }
+  return out;
+}
+
 export function extractLessonCandidates(events: readonly LoggedEvent[], frame: RunFrame): Lesson[] {
   const all = [
     ...planShape(events),
@@ -516,6 +560,8 @@ export function extractLessonCandidates(events: readonly LoggedEvent[], frame: R
     ...approvals(events),
     ...sandbox(events),
     ...critic(events),
+    ...specificity(events),
+    ...research(events),
     ...fallbacks(events),
     ...slowSteps(events),
     ...sources(events, frame),
