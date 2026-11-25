@@ -30,7 +30,6 @@ import { readRunsPaused, setRunsPaused } from "../workspace-settings";
 import { isRunsPausedError, RUNS_PAUSED_MESSAGE } from "./pause";
 import { handleSetRunsPaused } from "./switches";
 import {
-  errorCode,
   jsonPost,
   newGuest,
   newRun,
