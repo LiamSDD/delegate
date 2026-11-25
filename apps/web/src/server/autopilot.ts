@@ -39,6 +39,7 @@ import {
   appendEvent,
   createRunRecord,
   type EventDraft,
+  type Execution,
   getRunRecord,
   isTerminalEventType,
   missionInputOf,
@@ -359,22 +360,55 @@ async function startChild(
   await launchChild(app, ctx, started, deps);
 }
 
-async function launchChild(
+const CANCELLED_BY_PARENT: EventDraft = {
+  type: "run.failed",
+  payload: {
+    error: {
+      code: "cancelled_by_parent",
+      message: "Cancelled: its Autopilot run ended before this step launched.",
+    },
+  },
+};
+
+async function parentIsTerminal(app: AppDatabase, parent: RunContext): Promise<boolean> {
+  const record = await getRunRecord(app, parent.userId, parent.runId);
+  return record === null || isTerminalRecord(record);
+}
+
+async function createChildRecord(
+  app: AppDatabase,
+  parent: RunContext,
+  started: Pick<ChildStartedPayload, "childRunId" | "nodeId" | "missionId" | "input">,
+  execution: Execution,
+): Promise<boolean> {
+  try {
+    await createRunRecord(
+      app,
+      { userId: parent.userId, workspaceId: parent.workspaceId },
+      {
+        runId: started.childRunId,
+        missionId: started.missionId,
+        input: started.input,
+        execution,
+        parentRunId: parent.runId,
+        autopilot: { parentRunId: parent.runId, nodeId: started.nodeId },
+      },
+    );
+    return true;
+  } catch (error: unknown) {
+    if ((await getRunRecord(app, parent.userId, started.childRunId)) !== null) return false;
+    throw error;
+  }
+}
+
+export async function launchChild(
   app: AppDatabase,
   parent: RunContext,
   started: ChildStartedPayload,
   deps: DurableDeps,
 ): Promise<void> {
   const runner = deps.runner();
-  const session = { userId: parent.userId, workspaceId: parent.workspaceId };
-  await createRunRecord(app, session, {
-    runId: started.childRunId,
-    missionId: started.missionId,
-    input: started.input,
-    execution: runner.execution,
-    parentRunId: parent.runId,
-    autopilot: { parentRunId: parent.runId, nodeId: started.nodeId },
-  });
+  if (!(await createChildRecord(app, parent, started, runner.execution))) return;
   const ctx = { runId: started.childRunId, workspaceId: parent.workspaceId, userId: parent.userId };
   const mayAsk = started.approvals.sideEffects === "ask";
   const connections =
@@ -384,6 +418,10 @@ async function launchChild(
     deps.connections !== undefined
       ? await deps.connections(app, ctx).catch(() => undefined)
       : undefined;
+  if (await parentIsTerminal(app, parent)) {
+    await append(app, ctx, CANCELLED_BY_PARENT);
+    return;
+  }
   deps.schedule(() =>
     executeRun({
       app,
@@ -456,8 +494,11 @@ export async function cancelAutopilotChildren(
   app: AppDatabase,
   userId: string,
   parentRunId: string,
-  deps: Pick<DurableDeps, "registry">,
+  deps: Pick<DurableDeps, "registry" | "runner">,
 ): Promise<void> {
+  const parentRecord = await getRunRecord(app, userId, parentRunId);
+  if (parentRecord === null) return;
+  const parent = { runId: parentRunId, workspaceId: parentRecord.workspaceId, userId };
   let state: RunState;
   try {
     state = foldRun(await readAllEvents(app, userId, parentRunId));
@@ -467,7 +508,16 @@ export async function cancelAutopilotChildren(
   for (const child of state.children) {
     if (child.outcome !== undefined) continue;
     const record = await getRunRecord(app, userId, child.childRunId);
-    if (record === null || isTerminalRecord(record)) continue;
+    if (record === null) {
+      if (await createChildRecord(app, parent, child, deps.runner().execution))
+        await append(
+          app,
+          { runId: child.childRunId, workspaceId: parent.workspaceId, userId },
+          CANCELLED_BY_PARENT,
+        );
+      continue;
+    }
+    if (isTerminalRecord(record)) continue;
     await append(
       app,
       { runId: record.id, workspaceId: record.workspaceId, userId },

@@ -1,6 +1,7 @@
 import {
   AUTOPILOT_REPORT_KIND,
   AutopilotReportSchema,
+  type ChildStartedPayload,
   foldRun,
   type RunEvent,
 } from "@delegate/runtime";
@@ -21,7 +22,7 @@ import {
   handleRunChildren,
   startRunForSession,
 } from "./api";
-import { type AutopilotGraphNode } from "./autopilot";
+import { type AutopilotGraphNode, launchChild } from "./autopilot";
 import { type AppDatabase, createPgliteAppDatabase } from "./db";
 import { reviveOrSweep } from "./durable";
 import { storeInstallation } from "./github-connect";
@@ -450,5 +451,73 @@ describe("Autopilot API surfaces", () => {
     const child = await getRunRecord(app, h.session.userId, brief);
     expect(child?.status).toBe("failed");
     expect(child?.lastEventType).toBe("run.failed");
+  });
+});
+
+describe("Autopilot cancel/launch interleaving", () => {
+  async function startedChild(h: Harness, runId: string): Promise<ChildStartedPayload> {
+    h.tasks.length = 0;
+    const started: ChildStartedPayload = {
+      childRunId: crypto.randomUUID(),
+      nodeId: "brief",
+      missionId: "custom-goal",
+      label: "Goal brief",
+      input: { goal: "Cut support load", url: acme.url },
+      approvals: { plan: "human", sideEffects: "none" },
+    };
+    await appendEvent(app, parentCtx(h, runId), { type: "child.started", payload: started });
+    return started;
+  }
+
+  function parentCtx(h: Harness, runId: string) {
+    return { runId, workspaceId: h.session.workspaceId, userId: h.session.userId };
+  }
+
+  it("fails and never schedules a child whose parent went terminal before its row was created", async () => {
+    const h = await harness();
+    const runId = await startAutopilot(h, { goal: "Cut support load", url: "acme.example" });
+    const started = await startedChild(h, runId);
+    await appendEvent(app, parentCtx(h, runId), {
+      type: "run.failed",
+      payload: { error: { code: "cancelled", message: "cancelled by user" } },
+    });
+
+    await launchChild(app, parentCtx(h, runId), started, h.deps);
+
+    expect(h.tasks).toHaveLength(0);
+    const child = foldRun(await readAllEvents(app, h.session.userId, started.childRunId));
+    expect(child.status).toBe("failed");
+    expect(child.error?.code).toBe("cancelled_by_parent");
+    await drain(h);
+    expect(h.seen).toHaveLength(0);
+  });
+
+  it("records a started child with no row as cancelled so the in-flight launch refuses", async () => {
+    const h = await harness();
+    const runId = await startAutopilot(h, { goal: "Cut support load", url: "acme.example" });
+    const started = await startedChild(h, runId);
+
+    const cancelled = await handleCancelRun(
+      new Request(`${ORIGIN}/api/runs/${runId}/cancel`, {
+        method: "POST",
+        headers: { cookie: cookieOf(h.session), origin: ORIGIN, host: "localhost:3000" },
+      }),
+      runId,
+      h.deps,
+    );
+    expect(cancelled.status).toBe(200);
+    const recorded = await getRunRecord(app, h.session.userId, started.childRunId);
+    expect(recorded?.status).toBe("failed");
+    expect(recorded?.mission).toBe("custom-goal");
+
+    await launchChild(app, parentCtx(h, runId), started, h.deps);
+
+    expect(h.tasks).toHaveLength(0);
+    await drain(h);
+    expect(h.seen).toHaveLength(0);
+    const child = foldRun(await readAllEvents(app, h.session.userId, started.childRunId));
+    expect(child.status).toBe("failed");
+    expect(child.error?.code).toBe("cancelled_by_parent");
+    expect(child.autopilot).toEqual({ parentRunId: runId, nodeId: "brief" });
   });
 });
