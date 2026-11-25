@@ -149,18 +149,18 @@ function analystReply(user: string): Response {
   );
 }
 
-function auditEditorReply(user: string): Response {
+function auditEditorReply(user: string, picks = 6): Response {
   const ids = jsonLines(user, '{"id"').map((line) => String(line.id));
   return textReply(
     JSON.stringify({
       company: "Acme Robotics",
-      picks: ids.slice(0, 6),
+      picks: ids.slice(0, picks),
       notes: "Kept six distinct ideas.",
     }),
   );
 }
 
-function criticReply(user: string, forced?: string): Response {
+function criticReply(user: string, forced?: string, contradict?: RegExp): Response {
   const results = jsonLines(user, '{"id"').map((line) => ({
     id: line.id,
     atoms: [
@@ -168,7 +168,11 @@ function criticReply(user: string, forced?: string): Response {
         text: "atom",
         verdict:
           forced ??
-          (String(line.claim).startsWith("UNSUPPORTED") ? "not_enough_info" : "supported"),
+          (contradict?.test(String(line.id)) === true
+            ? "contradicted"
+            : String(line.claim).startsWith("UNSUPPORTED")
+              ? "not_enough_info"
+              : "supported"),
       },
     ],
   }));
@@ -194,6 +198,7 @@ function plannerReply(user: string): Response {
 async function runAudit(
   input: unknown,
   verdict?: "not_enough_info" | "contradicted",
+  options: { editorPicks?: number; contradict?: RegExp } = {},
 ): Promise<{ status: string; events: RunEvent[]; bodies: WireBody[] }> {
   const bodies: WireBody[] = [];
   const site = fixtureFetch((url, init) => {
@@ -205,8 +210,10 @@ async function runAudit(
     if (system.includes("quarantined reader")) return readerReply(user);
     if (system.includes("You are the planner")) return plannerReply(user);
     if (system.includes("You are an analyst")) return analystReply(user);
-    if (system.includes("Automation Audit. Analysts proposed")) return auditEditorReply(user);
-    if (system.includes("You are the critic")) return criticReply(user, verdict);
+    if (system.includes("Automation Audit. Analysts proposed"))
+      return auditEditorReply(user, options.editorPicks);
+    if (system.includes("You are the critic"))
+      return criticReply(user, verdict, options.contradict);
     if (system.includes("You are the editor of Delegate."))
       return verdict === undefined ? fixReply(user) : textReply(JSON.stringify({ fixes: [] }));
     if (system.includes("You are the researcher")) return textReply("Nothing more to fetch.");
@@ -383,6 +390,36 @@ describe("runMission automation-audit end to end (fixture site, fake provider ov
       (event) => event.type === "step.completed" && event.stepId === "critic",
     );
     expect(done).toMatchObject({ payload: { critic: { citationAccuracy: 0 } } });
+  });
+
+  it("backfills verified reserve candidates when the critic drops picked opportunities (gate run, wikimedia-foundation 2026-11-25)", async () => {
+    const { status, events } = await runAudit({ url: `${FIXTURE_ORIGIN}/` }, undefined, {
+      editorPicks: 5,
+      contradict: /^opp-[12]\./,
+    });
+    expect(status).toBe("completed");
+    const audit = finalAudit(events);
+    expect(audit.opportunities.length).toBeGreaterThanOrEqual(5);
+    expect(audit.shortfall).toBeUndefined();
+    expect(audit.opportunities.map((opportunity) => opportunity.id)).toEqual(
+      audit.opportunities.map((_, index) => `opp-${index + 1}`),
+    );
+    const said = events.flatMap((event) =>
+      event.type === "agent.message" && event.stepId === "critic" ? [event.payload.text] : [],
+    );
+    expect(said.join("\n")).toMatch(/Backfilled 2 verified reserve candidates/);
+  });
+
+  it("says explicitly when the evidence supports fewer than five opportunities", async () => {
+    const { status, events } = await runAudit({ url: `${FIXTURE_ORIGIN}/` }, undefined, {
+      editorPicks: 5,
+      contradict: /^(opp-[123]|reserve-\d+)\./,
+    });
+    expect(status).toBe("completed");
+    const audit = finalAudit(events);
+    expect(audit.opportunities).toHaveLength(2);
+    expect(audit.shortfall).toMatchObject({ found: 2, minimum: 5 });
+    expect(audit.summary).toMatch(/Insufficient public evidence/);
   });
 
   it("rejects invalid input", async () => {

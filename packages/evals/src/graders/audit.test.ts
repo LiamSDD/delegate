@@ -61,6 +61,26 @@ describe("gradeAudit", () => {
     );
   });
 
+  it("keeps a thin audit a hard failure but checks that it states its shortfall", () => {
+    const audit = fixtureAudit(evalCase);
+    const opportunities = audit.opportunities.slice(0, 3);
+    const silent = gradeAudit({ evalCase, events: log({ ...audit, opportunities }), targets });
+    expect(kinds(silent, false)).toContain("shortfall_flagged");
+    const flagged = gradeAudit({
+      evalCase,
+      events: log({
+        ...audit,
+        opportunities,
+        shortfall: { found: 3, minimum: 5, reason: "Insufficient public evidence." },
+      }),
+      targets,
+    });
+    expect(flagged.hardFailures).toEqual(["opportunity_count"]);
+    expect(kinds(flagged, true)).toContain("shortfall_flagged");
+    const full = gradeAudit({ evalCase, events: log(audit), targets });
+    expect(kinds(full, true)).toContain("shortfall_flagged");
+  });
+
   it("checks dead links on cited sources when links were checked", () => {
     const grade = gradeAudit({
       evalCase: evalCase,

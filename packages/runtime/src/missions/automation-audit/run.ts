@@ -340,6 +340,12 @@ export function dedupeCandidates(candidates: readonly Candidate[]): Candidate[] 
   return kept;
 }
 
+export function rerankOpportunities(opportunities: readonly Opportunity[]): Opportunity[] {
+  return [...opportunities]
+    .sort((a, b) => estimateRoi(b).eurPerMonth - estimateRoi(a).eurPerMonth)
+    .map((opportunity, index) => ({ ...opportunity, id: `opp-${index + 1}` }));
+}
+
 export function rankOpportunities(candidates: readonly Candidate[]): Opportunity[] {
   return [...candidates]
     .sort((a, b) => estimateRoi(b).eurPerMonth - estimateRoi(a).eurPerMonth)
@@ -348,6 +354,17 @@ export function rankOpportunities(candidates: readonly Candidate[]): Opportunity
 
 function euros(value: number): string {
   return `€${Math.round(value).toLocaleString("en-GB")}`;
+}
+
+export function auditShortfall(
+  found: number,
+): NonNullable<AutomationAudit["shortfall"]> | undefined {
+  if (found >= MIN_OPPORTUNITIES) return undefined;
+  return {
+    found,
+    minimum: MIN_OPPORTUNITIES,
+    reason: `Insufficient public evidence: only ${plural(found, "workflow")} at this company could be tied to cited quotes and survived verification, fewer than the ${MIN_OPPORTUNITIES} this audit aims for. None were padded in; reading more of the company's own pages (careers, help, docs) or connecting internal sources would add more.`,
+  };
 }
 
 export function auditSummary(company: string, opportunities: readonly Opportunity[]): string {
@@ -359,8 +376,9 @@ export function auditSummary(company: string, opportunities: readonly Opportunit
     { hours: 0, eur: 0 },
   );
   const top = opportunities[0];
+  const shortfall = auditShortfall(opportunities.length);
   return cut(
-    `${plural(opportunities.length, "automation opportunity", "automation opportunities")} for ${company}, ranked by estimated value.${top === undefined ? "" : ` Largest: ${top.title} (about ${euros(estimateRoi(top).eurPerMonth)}/month).`} Combined estimate: about ${Math.round(totals.hours)} hours and ${euros(totals.eur)} per month. These are estimates from stated assumptions (${AUDIT_FORMULA}).`,
+    `${plural(opportunities.length, "automation opportunity", "automation opportunities")} for ${company}, ranked by estimated value.${shortfall === undefined ? "" : ` ${shortfall.reason}`}${top === undefined ? "" : ` Largest: ${top.title} (about ${euros(estimateRoi(top).eurPerMonth)}/month).`} Combined estimate: about ${Math.round(totals.hours)} hours and ${euros(totals.eur)} per month. These are estimates from stated assumptions (${AUDIT_FORMULA}).`,
     1200,
   );
 }
@@ -378,6 +396,7 @@ interface AuditState {
   version: number;
   company: string;
   opportunities: Opportunity[];
+  reserves: Opportunity[];
   facts: TopicFact[];
   final: boolean;
   verification?: NonNullable<AutomationAudit["verification"]>;
@@ -442,7 +461,12 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
       sources: sourcesFor(state.opportunities),
       formula: AUDIT_FORMULA,
       ...(state.verification === undefined ? {} : { verification: state.verification }),
+      ...(state.final ? withShortfall(state.opportunities.length) : {}),
     });
+  const withShortfall = (found: number) => {
+    const shortfall = auditShortfall(found);
+    return shortfall === undefined ? {} : { shortfall };
+  };
 
   const analyst = (lens: AuditLens): StepExecutor => ({
     id: lens.stepId,
@@ -680,12 +704,16 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
         }
       }
       const opportunities = rankOpportunities(picked);
+      const reserves = rankOpportunities(pool.filter((candidate) => !picked.includes(candidate)))
+        .slice(0, Math.max(0, MAX_OPPORTUNITIES - opportunities.length))
+        .map((opportunity, index) => ({ ...opportunity, id: `reserve-${index + 1}` }));
       const facts = findingsToFacts(inputFindings(task));
       const state: AuditState = {
         artifactId: crypto.randomUUID(),
         version: 1,
         company,
         opportunities,
+        reserves,
         facts,
         final: false,
       };
@@ -735,7 +763,12 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
         throw new Error("The critic has no drafted audit to check");
       const facts = findingsToFacts(inputFindings(task));
       const quotes = quotesBySource(facts.length > 0 ? facts : state.facts);
-      const claims: CriticClaim[] = state.opportunities.flatMap((opportunity) => [
+      const checkReserves =
+        state.reserves.length > 0 &&
+        state.opportunities.length < MAX_OPPORTUNITIES &&
+        clock.fits(["fast", "worker", "fast"]);
+      const toCheck = [...state.opportunities, ...(checkReserves ? state.reserves : [])];
+      const claims: CriticClaim[] = toCheck.flatMap((opportunity) => [
         {
           id: `${opportunity.id}.workflow`,
           text: opportunity.workflow,
@@ -758,7 +791,7 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
       });
       const supportOf = (support: ClaimSupport) => (support === "supported" ? {} : { support });
       const dropped: string[] = [];
-      const survivors = state.opportunities.flatMap((opportunity): Opportunity[] => {
+      const verify = (opportunity: Opportunity): Opportunity[] => {
         const workflowParts = keptParts(outcome.kept, `${opportunity.id}.workflow`);
         const workflow =
           workflowParts.length === 0
@@ -794,7 +827,14 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
               ? "partially_verified"
               : "unverified";
         return [{ ...next, verification }];
-      });
+      };
+      const picked = state.opportunities.flatMap(verify);
+      const reserveDrops = dropped.length;
+      const backfill = checkReserves
+        ? state.reserves.flatMap(verify).slice(0, Math.max(0, MIN_OPPORTUNITIES - picked.length))
+        : [];
+      dropped.splice(reserveDrops);
+      const survivors = rerankOpportunities([...picked, ...backfill]);
       const accuracy = formatAccuracy(outcome.report);
       if (survivors.length === 0) {
         state.opportunities = state.opportunities.map((opportunity) => ({
@@ -837,15 +877,15 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
         };
       }
       state.version += 1;
+      state.final = true;
       await emit({
         runId,
         type: "artifact.updated",
         stepId: task.step.id,
         payload: { artifactId: state.artifactId, version: state.version, content: content(state) },
       });
-      state.final = true;
       await task.agent.say(
-        `Checked ${plural(outcome.report.claimsChecked, "claim")}: ${accuracy}.${dropped.length === 0 ? "" : ` Dropped ${plural(dropped.length, "opportunity", "opportunities")} whose workflow was contradicted or lost all evidence: ${dropped.join("; ")}.`}`,
+        `Checked ${plural(outcome.report.claimsChecked, "claim")}: ${accuracy}.${dropped.length === 0 ? "" : ` Dropped ${plural(dropped.length, "opportunity", "opportunities")} whose workflow was contradicted or lost all evidence: ${dropped.join("; ")}.`}${backfill.length === 0 ? "" : ` Backfilled ${plural(backfill.length, "verified reserve candidate")} the editor had ranked lower: ${backfill.map((opportunity) => opportunity.title).join("; ")}.`}`,
       );
       const kept = state.opportunities.length;
       if (kept < MIN_OPPORTUNITIES)

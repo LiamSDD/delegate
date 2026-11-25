@@ -52,6 +52,13 @@ export const AutomationAuditSchema = z
     opportunities: z.array(OpportunitySchema).min(1).max(MAX_OPPORTUNITIES),
     sources: z.array(SourceRecordSchema),
     formula: z.literal(AUDIT_FORMULA),
+    shortfall: z
+      .object({
+        found: z.number().int().nonnegative(),
+        minimum: z.number().int().positive(),
+        reason: z.string().trim().min(1).max(500),
+      })
+      .optional(),
     verification: z
       .object({
         status: VerificationStatusSchema,

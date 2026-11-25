@@ -129,6 +129,20 @@ export function gradeAudit(input: {
         detail: `${citations.length - dangling.length}/${citations.length} evidence citations resolve to a listed source`,
       },
     );
+    const shortfall = audit.shortfall;
+    checks.push({
+      kind: "shortfall_flagged",
+      severity: "soft",
+      passed: count >= MIN_OPPORTUNITIES ? shortfall === undefined : shortfall?.found === count,
+      detail:
+        count >= MIN_OPPORTUNITIES
+          ? shortfall === undefined
+            ? "no shortfall to flag"
+            : "flags a shortfall it does not have"
+          : shortfall === undefined
+            ? `${count} opportunities and no insufficient-evidence flag`
+            : `flags insufficient evidence (${shortfall.found} of ${shortfall.minimum})`,
+    });
     const generic = genericOpportunities(audit);
     checks.push({
       kind: "no_generic_ideas",
