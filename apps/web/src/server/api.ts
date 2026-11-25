@@ -15,6 +15,7 @@ import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 
 import { authenticateBearer, hasBearer } from "./api-tokens";
 import { autopilotGraph, cancelAutopilotChildren, createAutopilotRun } from "./autopilot";
+import { isRunsPausedError, RUNS_PAUSED_MESSAGE } from "./control/pause";
 import type { AppDatabase } from "./db";
 import { reviveOrSweep } from "./durable";
 import { executeRun } from "./execute-run";
@@ -49,7 +50,7 @@ import {
 } from "./session";
 import { buildRunView } from "./run-view-api";
 import { createRunEventStream, parseResumeSeq, type RunStreamOptions, SSE_HEADERS } from "./sse";
-import { readAutomation } from "./workspace-settings";
+import { readAutomation, readRunsPaused } from "./workspace-settings";
 
 export interface ApiDeps {
   app: () => Promise<AppDatabase>;
@@ -84,6 +85,7 @@ export type ApiErrorCode =
   | "forbidden"
   | "run_not_finished"
   | "invalid_step"
+  | "runs_paused"
   | "unavailable"
   | "unauthorized"
   | "internal";
@@ -295,7 +297,29 @@ export function unauthorized(): Response {
 
 export type StartRunResult = { ok: true; runId: string } | { ok: false; response: Response };
 
+export function runsPausedResponse(headers: Record<string, string> = {}): Response {
+  return apiError(409, "runs_paused", RUNS_PAUSED_MESSAGE, { headers });
+}
+
 export async function startRunForSession(
+  app: AppDatabase,
+  session: GuestSession,
+  request: CreateRunRequest,
+  deps: ApiDeps,
+  options: { autoApprovePlan: boolean; headers?: Record<string, string> },
+): Promise<StartRunResult> {
+  if ((await readRunsPaused(app, session)) !== null)
+    return { ok: false, response: runsPausedResponse(options.headers) };
+  try {
+    return await startUnpausedRun(app, session, request, deps, options);
+  } catch (error: unknown) {
+    if (isRunsPausedError(error))
+      return { ok: false, response: runsPausedResponse(options.headers) };
+    throw error;
+  }
+}
+
+async function startUnpausedRun(
   app: AppDatabase,
   session: GuestSession,
   request: CreateRunRequest,
@@ -780,6 +804,7 @@ export async function handleForkRun(
     if (!isRunnableMission(missionId)) {
       return apiError(400, "invalid_request", "This mission cannot be forked.");
     }
+    if ((await readRunsPaused(app, session)) !== null) return runsPausedResponse();
     const started = Date.now();
     const fork = planRunFork(await readAllEvents(app, session.userId, parent.id), parsed.data);
     if (!fork.ok) return forkRefusalResponse(fork);
@@ -816,6 +841,7 @@ export async function handleForkRun(
       { status: 201, headers: NO_STORE },
     );
   } catch (error: unknown) {
+    if (isRunsPausedError(error)) return runsPausedResponse();
     console.error("fork run failed", runId, error);
     return apiError(500, "internal", "The run could not be forked.");
   }
