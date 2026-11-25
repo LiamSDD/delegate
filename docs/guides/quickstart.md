@@ -24,7 +24,7 @@ Under the box:
 
 Press Enter. The app creates the run and opens its page.
 
-Addresses with a custom port, a username or password, an IP address or a local hostname are rejected, and the box says why. Input is cut at 2,000 characters, and a goal at 900.
+Only a public hostname is detected as a company website. An address with a custom port, a username or password, or an IP address is not, so the box treats it as a goal, and its label shows that before you start. A hostname on a local or internal suffix, such as `printer.local`, is refused when the run is created, and the box shows the reason. Input is cut at 2,000 characters, and a goal at 900.
 
 ## 3. Review the plan
 

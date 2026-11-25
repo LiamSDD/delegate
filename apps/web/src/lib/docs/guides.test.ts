@@ -11,7 +11,8 @@ import { STDIO_MISSIONS, WAIT_DEFAULT_SECONDS, WAIT_MAX_SECONDS } from "@delegat
 import { describe, expect, it } from "vitest";
 
 import { clientSnippets } from "@/lib/connection-snippets";
-import { MAX_INPUT_LENGTH } from "@/lib/detect-mission";
+import { detectMission, MAX_INPUT_LENGTH } from "@/lib/detect-mission";
+import { normaliseCompanyUrl } from "@/lib/runs/company-url";
 import { REPLAY_SPEEDS } from "@/lib/runs/replay";
 import { MAX_ACTIVE_TOKENS } from "@/server/api-tokens";
 import { LIST_RUNS_MAX } from "@/server/api";
@@ -95,6 +96,18 @@ describe("guides quote the limits the code enforces", () => {
       `Input is cut at ${number.format(MAX_INPUT_LENGTH)} characters, and a goal at ${GOAL_MAX_CHARS}`,
     );
     expect(text).toContain(`${seconds(XRAY_LIMITS.targetMs)} seconds for a Company X-ray`);
+  });
+
+  it("quickstart says what the home box does with an address that is not public", () => {
+    const text = guide("quickstart");
+    expect(text).toContain(
+      "An address with a custom port, a username or password, or an IP address is not, so the box treats it as a goal",
+    );
+    for (const address of ["stripe.com:8443", "user@example.com", "192.168.0.1"])
+      expect(detectMission(address)?.kind, address).toBe("goal");
+    expect(text).toContain("such as `printer.local`, is refused when the run is created");
+    expect(detectMission("printer.local")?.kind).toBe("company");
+    expect(normaliseCompanyUrl("printer.local")).toEqual({ ok: false, reason: "local_host" });
   });
 
   it("missions", () => {
