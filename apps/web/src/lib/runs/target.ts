@@ -1,13 +1,18 @@
 export const GOAL_TARGET_CHARS = 60;
 
 export function repoTarget(repoUrl: string): string | null {
-  const match = /^https:\/\/github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(repoUrl.trim());
+  const match =
+    /^https:\/\/(?:www\.)?github\.com\/([^/]+\/[^/]+?)(?:\.git)?(?:\/(?:tree|blob)\/.*)?\/?$/.exec(
+      repoUrl.trim(),
+    );
   return match?.[1] ?? null;
 }
 
 export function runTarget(input: Record<string, unknown>): string | null {
   if (typeof input.repoUrl === "string") return repoTarget(input.repoUrl);
   if (typeof input.url === "string") {
+    const repo = repoTarget(input.url);
+    if (repo !== null) return repo;
     try {
       return new URL(input.url).hostname.replace(/^www\./, "");
     } catch {

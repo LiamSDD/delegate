@@ -15,6 +15,7 @@ import type { BriefArtifact } from "@/lib/runs/run-view";
 
 import { CitationMarker } from "./brief-panel";
 import { actionButton, Chip, Eyebrow } from "./primitives";
+import { PartialNotice } from "./partial-notice";
 
 function Cites({
   citations,
@@ -117,6 +118,7 @@ export function GoalBriefPanel({
         </div>
       ) : brief === null ? null : (
         <article className="flex flex-col gap-6">
+          <PartialNotice partial={brief.partial} />
           <div className="flex flex-col gap-2">
             <h3 className="font-serif text-xl tracking-display text-balance text-text">
               {brief.objective}

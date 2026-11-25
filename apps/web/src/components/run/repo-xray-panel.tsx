@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 
 import { actionButton, Chip, Eyebrow, type Tone } from "./primitives";
 import { ShipItButton } from "./ship-it-button";
+import { PartialNotice } from "./partial-notice";
 
 function Cite({ xray, citations }: { xray: RepoXray; citations: readonly Citation[] }) {
   return (
@@ -181,6 +182,7 @@ function Overview({ xray }: { xray: RepoXray }) {
           </Chip>
         ))}
       </div>
+      <PartialNotice partial={xray.partial} />
       <p className="text-xs text-text-muted">
         {xray.snapshot.keptFiles} text files read from a{" "}
         {formatBytes(xray.snapshot.compressedBytes)} archive
