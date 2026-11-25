@@ -146,3 +146,4 @@ export const RESEARCH_STEP = {
 };
 
 export { repoTarGz, tarEntries, type TarFixtureEntry } from "./tarball";
+export * from "./autopilot";

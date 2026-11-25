@@ -925,7 +925,7 @@ export function foldRun(events: readonly RunEvent[]): RunState {
       case "child.completed": {
         const payload = event.payload;
         const child = state.children.find((entry) => entry.childRunId === payload.childRunId);
-        if (child === undefined || child.nodeId !== payload.nodeId)
+        if (child?.nodeId !== payload.nodeId)
           throw new EventOrderError(
             `child.completed at seq ${event.seq} has no matching child.started`,
           );
