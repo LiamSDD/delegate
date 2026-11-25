@@ -2,81 +2,18 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { type RunMissionOptions } from "@delegate/runtime/server";
 import { describe, expect, it } from "vitest";
 
 import { runDir } from "../judge/agreement-store";
 import { EvalResultFileSchema } from "../results";
 import { resultFilePath, runEval, type RunEvalDeps, type RunEvalOptions } from "../runner";
 import { loadBuildDataset } from "../datasets/build";
-import {
-  auditFixtureDrafts,
-  buildFixtureDrafts,
-  fixtureAnswers,
-  goalFixtureDrafts,
-  scriptedRunMission,
-} from "../testing/mission-fixtures";
-import { repoFixtureEvents } from "../testing/repo-fixture";
-import { xrayFixtureEvents } from "../testing/xray-fixture";
+import { fixtureAnswers, scriptedRunMission } from "../testing/mission-fixtures";
+import { fixtureDraftsFor, scriptedEvalDeps } from "../testing/scripted-deps";
 import { EVAL_MISSIONS, missionAdapter, type EvalMission } from ".";
 
-const ALL_CRITERIA_VERDICT = JSON.stringify(
-  Object.fromEntries(
-    EVAL_MISSIONS.flatMap((mission) => missionAdapter(mission).judge.criteria).map((criterion) => [
-      criterion,
-      { score: 4, rationale: "ok" },
-    ]),
-  ),
-);
-
-async function draftsFor(options: RunMissionOptions) {
-  const input = options.input as Record<string, unknown>;
-  switch (options.missionId) {
-    case "automation-audit": {
-      const evalCase = missionAdapter("audit")
-        .loadCases()
-        .find((c) => JSON.stringify(missionAdapter("audit").input(c)) === JSON.stringify(input));
-      return auditFixtureDrafts(evalCase as never);
-    }
-    case "build-agent": {
-      const evalCase = loadBuildDataset().find((c) => c.input.url === input.url);
-      if (evalCase === undefined) throw new Error("unknown build case");
-      return buildFixtureDrafts(evalCase);
-    }
-    case "custom-goal": {
-      const evalCase = missionAdapter("goal")
-        .loadCases()
-        .find((c) => JSON.stringify(missionAdapter("goal").input(c)) === JSON.stringify(input));
-      return goalFixtureDrafts(evalCase as never);
-    }
-    case "repo-xray":
-      return (await repoFixtureEvents(String(input.url))).map(
-        ({ seq: _seq, at: _at, runId: _runId, ...draft }) => draft,
-      );
-    default:
-      return (await xrayFixtureEvents()).map(
-        ({ seq: _seq, at: _at, runId: _runId, ...draft }) => draft,
-      );
-  }
-}
-
-function deps(judgeCalls: string[] = []): RunEvalDeps {
-  let tick = Date.parse("2026-11-25T10:00:00.000Z");
-  return {
-    runMission: scriptedRunMission(draftsFor),
-    env: {},
-    now: () => new Date((tick += 250)),
-    sleep: () => Promise.resolve(),
-    judgeCompleter: {
-      complete: (request) => {
-        judgeCalls.push(request.system.slice(0, 60));
-        return Promise.resolve({ text: ALL_CRITERIA_VERDICT, provider: "fake", model: "judge" });
-      },
-    },
-    checkLinks: (urls) => Promise.resolve(new Map(urls.map((url) => [url, { ok: true }]))),
-    answerQuestion: fixtureAnswers(loadBuildDataset()),
-    log: () => undefined,
-  };
+function deps(): RunEvalDeps {
+  return scriptedEvalDeps();
 }
 
 function firstCase(mission: EvalMission): string {
@@ -119,7 +56,7 @@ describe("runEval across missions", () => {
       });
       expect(live.overall.trials).toBe(2);
       expect(live.overall.hardFailures).toBe(0);
-      expect(live.judgeServing).toEqual([{ provider: "fake", model: "judge", calls: 2 }]);
+      expect(live.judgeServing).toEqual([{ provider: "fixture", model: "judge", calls: 2 }]);
       expect(Object.keys(live.overall.judge).sort()).toEqual(
         [...adapter.judge.criteria, "overall"].sort(),
       );
@@ -189,7 +126,10 @@ describe("runEval across missions", () => {
         calls += 1;
         if (calls === 1)
           return [
-            (await draftsFor(runOptions))[0] ?? { type: "run.completed", payload: { summary: "" } },
+            (await fixtureDraftsFor(runOptions))[0] ?? {
+              type: "run.completed",
+              payload: { summary: "" },
+            },
             {
               type: "model.fallback",
               payload: {
@@ -205,7 +145,7 @@ describe("runEval across missions", () => {
               payload: { error: { code: "no_model_available", message: "busy" } },
             },
           ];
-        return draftsFor(runOptions);
+        return fixtureDraftsFor(runOptions);
       }),
     });
     expect(sleeps).toEqual([90_000]);
