@@ -151,6 +151,15 @@ describe("confinePath with a local sandbox", () => {
   });
 });
 
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe("LocalProcessSandbox exec", () => {
   it("runs argv without a shell and reports the exit code", async () => {
     const sandbox = await sandboxWithRepo();
@@ -211,16 +220,19 @@ describe("LocalProcessSandbox exec", () => {
   it("kills background processes left behind when a command exits", async () => {
     const sandbox = await sandboxWithRepo();
     const marker = posix.join(sandbox.workdir, "background-survived");
+    const pidFile = posix.join(sandbox.workdir, "background.pid");
     const started = Date.now();
     const result = await sandbox.exec({
       cmd: "sh",
-      args: ["-c", `(sleep 1; touch ${marker}) & echo started`],
-      timeoutMs: 10_000,
+      args: ["-c", `(sleep 30; touch ${marker}) & echo $! > ${pidFile}; echo started`],
+      timeoutMs: 20_000,
     });
     expect(result.exitCode).toBe(0);
     expect(result.timedOut).toBe(false);
-    expect(Date.now() - started).toBeLessThan(900);
-    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    expect(Date.now() - started).toBeLessThan(15_000);
+    const pid = Number((await readFile(pidFile, "utf8")).trim());
+    expect(Number.isInteger(pid) && pid > 0).toBe(true);
+    await expect.poll(() => isAlive(pid), { timeout: 5_000, interval: 50 }).toBe(false);
     expect(await readdir(sandbox.workdir)).not.toContain("background-survived");
   });
 
