@@ -5,6 +5,7 @@ import { EvolutionLogSchema, type EvolutionLog } from "@delegate/evals/evolution
 import { LearnedRoutingSchema, type LearnedRouting } from "@delegate/evals/routing";
 import {
   MISSION_TARGETS,
+  SHARED_PROMPTS,
   TrainingRecordSchema,
   type TrainingRecord,
 } from "@delegate/evals/training";
@@ -569,6 +570,7 @@ export interface LivePrompt {
   liveVersion: number | null;
   onDisk: number[];
   trainable: boolean;
+  shared: boolean;
   awaitingPointer: number | null;
 }
 
@@ -619,6 +621,7 @@ export function livePromptVersions(input: {
           liveVersion: onDisk.includes(pointed) ? pointed : null,
           onDisk,
           trainable: trainable.has(key),
+          shared: (SHARED_PROMPTS as readonly string[]).includes(key),
           awaitingPointer: promoted.length === 0 ? null : Math.max(...promoted),
         },
       ];

@@ -88,8 +88,10 @@ export function PromptVersions({ missions }: { missions: readonly MissionPrompts
                     </span>
                   ) : prompt.trainable ? (
                     <Badge tone="neutral">training target</Badge>
+                  ) : prompt.shared ? (
+                    "shared across missions, hand-tuned"
                   ) : (
-                    "shared or verifier prompt, hand-tuned"
+                    "not a training target"
                   )}
                 </td>
               </tr>

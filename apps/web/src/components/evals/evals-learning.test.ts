@@ -340,9 +340,14 @@ describe("live prompt versions", () => {
       liveVersion: 2,
       onDisk: [1, 2, 3],
       trainable: true,
+      shared: false,
       awaitingPointer: 3,
     });
-    expect(xray?.prompts[0]).toMatchObject({ trainable: false, awaitingPointer: null });
+    expect(xray?.prompts[0]).toMatchObject({
+      trainable: false,
+      shared: true,
+      awaitingPointer: null,
+    });
     expect(missions.at(-1)?.playbooks.map((entry) => entry.key)).toEqual(["custom-goal:growth"]);
     const moved = livePromptVersions({
       catalog: loadPromptCatalog(path.join(root, "packages/runtime/prompts")),
@@ -448,6 +453,8 @@ describe("sections", () => {
     expect(training).toContain("[+0.120, +0.180] paired over 8 cases");
     expect(training).toContain("Δ −0.010");
     expect(training).toContain("try 2 against this baseline");
+    expect(training).toContain("8 cases · p &lt; 0.001 (needs &lt; 0.050)");
+    expect(training).toContain("8 cases · p = 0.680 (needs &lt; 0.025");
     expect(training).toContain("1 of 2 promoted");
     expect(training).toContain("baseline reused result file");
     const routingText = text(
@@ -472,6 +479,7 @@ describe("sections", () => {
     expect(prompts).toContain("v3 promoted");
     expect(prompts).toContain("RUNTIME_PROMPT_FILES.synthesis");
     expect(prompts).toContain("also on disk: v1, v3");
+    expect(prompts).toContain("shared across missions, hand-tuned");
   });
 
   it("keeps the difference mark's scale symmetric, floored and capped", () => {

@@ -26,6 +26,10 @@ function signed(value: number): string {
   return `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(3)}`;
 }
 
+function pText(p: number): string {
+  return p < 0.001 ? "p < 0.001" : `p = ${p.toFixed(3)}`;
+}
+
 function minutes(ms: number): string {
   return ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${(ms / 60_000).toFixed(1)} min`;
 }
@@ -148,8 +152,8 @@ function Step({ row }: { row: TrainingRow }) {
             {row.delta.lower === null || row.delta.upper === null
               ? ""
               : `[${signed(row.delta.lower)}, ${signed(row.delta.upper)}] `}
-            {row.delta.kind === "paired" ? "paired over" : "over"} {row.delta.units} · p ={" "}
-            {row.delta.pValue.toFixed(3)} (needs &lt; {row.alpha.toFixed(3)}
+            {row.delta.kind === "paired" ? "paired over" : "over"} {row.delta.units} ·{" "}
+            {pText(row.delta.pValue)} (needs &lt; {row.alpha.toFixed(3)}
             {row.comparisons > 1 ? `, try ${row.comparisons} against this baseline` : ""})
           </p>
         </div>
