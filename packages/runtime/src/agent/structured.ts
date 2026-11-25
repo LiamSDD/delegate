@@ -68,16 +68,15 @@ function read<T>(
       "refusal",
     );
   }
-  const stopped = result.stopReason === "max_tokens";
   if (text.trim() === "") return { ok: false, issues: EMPTY_ANSWER, truncated: false };
   const json = readJson(text);
-  const truncated = stopped || json.truncated;
   if (!json.ok) {
-    const note = truncated ? " The answer was cut off at the token limit; be more concise." : "";
+    const cutOff = result.stopReason === "max_tokens" || json.truncated;
+    const note = cutOff ? " The answer was cut off at the token limit; be more concise." : "";
     return {
       ok: false,
       issues: `- (root): the answer did not contain a parseable JSON value.${note}`,
-      truncated,
+      truncated: json.truncated,
     };
   }
   const fitted = fitToSchema(schema, json.value);

@@ -210,6 +210,17 @@ describe("callStructured follow-up turn", () => {
     expect(provider.requests[1]?.messages[2]?.content).toMatch(/failed validation/);
   });
 
+  it("does not ask prose that hit the token limit to continue; it asks for the JSON, more concisely", async () => {
+    const provider = scriptedProvider("fake", [
+      cut("Let me think about which items belong in the list. First,"),
+      textTurn(JSON.stringify(full)),
+    ]);
+    await callStructured(testRun({ provider }).ctx, options);
+    const asked = provider.requests[1]?.messages[2]?.content ?? "";
+    expect(asked).toMatch(/failed validation/);
+    expect(asked).toMatch(/cut off at the token limit; be more concise/);
+  });
+
   it("does not start a follow-up turn the step budget cannot pay for", async () => {
     const provider = scriptedProvider("fake", [
       textTurn("not json"),
