@@ -268,3 +268,65 @@ describe("self-check in the orchestrator", () => {
     expect(provider.requests).toHaveLength(0);
   });
 });
+
+describe("self-check on fixtures: exact cost and the upper bound of its benefit", () => {
+  const meets = (candidate: SubAgentResult) => [
+    candidate.findings.every((finding) => finding.quote !== undefined && finding.quote !== ""),
+    candidate.findings.length >= 3,
+  ];
+  const accepted = (candidate: SubAgentResult) => meets(candidate).every(Boolean);
+  const unquoted = (facts: number): SubAgentResult => {
+    const base = result(facts);
+    return {
+      ...base,
+      findings: base.findings.map(({ quote: _quote, ...finding }) => finding),
+    };
+  };
+  const fixtures: { first: SubAgentResult; second: SubAgentResult }[] = [
+    { first: result(4), second: result(4) },
+    { first: result(3), second: result(3) },
+    { first: result(5), second: result(5) },
+    { first: result(1), second: result(3, 0.8) },
+    { first: unquoted(3), second: result(3, 0.8) },
+    { first: result(0, 0.4), second: result(0, 0.4) },
+  ];
+
+  async function measure(judge: (candidate: SubAgentResult) => boolean[]) {
+    let fastCalls = 0;
+    let reruns = 0;
+    let acceptedAfter = 0;
+    for (const fixture of fixtures) {
+      const provider = scriptedProvider("fake", () => verdict(...judge(fixture.first)));
+      const harness = options(fixture.first, fixture.second);
+      const checked = await selfCheck(testRun({ provider }).ctx, harness.options);
+      fastCalls += provider.requests.length;
+      reruns += harness.reruns.length;
+      if (accepted(checked.result)) acceptedAfter += 1;
+    }
+    return { fastCalls, reruns, acceptedAfter };
+  }
+
+  it("without the check, three of six results meet their criteria", () => {
+    expect(fixtures.filter((fixture) => accepted(fixture.first))).toHaveLength(3);
+  });
+
+  it("with a judge that is always right: six fast calls and three more runs lift that to five of six", async () => {
+    expect(await measure(meets)).toEqual({ fastCalls: 6, reruns: 3, acceptedAfter: 5 });
+  });
+
+  it("with a judge that always passes: six fast calls buy nothing", async () => {
+    expect(await measure(() => [true, true])).toEqual({
+      fastCalls: 6,
+      reruns: 0,
+      acceptedAfter: 3,
+    });
+  });
+
+  it("with a judge that always fails: six fast calls and six more runs, still five of six", async () => {
+    expect(await measure(() => [false, false])).toEqual({
+      fastCalls: 6,
+      reruns: 6,
+      acceptedAfter: 5,
+    });
+  });
+});

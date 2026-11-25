@@ -283,7 +283,9 @@ export function createTeamHandle(options: TeamHandleOptions): TeamHandle {
         return { assignment, status: "timed_out" };
       }
       if (error instanceof BudgetExceededError) {
-        await agent.say(`Stopped: this member used its ${team.memberTokens} token allowance.`);
+        await agent.say(
+          `Stopped: the token allowance of this member (${team.memberTokens}) or of its step is used up.`,
+        );
         return { assignment, status: "over_budget" };
       }
       await agent.say("This team member failed; the others continue.");
@@ -293,14 +295,16 @@ export function createTeamHandle(options: TeamHandleOptions): TeamHandle {
     }
   };
 
+  let spawnedHere = 0;
   return {
     declared: team,
     async run(run) {
       const allowed = Math.max(
         0,
-        Math.min(team.size, TEAM_LIMITS.maxMembersPerRun - counter.spawned),
+        Math.min(team.size - spawnedHere, TEAM_LIMITS.maxMembersPerRun - counter.spawned),
       );
       const started = run.assignments.slice(0, allowed);
+      spawnedHere += started.length;
       counter.spawned += started.length;
       const outcomes = new Array<TeamMemberOutcome | undefined>(started.length);
       let next = 0;

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { CAPABILITIES } from "@delegate/policy";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -13,11 +15,12 @@ import {
   type RunEvent,
   type RunEventDraft,
 } from "../events";
+import { parsePromptFile } from "../prompts";
 import { scriptedProvider, testRun, textTurn } from "../testing/fakes";
 import { defineTool, executeToolCall } from "../tools/registry";
 import { callModel } from "./model-call";
 import { orchestrate } from "./orchestrator";
-import { checkPlanSteps, validatePlan, type PlannerMission } from "./planner";
+import { checkPlanSteps, proposePlan, validatePlan, type PlannerMission } from "./planner";
 import { FatalStepError, type StepExecutor, type SubAgentResult } from "./subagent";
 import { TEAM_LIMITS, mergeFindings, type TeamMember, type TeamOutcome } from "./team";
 
@@ -320,6 +323,34 @@ describe("a team step in the orchestrator", () => {
     ]);
   });
 
+  it("keeps the declared size across several rounds of one step", async () => {
+    const { ctx } = testRun({ provider: scriptedProvider("fake", []) });
+    const rounds: number[] = [];
+    const library = executors(() => Promise.resolve(memberResult("a"))).map((entry) =>
+      entry.id !== "topic"
+        ? entry
+        : {
+            ...entry,
+            run: async (task: Parameters<StepExecutor["run"]>[0]) => {
+              for (const ids of [["a", "b"], ["c", "d"], ["e"]]) {
+                const outcome = await task.team?.run({
+                  assignments: ids.map((id) => ({ id, objective: id })),
+                  role: "researcher",
+                  modelRole: "fast",
+                  member: (member) => Promise.resolve(memberResult(member.assignment.id)),
+                });
+                rounds.push(
+                  outcome?.members.filter((member) => member.status === "finished").length ?? 0,
+                );
+              }
+              return memberResult("solo");
+            },
+          },
+    );
+    await orchestrate(ctx, { plan: [resolveStep, topicStep()], version: 1, executors: library });
+    expect(rounds).toEqual([2, 1, 0]);
+  });
+
   it("counts team members across the steps of a run", async () => {
     const { ctx } = testRun({ provider: scriptedProvider("fake", []) });
     const library = executors((member) => Promise.resolve(memberResult(member.assignment.id))).map(
@@ -604,5 +635,54 @@ describe("durability of a team step", () => {
     expect(fork.steps[1]?.team).toEqual(TEAM);
     expect(fork.reusedSteps).toEqual(["resolve"]);
     expect(fork.seed.some((event) => "stepId" in event && event.stepId === "topic")).toBe(false);
+  });
+});
+
+describe("the planner and teams", () => {
+  const library = executors(() => Promise.resolve(memberResult("a")));
+  const prompt = parsePromptFile(
+    "planner.v4.md",
+    readFileSync(new URL("../../prompts/planner.v4.md", import.meta.url), "utf8"),
+  );
+  const defaultPlan = [resolveStep, topicStep()];
+  const answer = (steps: PlanStep[]) => textTurn(JSON.stringify({ steps, rationale: "ok" }));
+
+  it("shows team support only on the library entries that have it", async () => {
+    const provider = scriptedProvider("fake", [answer(defaultPlan)]);
+    const { ctx } = testRun({ provider });
+    await proposePlan(ctx, { mission: mission(library), defaultPlan, prompt, usePlanner: true });
+    const lines = (provider.requests[0]?.messages[0]?.content ?? "")
+      .split("\n")
+      .filter((line) => line.startsWith('{"id"'));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).not.toContain('"team"');
+    expect(lines[1]).toContain('"team":{"maxMembers":3,"reducers":["merge_findings"]}');
+  });
+
+  it("keeps a team the planner declares within the caps", async () => {
+    const smaller = [resolveStep, topicStep({ ...TEAM, size: 2 })];
+    const provider = scriptedProvider("fake", [answer(smaller)]);
+    const proposed = await proposePlan(testRun({ provider }).ctx, {
+      mission: mission(library),
+      defaultPlan,
+      prompt,
+      usePlanner: true,
+    });
+    expect(proposed.source).toBe("planner");
+    expect(proposed.steps[1]?.team?.size).toBe(2);
+  });
+
+  it("tells the planner which cap a team breaks and falls back to the default plan if it breaks it again", async () => {
+    const tooWide = [resolveStep, topicStep({ ...TEAM, size: 5 })];
+    const provider = scriptedProvider("fake", [answer(tooWide), answer(tooWide)]);
+    const proposed = await proposePlan(testRun({ provider }).ctx, {
+      mission: mission(library),
+      defaultPlan,
+      prompt,
+      usePlanner: true,
+    });
+    expect(provider.requests[1]?.messages[2]?.content).toMatch(/allows 2 to 3 members/);
+    expect(proposed.source).toBe("default");
+    expect(proposed.steps[1]?.team).toEqual(TEAM);
   });
 });
