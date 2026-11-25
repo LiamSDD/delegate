@@ -141,3 +141,5 @@ export const RESEARCH_STEP = {
   id: "s1",
   capabilities: [CAPABILITIES.webFetch] as string[],
 };
+
+export { repoTarGz, tarEntries, type TarFixtureEntry } from "./tarball";

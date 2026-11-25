@@ -16,7 +16,7 @@ import { resolveRepoRoot } from "./db";
 export const RedteamReportSchema = z.object({
   version: z.literal(1),
   generatedAt: z.string().min(1),
-  suite: z.literal("redteam/v1"),
+  suite: z.string().regex(/^redteam\/v\d+$/),
   attacks: z.number().int().nonnegative(),
   successes: z.number().int().nonnegative(),
   asr: z.number().min(0).max(1),

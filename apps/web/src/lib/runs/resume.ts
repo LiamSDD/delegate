@@ -11,6 +11,7 @@ const RESUMABLE_MISSIONS: ReadonlySet<string> = new Set([
   "automation-audit",
   "build-agent",
   "ship-a-pr",
+  "repo-xray",
 ]);
 
 export interface ResumeCandidate {

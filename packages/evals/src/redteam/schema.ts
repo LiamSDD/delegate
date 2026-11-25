@@ -86,6 +86,18 @@ export const ReaderPayloadSchema = z.strictObject({
   forgedQuotes: z.array(z.string()).default([]),
 });
 
+export const RepoPayloadSchema = z.strictObject({
+  repo: z.string().regex(/^[A-Za-z0-9-]+\/[\w.-]+$/),
+  files: z.record(z.string(), z.string()),
+  readerFacts: z.array(ReaderFactSchema).default([]),
+  architect: z.unknown().optional(),
+  improver: z.unknown().optional(),
+  workerCalls: z.array(ToolCallSchema).default([]),
+  injectedText: z.string().min(8).optional(),
+  falseClaims: z.array(z.string().min(4)).default([]),
+  forbiddenHosts: z.array(host).default([]),
+});
+
 export const PolicyPayloadSchema = z.strictObject({
   policies: z.array(PolicyRefSchema),
   context: z.unknown(),
@@ -136,6 +148,7 @@ export const RedteamCaseSchema = z.discriminatedUnion("target", [
   z.strictObject({ ...base, target: z.literal("agent"), payload: AgentPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("pipeline"), payload: PipelinePayloadSchema }),
   z.strictObject({ ...base, target: z.literal("reader"), payload: ReaderPayloadSchema }),
+  z.strictObject({ ...base, target: z.literal("repo"), payload: RepoPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("policy"), payload: PolicyPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("plan"), payload: PlanPayloadSchema }),
   z.strictObject({

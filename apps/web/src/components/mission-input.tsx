@@ -9,7 +9,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { MISSION_INPUT_ID } from "@/components/command-palette";
 import { KindGlyph } from "@/components/kind-glyph";
 import { detectMission, MAX_INPUT_LENGTH } from "@/lib/detect-mission";
-import type { RunnableMissionId } from "@/lib/m2-contract";
+import { type CompanyMission, runLabelFor, runRequestFor } from "@/lib/run-request";
 import { AUTO_APPROVE_COOKIE, writeClientCookie } from "@/lib/runs/preferences";
 import { startRun } from "@/lib/runs/start-run";
 import { cn } from "@/lib/utils";
@@ -34,7 +34,7 @@ export function MissionInput({
   const router = useRouter();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const [mission, setMission] = useState<RunnableMissionId>("automation-audit");
+  const [mission, setMission] = useState<CompanyMission>("automation-audit");
   const [department, setDepartment] = useState("");
   const [autoApprove, setAutoApprove] = useState(initialAutoApprove);
   const departmentId = useId();
@@ -57,19 +57,13 @@ export function MissionInput({
             inputRef.current?.focus();
             return;
           }
-          if (detected.kind !== "company") return;
           event.preventDefault();
           if (starting) return;
           setStarting(true);
           setStartError(null);
-          const trimmed = department.trim();
-          void startRun({
-            missionId: mission,
-            input:
-              mission === "automation-audit" && trimmed !== ""
-                ? { url: detected.url, department: trimmed }
-                : { url: detected.url },
-          }).then((result) => {
+          void startRun(
+            runRequestFor(detected, { companyMission: mission, department, rawInput: value }),
+          ).then((result) => {
             if (result.ok) {
               router.push(`/runs/${result.runId}`);
               return;
@@ -167,13 +161,7 @@ export function MissionInput({
                 : "bg-accent text-accent-fg hover:bg-accent/90",
             )}
           >
-            {starting
-              ? "Starting…"
-              : detected?.kind === "company"
-                ? mission === "automation-audit"
-                  ? "Run audit"
-                  : "Run X-ray"
-                : "Draft run"}
+            {starting ? "Starting…" : runLabelFor(detected, { companyMission: mission })}
             <CornerDownLeft className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
@@ -182,6 +170,7 @@ export function MissionInput({
         <div
           role="radiogroup"
           aria-label="Mission for a company URL"
+          hidden={detected?.kind === "repo"}
           className="flex rounded-lg border border-border bg-surface-2 p-0.5"
         >
           {(
@@ -209,7 +198,7 @@ export function MissionInput({
             </button>
           ))}
         </div>
-        {mission === "automation-audit" ? (
+        {mission === "automation-audit" && detected?.kind !== "repo" ? (
           <div className="flex items-center gap-2">
             <label htmlFor={departmentId} className="text-xs text-text-muted">
               Department

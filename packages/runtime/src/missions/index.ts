@@ -10,6 +10,11 @@ import { XRAY_PLAN } from "./company-xray/plan";
 import { ShipAPrInputSchema } from "./ship-a-pr/input";
 import { SHIP_CAPABILITIES } from "./ship-a-pr/plan";
 import { SHIP_RESULT_KIND, ShipResultSchema } from "./ship-a-pr/schema";
+import { CustomGoalInputSchema } from "./custom-goal/input";
+import { GOAL_BRIEF_KIND, GoalBriefSchema } from "./custom-goal/schema";
+import { RepoXrayInputSchema } from "./repo-xray/input";
+import { REPO_PLAN } from "./repo-xray/plan";
+import { REPO_XRAY_KIND, RepoXraySchema } from "./repo-xray/schema";
 
 export const MISSIONS = {
   "company-xray": {
@@ -52,6 +57,26 @@ export const MISSIONS = {
     deliverableKind: SHIP_RESULT_KIND,
     capabilities: [...SHIP_CAPABILITIES],
   },
+  "custom-goal": {
+    id: "custom-goal",
+    title: "Custom goal",
+    description:
+      "Any goal in plain language. The planner composes a 3–8 step plan from the existing research, reading, synthesis and critic steps; a company or domain named in the goal is resolved (typed domain, else Wikidata). Deliverable: a cited goal brief with findings by workstream, a ranked action plan mapped to follow-up missions, and risks.",
+    inputSchema: CustomGoalInputSchema,
+    deliverableSchema: GoalBriefSchema,
+    deliverableKind: GOAL_BRIEF_KIND,
+    capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
+  },
+  "repo-xray": {
+    id: "repo-xray",
+    title: "Repo X-ray",
+    description:
+      "Architecture map, module responsibilities, onboarding guide, dependency and security hotspots, test-coverage gaps and 5–8 ranked, testable improvements for a public GitHub repository. The repository is fetched once as a tarball, analysed in code first, its documentation read in quarantine, and every claim cites path:line ranges the critic verifies against the stored snapshot.",
+    inputSchema: RepoXrayInputSchema,
+    deliverableSchema: RepoXraySchema,
+    deliverableKind: REPO_XRAY_KIND,
+    capabilities: [...new Set(REPO_PLAN.flatMap((step) => step.capabilities))],
+  },
 } as const;
 
 export type MissionId = keyof typeof MISSIONS;
@@ -62,3 +87,5 @@ export * from "./automation-audit";
 export * from "./next-actions";
 export * from "./build-agent";
 export * from "./ship-a-pr";
+export * from "./custom-goal";
+export * from "./repo-xray";

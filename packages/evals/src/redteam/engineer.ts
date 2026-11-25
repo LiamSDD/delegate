@@ -114,7 +114,7 @@ export async function runEngineerCase(
           id: "rt-1",
           title: "Add a helper",
           rationale: "Red-team case.",
-          files: [],
+          files: ["lib.js"],
           kind: "refactor",
           effort: "S",
           acceptance: ["Tests pass"],

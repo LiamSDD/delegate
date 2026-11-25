@@ -1,4 +1,4 @@
-import { type MilestoneId } from "./roadmap";
+import { isShipped, type MilestoneId } from "./roadmap";
 
 export type MissionId =
   | "company-xray"
@@ -30,6 +30,7 @@ export interface Mission {
   inputs: string;
   durationTarget: string | null;
   arrives: MilestoneId;
+  live?: true;
   hero: boolean;
 }
 
@@ -89,6 +90,7 @@ export const MISSIONS: readonly Mission[] = [
     inputs: "Public GitHub URL",
     durationTarget: null,
     arrives: "M5",
+    live: true,
     hero: true,
   },
   {
@@ -145,8 +147,9 @@ export const MISSIONS: readonly Mission[] = [
     id: "custom-goal",
     group: null,
     name: "Custom goal",
-    outcome: "Free text; the planner composes the tools and agents.",
-    inputs: "A goal in plain language",
+    outcome:
+      "Free text; the planner composes research and critic agents into a cited, ranked action plan.",
+    inputs: "A goal in plain language, optionally naming a company",
     durationTarget: null,
     arrives: "M2",
     hero: false,
@@ -155,6 +158,10 @@ export const MISSIONS: readonly Mission[] = [
 
 export function missionsInGroup(group: MissionGroupId): readonly Mission[] {
   return MISSIONS.filter((mission) => mission.group === group);
+}
+
+export function isMissionLive(mission: Mission): boolean {
+  return mission.live === true || isShipped(mission.arrives);
 }
 
 export function missionById(id: MissionId): Mission {

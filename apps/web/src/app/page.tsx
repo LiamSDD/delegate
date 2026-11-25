@@ -1,18 +1,18 @@
 import { cookies } from "next/headers";
 
 import { MissionCatalogue } from "@/components/mission-catalogue";
+import { RunPipeline } from "@/components/run-pipeline";
 import { type ExampleTarget, MissionInput } from "@/components/mission-input";
 import { SectionHeading } from "@/components/section-heading";
-import { SystemStatus } from "@/components/system-status";
 import { TrustStrip } from "@/components/trust-strip";
-import { loadLiveChain } from "@/lib/model-chain-file";
 import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
+import { pipelineStats } from "@/server/pipeline-stats";
 
 const EXAMPLES: readonly ExampleTarget[] = [
   { label: "stripe.com", value: "https://stripe.com" },
   { label: "linear.app", value: "https://linear.app" },
   { label: "datadoghq.com", value: "https://www.datadoghq.com" },
-  { label: "github.com/vercel/next.js", value: "https://github.com/vercel/next.js" },
+  { label: "github.com/sindresorhus/ky", value: "https://github.com/sindresorhus/ky" },
   {
     label: "Map where our docs contradict the pricing page",
     value: "Map where our public docs contradict the pricing page",
@@ -20,7 +20,6 @@ const EXAMPLES: readonly ExampleTarget[] = [
 ];
 
 export default async function HomePage() {
-  const chain = loadLiveChain();
   const autoApprove = (await cookies()).get(AUTO_APPROVE_COOKIE)?.value === "1";
   return (
     <div className="mx-auto flex max-w-content flex-col px-6">
@@ -30,7 +29,7 @@ export default async function HomePage() {
       >
         <div className="flex max-w-3xl flex-col gap-5">
           <p className="font-mono text-2xs tracking-label text-text-subtle uppercase">
-            Live <span aria-hidden="true">·</span> X-ray, Automation Audit, Build it
+            Live <span aria-hidden="true">·</span> Custom goals, X-ray, Automation Audit, Build it
           </p>
           <h1
             id="hero-title"
@@ -47,7 +46,7 @@ export default async function HomePage() {
         </div>
         <div className="flex max-w-3xl flex-col gap-6">
           <MissionInput examples={EXAMPLES} initialAutoApprove={autoApprove} />
-          <SystemStatus chain={chain} />
+          <RunPipeline stats={pipelineStats()} />
         </div>
       </section>
 

@@ -26,6 +26,10 @@ datasets/
 
   `run` is a results directory name; the label is matched to `results/<run>/<caseId>/<trial>.judge.json`. `pnpm --filter @delegate/evals agreement` reports exact-match rate, within-one rate and Cohen's kappa per criterion, or says plainly that there are no human labels yet.
 
+## Custom goal (`custom-goal/`)
+
+- `v1.jsonl`: one `CustomGoalCaseSchema` case per line (`src/datasets/custom-goal.ts`): the free-text `goal`, the expected company target (`domain`, `brand` or `none`), a minimum number of actions and workstream hints. Graders and the case table are in `CHANGELOG.md`.
+
 ## Running
 
 ```bash

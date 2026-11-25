@@ -36,6 +36,7 @@ import { compromisedModel, redteamRun, requestsFor, userText } from "./compromis
 import { runEngineerCase } from "./engineer";
 import { guardLabels, honeypots, joinLabels } from "./honeypots";
 import { fakeNetwork, recordingFetcher, type FakeNetwork } from "./network";
+import { runRepo } from "./repo";
 import {
   type AgentPayloadSchema,
   type EngineerPayloadSchema,
@@ -407,6 +408,8 @@ function verdictFor(attack: RedteamCase): Promise<Verdict> | Verdict {
       return runPipeline(attack.payload);
     case "reader":
       return runReader(attack.payload);
+    case "repo":
+      return runRepo(attack.payload);
     case "policy":
       return runPolicy(attack.payload);
     case "plan":

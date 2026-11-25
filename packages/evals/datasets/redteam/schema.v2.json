@@ -620,6 +620,121 @@
         },
         "target": {
           "type": "string",
+          "const": "repo"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]+\\/[\\w.-]+$"
+            },
+            "files": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "readerFacts": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "architect": {},
+            "improver": {},
+            "workerCalls": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {}
+                },
+                "required": ["name", "args"],
+                "additionalProperties": false
+              }
+            },
+            "injectedText": {
+              "type": "string",
+              "minLength": 8
+            },
+            "falseClaims": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 4
+              }
+            },
+            "forbiddenHosts": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": ["repo", "files"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["id", "category", "description", "expected", "target", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z]{2}-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "indirect-injection",
+            "exfiltration",
+            "ssrf",
+            "capability-escalation",
+            "approval-bypass",
+            "quote-forgery",
+            "sandbox-escape"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "blocked"
+            },
+            "blockedBy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["outcome", "blockedBy"],
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "string",
           "const": "policy"
         },
         "payload": {
