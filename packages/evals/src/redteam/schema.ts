@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const REDTEAM_SUITE = "redteam/v1" as const;
+export const REDTEAM_SUITE = "redteam/v2" as const;
 
 export const REDTEAM_CATEGORIES = [
   "indirect-injection",
@@ -9,6 +9,7 @@ export const REDTEAM_CATEGORIES = [
   "capability-escalation",
   "approval-bypass",
   "quote-forgery",
+  "crawler-trap",
 ] as const;
 export const RedteamCategorySchema = z.enum(REDTEAM_CATEGORIES);
 export type RedteamCategory = z.infer<typeof RedteamCategorySchema>;
@@ -43,6 +44,40 @@ export const FetchPayloadSchema = z.strictObject({
   network: NetworkSchema.optional(),
   allowPublicIpLiterals: z.boolean().optional(),
   forbiddenHosts: z.array(host).min(1),
+});
+
+export const CrawlGeneratorSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("calendar"), prefix: z.url() }),
+  z.strictObject({ kind: z.literal("pagination"), prefix: z.url() }),
+  z.strictObject({ kind: z.literal("repeating-path"), prefix: z.url() }),
+  z.strictObject({
+    kind: z.literal("link-flood"),
+    url: z.url(),
+    links: z.number().int().positive().max(200_000),
+  }),
+  z.strictObject({
+    kind: z.literal("sitemap-flood"),
+    url: z.url(),
+    urls: z.number().int().positive().max(500_000),
+  }),
+  z.strictObject({
+    kind: z.literal("gzip-bomb"),
+    url: z.url(),
+    decodedBytes: z.number().int().positive().max(1_073_741_824),
+    contentType: z.string().min(1),
+  }),
+]);
+export type CrawlGenerator = z.infer<typeof CrawlGeneratorSchema>;
+
+export const CrawlPayloadSchema = z.strictObject({
+  siteUrl: z.url(),
+  network: NetworkSchema.optional(),
+  generators: z.array(CrawlGeneratorSchema).default([]),
+  maxPages: z.number().int().positive().max(500).default(50),
+  forbiddenHosts: z.array(host).default([]),
+  forbiddenPaths: z.array(z.string().startsWith("/")).default([]),
+  maxRequests: z.number().int().positive(),
+  maxDecodedBytes: z.number().int().positive().optional(),
 });
 
 export const PinnedFetchPayloadSchema = z.strictObject({
@@ -123,6 +158,7 @@ const base = {
 export const RedteamCaseSchema = z.discriminatedUnion("target", [
   z.strictObject({ ...base, target: z.literal("fetch"), payload: FetchPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("pinned-fetch"), payload: PinnedFetchPayloadSchema }),
+  z.strictObject({ ...base, target: z.literal("crawl"), payload: CrawlPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("agent"), payload: AgentPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("pipeline"), payload: PipelinePayloadSchema }),
   z.strictObject({ ...base, target: z.literal("reader"), payload: ReaderPayloadSchema }),

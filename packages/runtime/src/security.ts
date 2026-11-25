@@ -11,7 +11,10 @@ export {
 } from "./agent/planner";
 export { type StepExecutor, type SubAgentResult } from "./agent/subagent";
 export { createResearchKit, type ResearchKit } from "./missions/shared/research";
-export { createResearchEnvironment, createResearchTools } from "./tools/research";
+export { createResearchEnvironment, createResearchTools, siteScope } from "./tools/research";
+export { crawl, type CrawlResult } from "./crawl/engine";
+export { HostPoliteness } from "./crawl/politeness";
+export { COMPANY_PROFILE } from "./crawl/priority";
 export {
   detectInjection,
   quoteAppearsIn,

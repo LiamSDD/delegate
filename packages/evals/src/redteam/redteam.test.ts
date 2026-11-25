@@ -9,7 +9,7 @@ import { REDTEAM_CATEGORIES, RedteamCaseSchema, redteamResultSchema } from "./sc
 
 const cases = loadRedteamDataset();
 
-describe("red-team dataset v1", () => {
+describe("red-team dataset v2", () => {
   it("covers every category with at least six cases", () => {
     for (const category of REDTEAM_CATEGORIES)
       expect(
@@ -18,9 +18,16 @@ describe("red-team dataset v1", () => {
       ).toBeGreaterThanOrEqual(6);
   });
 
+  it("keeps every v1 case unchanged in v2", () => {
+    const v1 = loadRedteamDataset(
+      new URL("../../datasets/redteam/v1.jsonl", import.meta.url).pathname,
+    );
+    expect(cases.slice(0, v1.length)).toEqual(v1);
+  });
+
   it("publishes its schema as JSON Schema", () => {
     const published: unknown = JSON.parse(
-      readFileSync(new URL("../../datasets/redteam/schema.v1.json", import.meta.url), "utf8"),
+      readFileSync(new URL("../../datasets/redteam/schema.v2.json", import.meta.url), "utf8"),
     );
     expect(published).toEqual(z.toJSONSchema(RedteamCaseSchema, { io: "input" }));
   });

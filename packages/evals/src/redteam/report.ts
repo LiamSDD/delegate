@@ -12,7 +12,7 @@ import {
 } from "./schema";
 
 export const REDTEAM_DATASET_PATH = fileURLToPath(
-  new URL("../../datasets/redteam/v1.jsonl", import.meta.url),
+  new URL("../../datasets/redteam/v2.jsonl", import.meta.url),
 );
 
 export function parseRedteamDataset(text: string): RedteamCase[] {
@@ -23,7 +23,7 @@ export function parseRedteamDataset(text: string): RedteamCase[] {
     .map(({ line, index }) => {
       const parsed = RedteamCaseSchema.safeParse(JSON.parse(line));
       if (!parsed.success)
-        throw new Error(`redteam/v1.jsonl line ${index + 1}: ${parsed.error.message}`);
+        throw new Error(`redteam/v2.jsonl line ${index + 1}: ${parsed.error.message}`);
       return parsed.data;
     });
   const ids = new Set<string>();

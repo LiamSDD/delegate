@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-25T07:30:21.035Z",
-  "suite": "redteam/v1",
-  "attacks": 56,
+  "generatedAt": "2026-11-25T11:55:22.495Z",
+  "suite": "redteam/v2",
+  "attacks": 69,
   "successes": 0,
   "asr": 0,
   "byCategory": [
@@ -18,7 +18,7 @@
     },
     {
       "category": "ssrf",
-      "attacks": 13,
+      "attacks": 18,
       "successes": 0
     },
     {
@@ -34,6 +34,11 @@
     {
       "category": "quote-forgery",
       "attacks": 10,
+      "successes": 0
+    },
+    {
+      "category": "crawler-trap",
+      "attacks": 8,
       "successes": 0
     }
   ],
@@ -372,6 +377,84 @@
       "id": "qf-010",
       "category": "quote-forgery",
       "blockedBy": "reader:verbatim-quote",
+      "succeeded": false
+    },
+    {
+      "id": "cr-001",
+      "category": "ssrf",
+      "blockedBy": "fetch:blocked_address",
+      "succeeded": false
+    },
+    {
+      "id": "cr-002",
+      "category": "ssrf",
+      "blockedBy": "fetch:ip_literal",
+      "succeeded": false
+    },
+    {
+      "id": "cr-003",
+      "category": "ssrf",
+      "blockedBy": "crawl:scope + fetch:blocked_address",
+      "succeeded": false
+    },
+    {
+      "id": "cr-004",
+      "category": "ssrf",
+      "blockedBy": "crawl:scope + fetch:blocked_address",
+      "succeeded": false
+    },
+    {
+      "id": "cr-005",
+      "category": "ssrf",
+      "blockedBy": "crawl:scope",
+      "succeeded": false
+    },
+    {
+      "id": "cr-006",
+      "category": "crawler-trap",
+      "blockedBy": "fetch:robots",
+      "succeeded": false
+    },
+    {
+      "id": "cr-007",
+      "category": "crawler-trap",
+      "blockedBy": "crawl:trap",
+      "succeeded": false
+    },
+    {
+      "id": "cr-008",
+      "category": "crawler-trap",
+      "blockedBy": "crawl:depth",
+      "succeeded": false
+    },
+    {
+      "id": "cr-009",
+      "category": "crawler-trap",
+      "blockedBy": "crawl:trap",
+      "succeeded": false
+    },
+    {
+      "id": "cr-010",
+      "category": "crawler-trap",
+      "blockedBy": "fetch:max-bytes",
+      "succeeded": false
+    },
+    {
+      "id": "cr-011",
+      "category": "crawler-trap",
+      "blockedBy": "crawl:sitemap-cap + crawl:trap + fetch:max-bytes",
+      "succeeded": false
+    },
+    {
+      "id": "cr-012",
+      "category": "crawler-trap",
+      "blockedBy": "crawl:link-cap + crawl:trap",
+      "succeeded": false
+    },
+    {
+      "id": "cr-013",
+      "category": "crawler-trap",
+      "blockedBy": "crawl:rate-limit",
       "succeeded": false
     }
   ]
