@@ -4,7 +4,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { posix } from "node:path";
 
-import { shipDemoPolicy, shipOwnerPolicy } from "@delegate/policy";
+import { shipConnectedPolicy, shipDemoPolicy, shipOwnerPolicy } from "@delegate/policy";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createRunContext, type Audience } from "../../agent/context";
@@ -18,7 +18,7 @@ import { type ModelRequest, type ModelStreamEvent } from "../../providers/types"
 import { createFixtureRepo, FIXED_SUM, SUM_FIXTURE } from "../../testing/fixture-repo";
 import { TEST_MODELS_CONFIG, scriptedProvider, textTurn, toolTurn } from "../../testing/fakes";
 import { type ShipAPrInput } from "./input";
-import { runShipAPr } from "./run";
+import { runShipAPr, type FindInstallation } from "./run";
 import { ShipResultSchema, type AwaitShipApproval, type ShipDecision } from "./schema";
 
 const NOW = Date.parse("2026-11-25T10:00:00Z");
@@ -114,6 +114,7 @@ function fakeGitHub(installed: boolean) {
 async function ship(options: {
   audience: Audience;
   github: GitHubAppClient | null;
+  connected?: FindInstallation;
   decision?: ShipDecision;
   approval?: AwaitShipApproval;
 }) {
@@ -131,7 +132,13 @@ async function ship(options: {
       return Promise.resolve();
     }),
     budget: new Budget({ run: { maxTokens: 1_000_000, maxMicroUsd: 0 }, steps: {} }),
-    policies: [options.audience === "owner" ? shipOwnerPolicy : shipDemoPolicy],
+    policies: [
+      options.audience === "owner"
+        ? shipOwnerPolicy
+        : options.connected === undefined
+          ? shipDemoPolicy
+          : shipConnectedPolicy,
+    ],
     createProvider: () => provider,
     now: () => new Date(),
   });
@@ -156,6 +163,7 @@ async function ship(options: {
     },
     sandboxes: createLocalSandboxProvider({ root: sandboxRoot }),
     github: options.github,
+    ...(options.connected === undefined ? {} : { findInstallation: options.connected }),
     cloneUrl: () => fixture,
     ...(approval === undefined ? {} : { awaitShipApproval: approval }),
   });
@@ -297,6 +305,39 @@ describe("Ship-a-PR mission", { timeout: 60_000 }, () => {
       await rm(check);
     }
     expect(await readFile(posix.join(fixture, "src/sum.js"), "utf8")).not.toBe(FIXED_SUM);
+  });
+
+  it("opens a real PR for a visitor whose own connected installation covers the repository", async () => {
+    const github = fakeGitHub(false);
+    const asked: string[] = [];
+    const run = await ship({
+      audience: "public-demo",
+      github: github.client,
+      connected: (owner, repo) => {
+        asked.push(`${owner}/${repo}`);
+        return Promise.resolve({ installationId: 7 });
+      },
+      decision: { decision: "approved", approvedBy: { type: "guest", id: "visitor" } },
+    });
+    expect(asked).toEqual(["acme/widgets"]);
+    expect(run.requests[0]?.mode).toBe("pull_request");
+    expect(github.calls.map((call) => call.path)).not.toContain("/repos/acme/widgets/installation");
+    expect(github.calls[0]?.path).toBe("/app/installations/7/access_tokens");
+    expect(run.result?.status).toBe("opened");
+    expect(JSON.stringify(run.events)).not.toContain(TOKEN);
+  });
+
+  it("gives a connected visitor a patch when their installation does not cover the repository", async () => {
+    const github = fakeGitHub(true);
+    const run = await ship({
+      audience: "public-demo",
+      github: github.client,
+      connected: () => Promise.resolve(null),
+      decision: { decision: "approved" },
+    });
+    expect(github.calls).toEqual([]);
+    expect(run.requests[0]?.mode).toBe("patch");
+    expect(run.requests[0]?.reason).toContain("No GitHub installation connected");
   });
 
   it("falls back to a patch when the GitHub App is not installed on the repository", async () => {

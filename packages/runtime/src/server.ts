@@ -4,6 +4,7 @@ import { lookup } from "node:dns/promises";
 import {
   defaultPolicy,
   ownerDefaultPolicy,
+  shipConnectedPolicy,
   shipDemoPolicy,
   shipOwnerPolicy,
   type Policy,
@@ -45,7 +46,7 @@ import {
 import { runBuildAgent } from "./missions/build-agent/run";
 import { createMemoryAssistantStore, type AssistantStore } from "./missions/build-agent/schema";
 import { runCompanyXray } from "./missions/company-xray/run";
-import { runShipAPr, type ShipLimits } from "./missions/ship-a-pr/run";
+import { runShipAPr, type FindInstallation, type ShipLimits } from "./missions/ship-a-pr/run";
 import { type AwaitShipApproval } from "./missions/ship-a-pr/schema";
 import {
   createGitHubAppClient,
@@ -93,6 +94,7 @@ export interface RunMissionOptions {
   awaitShipApproval?: AwaitShipApproval;
   sandboxes?: SandboxProvider;
   github?: GitHubAppClient | null;
+  findInstallation?: FindInstallation;
   cloneUrl?: (repo: RepoRef) => string;
   shipLimits?: Partial<ShipLimits>;
 }
@@ -138,8 +140,11 @@ export function inProcessStores(): { knowledge: KnowledgeStore; assistants: Assi
 
 const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set(["build-agent", "ship-a-pr"]);
 
-function policiesFor(missionId: MissionId, audience: Audience): Policy[] {
-  if (missionId === "ship-a-pr") return [audience === "owner" ? shipOwnerPolicy : shipDemoPolicy];
+function policiesFor(missionId: MissionId, audience: Audience, connected: boolean): Policy[] {
+  if (missionId === "ship-a-pr")
+    return [
+      audience === "owner" ? shipOwnerPolicy : connected ? shipConnectedPolicy : shipDemoPolicy,
+    ];
   return [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy];
 }
 
@@ -294,7 +299,7 @@ async function executeMission(
     env: options.env,
     emitter: createRunEmitter(emit),
     budget: new Budget({ run: RUN_BUDGETS[audience] }),
-    policies: policiesFor(mission.id, audience),
+    policies: policiesFor(mission.id, audience, options.findInstallation !== undefined),
     createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
     environment: "server",
     ...(options.latency === undefined ? {} : { latency: options.latency }),
@@ -337,7 +342,7 @@ async function executeMission(
       sandboxes = options.sandboxes ?? createSandboxProvider(options.env);
       github =
         options.github === undefined
-          ? audience === "owner"
+          ? audience === "owner" || options.findInstallation !== undefined
             ? githubAppFromEnv(options.env, options.fetchImpl)
             : null
           : options.github;
@@ -355,6 +360,9 @@ async function executeMission(
       prompts: { planner: prompts.planner, engineer: prompts.engineer },
       sandboxes,
       github,
+      ...(options.findInstallation === undefined
+        ? {}
+        : { findInstallation: options.findInstallation }),
       ...(options.cloneUrl === undefined ? {} : { cloneUrl: options.cloneUrl }),
       ...(options.awaitShipApproval === undefined
         ? {}
@@ -551,3 +559,6 @@ export {
 export { reciprocalRankFusion, retrieve, RETRIEVAL_DEFAULTS } from "./knowledge/retrieve";
 export { memoryNotes, recordRunMemory, MEMORY_KEYS } from "./knowledge/workspace-memory";
 export { assistantIdForRun } from "./missions/build-agent/run";
+export { type FindInstallation } from "./missions/ship-a-pr/run";
+export { readGitHubAppConfig, type GitHubAppClient } from "./github/app";
+export { createSandboxProvider, sandboxKindFor } from "./sandbox";

@@ -112,7 +112,7 @@ export interface RepoSession {
 
 export interface GitHubAppClient {
   installationFor(repo: RepoRef): Promise<number | null>;
-  sessionFor(repo: RepoRef): Promise<RepoSession | null>;
+  sessionFor(repo: RepoRef, installationId?: number): Promise<RepoSession | null>;
 }
 
 export interface GitHubAppClientOptions {
@@ -197,8 +197,8 @@ export function createGitHubAppClient(options: GitHubAppClientOptions): GitHubAp
 
   return {
     installationFor,
-    async sessionFor(repo) {
-      const installationId = await installationFor(repo);
+    async sessionFor(repo, knownInstallation) {
+      const installationId = knownInstallation ?? (await installationFor(repo));
       if (installationId === null) return null;
       const minted = await call(
         "installation token",

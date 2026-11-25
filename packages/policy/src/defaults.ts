@@ -138,6 +138,34 @@ export const shipDemoPolicy: Policy = PolicySchema.parse({
   ],
 });
 
+export const shipConnectedPolicy: Policy = PolicySchema.parse({
+  id: "ship-connected",
+  name: "Ship-a-PR for a visitor with a connected GitHub installation",
+  description:
+    "A visitor who connected their own GitHub App installation: sandbox-only reads, writes and allowlisted commands; one pull request to the GitHub API on a repository their installation covers, always after human approval; no spend. The pull request is a system action with no model provider, so provider terms are enforced by the public-demo model routing rather than by this policy.",
+  rules: [
+    {
+      id: "sandbox-capabilities",
+      kind: "capability_allowlist",
+      capabilities: [...SANDBOX_CAPABILITIES, CAPABILITIES.artifactWrite, CAPABILITIES.repoWrite],
+    },
+    {
+      id: "github-api-only",
+      kind: "egress_allowlist",
+      capabilities: [CAPABILITIES.repoWrite],
+      domains: [GITHUB_API_HOST],
+    },
+    { id: "pull-request-approval", kind: "require_approval", tools: [GITHUB_OPEN_PR_TOOL] },
+    { id: "zero-spend", kind: "spend_cap", perRunMicroUsd: 0, perDayMicroUsd: 0, onExceed: "deny" },
+    {
+      id: "no-confidential-data",
+      kind: "classification",
+      classifications: ["confidential", "restricted"],
+      forbiddenTools: ["*"],
+    },
+  ],
+});
+
 export const shipOwnerPolicy: Policy = PolicySchema.parse({
   id: "ship-owner",
   name: "Ship-a-PR for the owner",

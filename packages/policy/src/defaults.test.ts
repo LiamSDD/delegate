@@ -7,6 +7,7 @@ import {
   SANDBOX_CAPABILITIES,
   defaultPolicy,
   ownerDefaultPolicy,
+  shipConnectedPolicy,
   shipDemoPolicy,
   shipOwnerPolicy,
 } from "./defaults";
@@ -95,6 +96,19 @@ describe("ship-a-pr policies", () => {
   it("denies a pull request to guests and requires approval for the owner", () => {
     expect(evaluate([shipDemoPolicy], openPr).decision).toBe("deny");
     expect(evaluate([shipOwnerPolicy], openPr).decision).toBe("require_approval");
+  });
+
+  it("requires approval for a connected visitor and keeps zero spend", () => {
+    expect(evaluate([shipConnectedPolicy], openPr).decision).toBe("require_approval");
+    expect(
+      evaluate([shipConnectedPolicy], { ...openPr, targetDomain: "attacker.example" }).decision,
+    ).toBe("deny");
+    expect(
+      evaluate([shipConnectedPolicy], {
+        ...sandbox(CAPABILITIES.sandboxWrite),
+        spentRunMicroUsd: 1,
+      }).decision,
+    ).toBe("deny");
   });
 
   it("never lets a pull request reach a host other than the GitHub API", () => {

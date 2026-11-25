@@ -1,5 +1,7 @@
 import { CAPABILITIES, GITHUB_API_HOST, GITHUB_OPEN_PR_TOOL, evaluate } from "@delegate/policy";
 
+import { z } from "zod";
+
 import { RunAbortedError, type RunContext } from "../../agent/context";
 import { runAgentLoop } from "../../agent/loop";
 import {
@@ -96,12 +98,20 @@ export interface ShipAPrDependencies {
   prompts: ShipAPrPrompts;
   sandboxes: SandboxProvider;
   github: GitHubAppClient | null;
+  findInstallation?: FindInstallation;
   cloneUrl?: (repo: RepoRef) => string;
   awaitShipApproval?: AwaitShipApproval;
   existingArtifacts?: readonly ExistingArtifact[];
   limits?: Partial<ShipLimits>;
   run?: Omit<PlannedRunOptions, "plannerPrompt">;
 }
+
+export type FindInstallation = (
+  owner: string,
+  repo: string,
+) => Promise<{ installationId: number } | null>;
+
+const InstallationSchema = z.object({ installationId: z.number().int().positive() }).nullable();
 
 function cut(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -520,24 +530,50 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
     },
   };
 
+  const findInstallation = async (): Promise<{
+    installationId: number | null;
+    source: "connected" | "owner";
+  } | null> => {
+    if (deps.findInstallation !== undefined) {
+      const found = InstallationSchema.safeParse(
+        await deps.findInstallation(repoRef.owner, repoRef.name),
+      );
+      if (found.success && found.data !== null)
+        return { installationId: found.data.installationId, source: "connected" };
+    }
+    if (ctx.audience === "owner") return { installationId: null, source: "owner" };
+    return null;
+  };
+
   const decideMode = async (
     after: ShipTestReport,
   ): Promise<{ mode: ShipMode; reason: string; session: RepoSession | null }> => {
     const patch = (reason: string) => ({ mode: "patch" as const, reason, session: null });
-    if (ctx.audience !== "owner")
-      return patch(
-        "Public demo runs never push to GitHub; the change is offered as a patch and test report.",
-      );
     if (after.test.passed !== true)
       return patch(
         after.test.command === null
           ? "No test command was detected, so no pull request is offered; the change is offered as a patch."
           : "The repository's tests do not pass after the change, so no pull request is offered.",
       );
+    let installation: Awaited<ReturnType<typeof findInstallation>>;
+    try {
+      installation = await findInstallation();
+    } catch {
+      return patch(
+        "Your GitHub connection could not be checked, so the change is offered as a patch.",
+      );
+    }
+    if (installation === null)
+      return patch(
+        `No GitHub installation connected to this workspace covers ${repo}, so the change is offered as a patch and test report.`,
+      );
     if (deps.github === null)
       return patch("No GitHub App is configured (GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY).");
     try {
-      const session = await deps.github.sessionFor(repoRef);
+      const session = await deps.github.sessionFor(
+        repoRef,
+        ...(installation.installationId === null ? [] : [installation.installationId]),
+      );
       if (session === null)
         return patch(
           `The Delegate GitHub App is not installed on ${repo}, so the change is offered as a patch.`,
@@ -549,7 +585,7 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
       };
     } catch (error) {
       return patch(
-        `The GitHub App installation could not be checked (${error instanceof GitHubApiError ? `HTTP ${error.status}` : "network error"}), so the change is offered as a patch.`,
+        `A token for ${repo} could not be minted (${error instanceof GitHubApiError ? `HTTP ${error.status}` : "network error"}), so the change is offered as a patch.`,
       );
     }
   };
@@ -620,7 +656,7 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
           ? {
               mode: "patch" as const,
               session: null,
-              reason: `${ctx.audience === "owner" ? "" : "Public demo runs never push to GitHub. "}Policy ${policy.policyId} denies pull requests here: ${cut(policy.reason, 200)}`,
+              reason: `${ctx.audience === "owner" ? "" : "Public demo runs without a connected GitHub installation never push. "}Policy ${policy.policyId} denies pull requests here: ${cut(policy.reason, 200)}`,
             }
           : await decideMode(after);
       const base =
@@ -643,17 +679,17 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
         after: after.test,
         reason,
       };
+      await task.agent.say(
+        mode === "pull_request"
+          ? `Waiting for approval to open a pull request on ${repo}.`
+          : `Waiting for approval of the patch. ${reason}`,
+      );
       await emit({
         runId,
         type: "ship.approval.requested",
         stepId: task.step.id,
         payload: request,
       });
-      await task.agent.say(
-        mode === "pull_request"
-          ? `Waiting for approval to open a pull request on ${repo}.`
-          : `Waiting for approval of the patch. ${reason}`,
-      );
       const decision = await awaitDecision(request);
       await emit({
         runId,

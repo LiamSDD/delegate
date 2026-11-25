@@ -34,8 +34,12 @@ export interface LocalSandboxOptions {
   production?: boolean;
 }
 
-export function scrubbedEnv(workdir: string, path: string): Record<string, string> {
+export function scrubbedEnv(
+  workdir: string,
+  path: string,
+): Record<string, string> & { NODE_ENV: "test" } {
   return {
+    NODE_ENV: "test" as const,
     PATH: path,
     HOME: posix.join(workdir, "home"),
     TMPDIR: posix.join(workdir, "tmp"),
