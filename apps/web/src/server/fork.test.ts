@@ -324,6 +324,32 @@ describe("POST /api/runs/[id]/fork", () => {
     expect(await response.json()).toMatchObject({ error: { code: "run_not_finished" } });
   });
 
+  it("does not spend the run quota on refused forks", async () => {
+    const d = deps({ guestLimiter: createRateLimiter({ limit: 2, windowMs: 3_600_000 }) });
+    const parent = await finishedRun(d);
+    const path = `/api/runs/${parent.runId}/fork`;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const refused = await handleForkRun(
+        request(path, { stepId: "no-such-step" }, { cookie: parent.cookie }),
+        parent.runId,
+        d,
+      );
+      expect(refused.status).toBe(400);
+    }
+    const accepted = await handleForkRun(
+      request(path, { stepId: "map-site" }, { cookie: parent.cookie }),
+      parent.runId,
+      d,
+    );
+    expect(accepted.status).toBe(201);
+    const limited = await handleForkRun(
+      request(path, { stepId: "map-site" }, { cookie: parent.cookie }),
+      parent.runId,
+      d,
+    );
+    expect(limited.status).toBe(429);
+  });
+
   it("rate limits forks with the run quota", async () => {
     const d = deps({ guestLimiter: createRateLimiter({ limit: 1, windowMs: 3_600_000 }) });
     const parent = await finishedRun(d);

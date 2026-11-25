@@ -555,12 +555,6 @@ export async function handleForkRun(
     const { app, session } = guest;
     const parent = await getRunRecord(app, session.userId, runId);
     if (parent?.workspaceId !== session.workspaceId) return notFound();
-    const quota = deps.guestLimiter.take(session.userId);
-    if (!quota.ok) {
-      return apiError(429, "rate_limited", "Demo runs are limited per hour. Try again later.", {
-        headers: { "Retry-After": retryAfterSeconds(quota.retryAfterMs) },
-      });
-    }
     const missionId = parent.mission;
     if (!isRunnableMission(missionId)) {
       return apiError(400, "invalid_request", "This mission cannot be forked.");
@@ -568,6 +562,12 @@ export async function handleForkRun(
     const started = Date.now();
     const fork = planRunFork(await readAllEvents(app, session.userId, parent.id), parsed.data);
     if (!fork.ok) return forkRefusalResponse(fork);
+    const quota = deps.guestLimiter.take(session.userId);
+    if (!quota.ok) {
+      return apiError(429, "rate_limited", "Demo runs are limited per hour. Try again later.", {
+        headers: { "Retry-After": retryAfterSeconds(quota.retryAfterMs) },
+      });
+    }
     const runner = deps.runner();
     const created = await createForkRecord(app, session, parent, fork, runner.execution);
     const ctx = { runId: created.runId, workspaceId: session.workspaceId, userId: session.userId };
