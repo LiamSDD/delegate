@@ -258,6 +258,34 @@ const samples: Record<RunEvent["type"], unknown> = {
       tokens: 26,
     },
   },
+  "child.started": {
+    type: "child.started",
+    payload: {
+      childRunId: "00000000-0000-4000-8000-000000000001",
+      nodeId: "brief",
+      missionId: "custom-goal",
+      label: "Goal brief",
+      input: { goal: "Automate support" },
+      approvals: { plan: "human", sideEffects: "none" },
+    },
+  },
+  "child.completed": {
+    type: "child.completed",
+    payload: {
+      childRunId: "00000000-0000-4000-8000-000000000001",
+      nodeId: "brief",
+      missionId: "custom-goal",
+      outcome: {
+        status: "completed",
+        summary: "Goal brief: 3 ranked actions.",
+        deliverable: { artifactId: "a1", kind: "goal-brief", title: "Goal brief" },
+        metrics: [{ label: "Actions", value: "3" }],
+        links: [],
+        needsHuman: [],
+      },
+      tokens: 1200,
+    },
+  },
 };
 
 function envelope(seq: number, body: unknown): unknown {
@@ -269,9 +297,9 @@ function build(bodies: unknown[]): RunEvent[] {
 }
 
 describe("RunEvent", () => {
-  it("lists exactly the twenty-six event types", () => {
-    expect(RUN_EVENT_TYPES).toHaveLength(26);
-    expect(new Set(RUN_EVENT_TYPES).size).toBe(26);
+  it("lists exactly the twenty-eight event types", () => {
+    expect(RUN_EVENT_TYPES).toHaveLength(28);
+    expect(new Set(RUN_EVENT_TYPES).size).toBe(28);
     expect(Object.keys(samples).sort()).toEqual([...RUN_EVENT_TYPES].sort());
   });
 
@@ -377,6 +405,61 @@ describe("ship events", () => {
         ]),
       ),
     ).toThrow(EventOrderError);
+  });
+});
+
+describe("child run events", () => {
+  const second = "00000000-0000-4000-8000-000000000002";
+  const started = samples["child.started"];
+  const completed = samples["child.completed"];
+  const startedSecond = {
+    type: "child.started",
+    payload: {
+      childRunId: second,
+      nodeId: "audit",
+      missionId: "automation-audit",
+      label: "AI Automation Audit",
+      input: { url: "https://acme.com/" },
+      from: {
+        contract: "brief-track",
+        fromRunId: "00000000-0000-4000-8000-000000000001",
+        artifactId: "a1",
+      },
+      approvals: { plan: "auto", sideEffects: "none" },
+    },
+  };
+
+  it("folds children with their hand-off and outcome", () => {
+    const state = foldRun(build([samples["run.created"], started, completed, startedSecond]));
+    expect(state.status).toBe("running");
+    expect(state.children.map((child) => [child.nodeId, child.outcome?.status ?? null])).toEqual([
+      ["brief", "completed"],
+      ["audit", null],
+    ]);
+    expect(state.children[0]?.tokens).toBe(1200);
+    expect(state.children[1]?.from?.contract).toBe("brief-track");
+  });
+
+  it("refuses a second child while one is running, repeats and unmatched completions", () => {
+    expect(() => foldRun(build([samples["run.created"], started, startedSecond]))).toThrow(
+      EventOrderError,
+    );
+    expect(() => foldRun(build([samples["run.created"], started, completed, completed]))).toThrow(
+      EventOrderError,
+    );
+    expect(() => foldRun(build([samples["run.created"], completed]))).toThrow(EventOrderError);
+  });
+
+  it("records the autopilot parent on a child run", () => {
+    const created = samples["run.created"] as { type: string; payload: Record<string, unknown> };
+    const child = {
+      ...created,
+      payload: {
+        ...created.payload,
+        autopilot: { parentRunId: "00000000-0000-4000-8000-0000000000aa", nodeId: "audit" },
+      },
+    };
+    expect(foldRun(build([child])).autopilot?.nodeId).toBe("audit");
   });
 });
 

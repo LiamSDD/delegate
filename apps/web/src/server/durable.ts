@@ -1,14 +1,17 @@
+import { AUTOPILOT_MISSION_ID, type ChildStartedPayload, foldRun } from "@delegate/runtime";
 import { analyseForResume, type FindInstallation } from "@delegate/runtime/server";
 
 import { isExecutableMission } from "@/lib/m2-contract";
 import { MAX_RESUMES, resumeDecision, resumeMarkerDraft, resumeNotices } from "@/lib/runs/resume";
 
+import { advanceAutopilot, autopilotLinkOf } from "./autopilot";
 import type { AppDatabase } from "./db";
 import { executeRun } from "./execute-run";
 import type { MissionConnections } from "./mission-runner";
 import { createDbLease } from "./leases";
 import type { MissionRunner } from "./mission-runner";
 import type { RunRegistry } from "./run-registry";
+import type { RateLimiter } from "./session";
 import {
   appendEvent,
   type Execution,
@@ -28,6 +31,8 @@ export interface DurableDeps {
   shipInstallations?: (workspaceId: string, userId: string) => FindInstallation;
   connections?: (app: AppDatabase, ctx: RunContext) => Promise<MissionConnections | undefined>;
   now?: () => Date;
+  guestLimiter: RateLimiter;
+  shipEnabled?: boolean;
 }
 
 const holder = globalThis as typeof globalThis & { __delegateResuming?: Set<string> };
@@ -87,8 +92,12 @@ async function resumeRun(
   await appendEvent(app, ctx, marker);
   const resumeFrom = await readAllEvents(app, userId, record.id);
   const missionId = record.mission;
+  const link = autopilotLinkOf(resumeFrom);
+  const approvals =
+    link === undefined ? undefined : await childApprovals(app, userId, link.parentRunId, record.id);
+  const mayAsk = approvals === undefined || approvals.sideEffects === "ask";
   const connections =
-    deps.connections === undefined
+    deps.connections === undefined || !mayAsk
       ? undefined
       : await deps.connections(app, ctx).catch(() => undefined);
   deps.schedule(() =>
@@ -101,12 +110,31 @@ async function resumeRun(
       registry: deps.registry,
       lease,
       resumeFrom,
+      ...(approvals === undefined ? {} : { autoApprovePlan: approvals.plan === "auto" }),
       ...(connections === undefined ? {} : { connections }),
-      ...(missionId === "ship-a-pr" && deps.shipInstallations !== undefined
+      ...(missionId === "ship-a-pr" && mayAsk && deps.shipInstallations !== undefined
         ? { findInstallation: deps.shipInstallations(record.workspaceId, userId) }
         : {}),
+      ...(link === undefined
+        ? {}
+        : { onSettled: () => advanceAutopilot(app, userId, link.parentRunId, deps) }),
     }),
   );
+}
+
+async function childApprovals(
+  app: AppDatabase,
+  userId: string,
+  parentRunId: string,
+  childRunId: string,
+): Promise<ChildStartedPayload["approvals"]> {
+  const fallback = { plan: "human", sideEffects: "none" } as const;
+  try {
+    const parent = foldRun(await readAllEvents(app, userId, parentRunId));
+    return parent.children.find((child) => child.childRunId === childRunId)?.approvals ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function reviveOrSweep(
@@ -115,6 +143,11 @@ export async function reviveOrSweep(
   record: RunRecord,
   deps: DurableDeps,
 ): Promise<RunRecord | null> {
+  if (record.mission === AUTOPILOT_MISSION_ID) {
+    if (record.lastEventType !== null && isTerminalEventType(record.lastEventType)) return record;
+    await advanceAutopilot(app, userId, record.id, deps);
+    return getRunRecord(app, userId, record.id);
+  }
   const now = deps.now?.() ?? new Date();
   const decision = resumeDecision(
     {

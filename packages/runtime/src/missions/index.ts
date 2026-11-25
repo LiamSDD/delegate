@@ -93,4 +93,5 @@ export * from "./next-actions";
 export * from "./build-agent";
 export * from "./ship-a-pr";
 export * from "./custom-goal";
+export * from "./autopilot";
 export * from "./repo-xray";

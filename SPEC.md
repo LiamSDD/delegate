@@ -285,13 +285,13 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 - [x] *Done when:* attack success rate is 0% and a fork-and-diff starts in under 10 s (live: ASR 0/56; fork first new event 0.2 s on delegate-beryl.vercel.app)
 
 ### M5 · Engineering missions
-- [ ] Repo X-ray
-- [ ] Ship-a-PR (Claude Agent SDK in a sandbox, GitHub App authorisation, patch fallback)
-- [ ] *Done when:* a PR passing the repo's tests is opened on one of the owner's repos after approval
+- [x] Repo X-ray
+- [x] Ship-a-PR (own Engineer loop on the free model chain instead of the Claude Agent SDK per ADR 0011, Vercel Sandbox, GitHub App authorisation, patch fallback)
+- [ ] *Done when:* a PR passing the repo's tests is opened on one of the owner's repos after approval (flow live and covered by tests and red-team cases; the owner has not yet connected a repository for the live PR)
 
 ### M6 · Platform interfaces
 - [ ] REST API, OpenAPI, TypeScript SDK, signed webhooks, CLI
-- [ ] MCP server (call Delegate from Claude Code), MCP client connectors, Ops Pulse
+- [ ] MCP server (call Delegate from Claude Code), MCP client connectors, Ops Pulse (MCP server and connectors shipped early, ADR 0014; Ops Pulse not started)
 - [ ] *Done when:* Demo B steps 1–2 work from a terminal
 
 ### M7 · Enterprise

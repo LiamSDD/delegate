@@ -18,6 +18,7 @@ import { missionLabel, RUNNABLE_MISSION_IDS, type RunnableMissionId } from "@/li
 
 import { AgentLanes } from "./agent-lanes";
 import { AuditPanel } from "./audit-panel";
+import { AutopilotBanner } from "./autopilot-panel";
 import { BriefPanel } from "./brief-panel";
 import { BuildAgentPanel } from "./build-agent-panel";
 import { ForkBanner } from "./fork-banner";
@@ -310,6 +311,7 @@ export function RunView({
               }}
             />
           ) : null}
+          <AutopilotBanner events={recorded} />
           <ForkBanner runId={runId} events={recorded} />
           <ResumedBanner events={events} />
           {ready?.outcome === null || ready?.outcome === undefined ? null : (

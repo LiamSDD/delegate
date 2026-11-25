@@ -27,6 +27,8 @@ export const RUN_EVENT_TYPES = [
   "ship.approval.decided",
   "pr.opened",
   "playbook.applied",
+  "child.started",
+  "child.completed",
 ] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
@@ -333,6 +335,76 @@ export const ForkOriginSchema = z.object({
 });
 export type ForkOrigin = z.infer<typeof ForkOriginSchema>;
 
+export const CHILD_MISSION_IDS = [
+  "custom-goal",
+  "company-xray",
+  "automation-audit",
+  "build-agent",
+  "repo-xray",
+  "ship-a-pr",
+] as const;
+export const ChildMissionIdSchema = z.enum(CHILD_MISSION_IDS);
+export type ChildMissionId = z.infer<typeof ChildMissionIdSchema>;
+
+export const AutopilotLinkSchema = z.object({
+  parentRunId: z.uuid(),
+  nodeId: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
+});
+export type AutopilotLink = z.infer<typeof AutopilotLinkSchema>;
+
+export const ChildHandoffSchema = z.object({
+  contract: z.string().min(1).max(80),
+  fromRunId: z.uuid(),
+  artifactId: id,
+  itemId: z.string().min(1).max(80).optional(),
+  itemTitle: z.string().min(1).max(160).optional(),
+});
+export type ChildHandoff = z.infer<typeof ChildHandoffSchema>;
+
+export const CHILD_APPROVAL_MODES = ["auto", "human"] as const;
+export const CHILD_SIDE_EFFECT_MODES = ["ask", "patch_only", "none"] as const;
+
+export const ChildStartedPayloadSchema = z.object({
+  childRunId: z.uuid(),
+  nodeId: AutopilotLinkSchema.shape.nodeId,
+  missionId: ChildMissionIdSchema,
+  label: z.string().min(1).max(120),
+  input: z.record(z.string(), z.unknown()),
+  from: ChildHandoffSchema.optional(),
+  approvals: z.object({
+    plan: z.enum(CHILD_APPROVAL_MODES),
+    sideEffects: z.enum(CHILD_SIDE_EFFECT_MODES),
+  }),
+});
+export type ChildStartedPayload = z.infer<typeof ChildStartedPayloadSchema>;
+
+export const ChildLinkSchema = z.object({
+  label: z.string().min(1).max(60),
+  href: z.string().min(1).max(500),
+});
+
+export const ChildOutcomeSchema = z.object({
+  status: z.enum(["completed", "failed"]),
+  summary: z.string().max(600),
+  error: z.object({ code: id, message: z.string().max(400) }).optional(),
+  deliverable: z.object({ artifactId: id, kind: id, title: z.string().min(1).max(200) }).nullable(),
+  metrics: z
+    .array(z.object({ label: z.string().min(1).max(40), value: z.string().min(1).max(80) }))
+    .max(6),
+  links: z.array(ChildLinkSchema).max(4),
+  needsHuman: z.array(z.string().min(1).max(300)).max(4),
+});
+export type ChildOutcome = z.infer<typeof ChildOutcomeSchema>;
+
+export const ChildCompletedPayloadSchema = z.object({
+  childRunId: z.uuid(),
+  nodeId: AutopilotLinkSchema.shape.nodeId,
+  missionId: ChildMissionIdSchema,
+  outcome: ChildOutcomeSchema,
+  tokens: tokenCount,
+});
+export type ChildCompletedPayload = z.infer<typeof ChildCompletedPayloadSchema>;
+
 export const PlaybookAppliedEntrySchema = z.object({
   id: z.string().regex(/^pb_[0-9a-f]{8}$/),
   scope: z.enum(["workspace", "house"]),
@@ -368,6 +440,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       actor: ActorSchema,
       budget: z.object({ maxTokens: tokenCount, maxMicroUsd: MicroUsdSchema }),
       forkedFrom: ForkOriginSchema.optional(),
+      autopilot: AutopilotLinkSchema.optional(),
     }),
   ),
   event(
@@ -525,6 +598,8 @@ export const RunEventSchema = z.discriminatedUnion("type", [
   event("ship.approval.decided", ShipApprovalDecidedPayloadSchema),
   event("pr.opened", PullRequestOpenedPayloadSchema),
   event("playbook.applied", PlaybookAppliedSchema),
+  event("child.started", ChildStartedPayloadSchema),
+  event("child.completed", ChildCompletedPayloadSchema),
 ]);
 
 export type RunEvent = z.infer<typeof RunEventSchema>;
@@ -622,12 +697,22 @@ export interface ShipState {
   pullRequest?: PullRequestOpenedPayload;
 }
 
+export interface ChildRunState extends ChildStartedPayload {
+  seq: number;
+  startedAt: string;
+  completedAt?: string;
+  outcome?: ChildOutcome;
+  tokens?: number;
+}
+
 export interface RunState {
   runId: string;
   status: RunStatus;
   workspaceId?: string;
   missionId?: string;
   forkedFrom?: ForkOrigin;
+  autopilot?: AutopilotLink;
+  children: ChildRunState[];
   plan: { version: number; steps: PlanStep[]; approved: boolean; phases?: PlanPhase[] } | null;
   planRevisions: PlanRevision[];
   steps: StepState[];
@@ -689,6 +774,7 @@ export function foldRun(events: readonly RunEvent[]): RunState {
     pendingApprovals: [],
     artifacts: emptyArtifacts(),
     fallbacks: [],
+    children: [],
     lastSeq: -1,
   };
 
@@ -728,6 +814,7 @@ export function foldRun(events: readonly RunEvent[]): RunState {
         state.workspaceId = event.payload.workspaceId;
         state.missionId = event.payload.missionId;
         if (event.payload.forkedFrom !== undefined) state.forkedFrom = event.payload.forkedFrom;
+        if (event.payload.autopilot !== undefined) state.autopilot = event.payload.autopilot;
         lifecycle = "planning";
         break;
       case "plan.proposed":
@@ -888,6 +975,36 @@ export function foldRun(events: readonly RunEvent[]): RunState {
       case "playbook.applied":
         state.playbook = { ...event.payload, seq: event.seq };
         break;
+      case "child.started": {
+        const payload = event.payload;
+        if (
+          state.children.some(
+            (child) => child.childRunId === payload.childRunId || child.nodeId === payload.nodeId,
+          )
+        )
+          throw new EventOrderError(`child.started at seq ${event.seq} repeats a child`);
+        if (state.children.some((child) => child.outcome === undefined))
+          throw new EventOrderError(
+            `child.started at seq ${event.seq} while another child is still running`,
+          );
+        state.children.push({ ...payload, seq: event.seq, startedAt: event.at });
+        lifecycle = "running";
+        break;
+      }
+      case "child.completed": {
+        const payload = event.payload;
+        const child = state.children.find((entry) => entry.childRunId === payload.childRunId);
+        if (child?.nodeId !== payload.nodeId)
+          throw new EventOrderError(
+            `child.completed at seq ${event.seq} has no matching child.started`,
+          );
+        if (child.outcome !== undefined)
+          throw new EventOrderError(`child.completed at seq ${event.seq} repeats a child`);
+        child.outcome = payload.outcome;
+        child.completedAt = event.at;
+        child.tokens = payload.tokens;
+        break;
+      }
       case "run.completed":
         state.summary = event.payload.summary;
         lifecycle = "completed";

@@ -81,3 +81,15 @@ Append one entry per completed task: date, shipped, next, known issues, metrics.
 - Live eval found that pages over 2 MB failed the whole X-ray; the fetcher now keeps the capped prefix. Eval CLI now uses the same NVIDIA chain as the deployed site.
 - **Live X-ray eval** (8 companies × 2 trials, NVIDIA free tier): pass 81% [57%, 93%], deterministic score 0.91 ± 0.09, judge 0.75 ± 0.10, p50 61 s, p95 81 s, $0. LEGO blocks automated fetches (403); one Rakuten trial failed synthesis validation.
 - Not done: judge-human agreement has no human labels yet; Audit and Build it have no eval datasets yet.
+
+## 2026-11-25/26 · M5 engineering missions and platform upgrades
+
+- **Repo X-ray** (ADR 0010): codeload tarball ingestion with caps, deterministic analysis, model steps on evidence ids only, line-level citation critic. Live on LiamSDD/claude-ledger: 2m35s, 7 ranked improvements, 71% supported (24 claims checked).
+- **Ship-a-PR** (ADR 0011): own Engineer loop on the free chain, Vercel Sandbox, ship approval of the exact diff, PR pushed from the approved bytes only, GitHub App with single-repo tokens and push-access check at ship time, patch fallback. Live and configured; no live PR yet (owner chose not to connect a personal repository).
+- **Custom goals** run live (no more draft page). Live: "I want to achieve nike's marketing and agentic work" → nike.com via Wikidata, 1m59s, 15/15 claims verified, 4 ranked actions. Briefs still include generic background; addressed in the next round.
+- **Crawl engine** (ADR 0012): 32 workers, 6 per host, Crawl-delay and Retry-After honoured with caps. 150 pages of docs.python.org in 15.5 s (was >150 s).
+- **Evolving playbooks** (ADR 0013): lessons from run outcomes, per-workspace and house playbooks, eval-gated `pnpm evolve`.
+- **Connections** (ADR 0014): `/api/mcp` for Claude Code, Codex, Cursor and VS Code; MCP client connectors with quarantined output and exact-argument approvals; Connect GitHub.
+- Hard deadlines and checkpoint resume for custom goal and Repo X-ray; host-gate waits abortable.
+- Two independent reviews found 2 high and 2 blocking issues plus 9 smaller ones; all fixed with tests. Red-team: 106 attacks across 10 categories, 0 successes.
+- Migrations 0005–0008 applied to Neon with `scripts/neon-migrate.sh`.

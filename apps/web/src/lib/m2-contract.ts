@@ -36,6 +36,8 @@ export const RUNNABLE_MISSION_IDS = [
 export type RunnableMissionId = (typeof RUNNABLE_MISSION_IDS)[number];
 
 export const SHIP_MISSION_ID = "ship-a-pr" as const;
+export const AUTOPILOT_MISSION = "autopilot" as const;
+export type AutopilotMissionId = typeof AUTOPILOT_MISSION;
 export type ExecutableMissionId = RunnableMissionId | typeof SHIP_MISSION_ID;
 
 export function isExecutableMission(mission: string): mission is ExecutableMissionId {
@@ -61,6 +63,7 @@ export const MISSION_LABELS: Record<string, string> = {
   "ship-a-pr": "Ship-a-PR",
   "custom-goal": "Custom goal",
   "repo-xray": "Repo X-ray",
+  autopilot: "Autopilot",
 };
 
 export function missionLabel(id: string): string {
