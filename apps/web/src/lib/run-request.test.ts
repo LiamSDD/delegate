@@ -66,3 +66,20 @@ describe("runTarget", () => {
     expect(runTarget({})).toBeNull();
   });
 });
+
+describe("Autopilot choice", () => {
+  it("turns a goal into an Autopilot run only when chosen, and leaves URLs on their missions", () => {
+    const goal = detect("Cut the support backlog for our team");
+    expect(runRequestFor(goal, { companyMission: "automation-audit", autopilot: true })).toEqual({
+      missionId: "autopilot",
+      input: { goal: "Cut the support backlog for our team" },
+    });
+    expect(runLabelFor(goal, { companyMission: "automation-audit", autopilot: true })).toBe(
+      "Run Autopilot",
+    );
+    const company = detect("stripe.com");
+    expect(
+      runRequestFor(company, { companyMission: "company-xray", autopilot: true }).missionId,
+    ).toBe("company-xray");
+  });
+});

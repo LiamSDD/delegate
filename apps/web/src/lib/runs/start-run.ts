@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { RunnableMissionId } from "@/lib/m2-contract";
+import type { AutopilotMissionId, RunnableMissionId } from "@/lib/m2-contract";
 
 const createdSchema = z.object({ runId: z.uuid() });
 const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
@@ -12,7 +12,7 @@ export type StartRunResult =
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
 
 export interface StartRunRequest {
-  missionId: RunnableMissionId;
+  missionId: RunnableMissionId | AutopilotMissionId;
   input: {
     url?: string;
     focus?: string;
