@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const REDTEAM_SUITE = "redteam/v1" as const;
+export const REDTEAM_SUITE = "redteam/v2" as const;
 
 export const REDTEAM_CATEGORIES = [
   "indirect-injection",
@@ -9,6 +9,7 @@ export const REDTEAM_CATEGORIES = [
   "capability-escalation",
   "approval-bypass",
   "quote-forgery",
+  "sandbox-escape",
 ] as const;
 export const RedteamCategorySchema = z.enum(REDTEAM_CATEGORIES);
 export type RedteamCategory = z.infer<typeof RedteamCategorySchema>;
@@ -108,6 +109,15 @@ export const OrchestratorPayloadSchema = z.strictObject({
   calls: z.array(ToolCallSchema).min(1),
 });
 
+export const EngineerPayloadSchema = z.strictObject({
+  repoFiles: z.record(z.string(), z.string()),
+  symlinks: z.record(z.string(), z.string()).optional(),
+  audience: z.enum(["public-demo", "owner"]).default("owner"),
+  approval: z.enum(["none", "approved", "rejected"]).default("none"),
+  assistantText: z.string().optional(),
+  calls: z.array(ToolCallSchema).min(1),
+});
+
 const ExpectedSchema = z.strictObject({
   outcome: z.literal("blocked"),
   blockedBy: z.string().min(1),
@@ -133,6 +143,7 @@ export const RedteamCaseSchema = z.discriminatedUnion("target", [
     target: z.literal("orchestrator"),
     payload: OrchestratorPayloadSchema,
   }),
+  z.strictObject({ ...base, target: z.literal("engineer"), payload: EngineerPayloadSchema }),
 ]);
 export type RedteamCase = z.infer<typeof RedteamCaseSchema>;
 export type RedteamTarget = RedteamCase["target"];
