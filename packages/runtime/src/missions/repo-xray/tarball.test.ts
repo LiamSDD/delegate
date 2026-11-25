@@ -96,6 +96,17 @@ describe("readTarGz", () => {
     });
   });
 
+  it("refuses pax and GNU long-name metadata bodies over 1 MB", async () => {
+    const huge = `r/${"p".repeat(1_100_000)}`;
+    for (const type of ["pax-path", "gnu-longname"] as const) {
+      await expect(
+        readTarGz(gzipSync(tarEntries([{ path: huge, type, content: "x" }])), {
+          decide: keepAll,
+        }),
+      ).rejects.toMatchObject({ code: "corrupt_tar" });
+    }
+  });
+
   it("normalises entry paths and refuses traversal", () => {
     expect(normaliseEntryPath("widget-abc/src/./a.ts", 1)).toBe("src/a.ts");
     expect(normaliseEntryPath("widget-abc/", 1)).toBe("");
