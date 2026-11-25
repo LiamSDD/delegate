@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "id": "2026-11-25T18-08-43-387Z",
+  "mission": "repo",
+  "mode": "live",
+  "dataset": {
+    "name": "repo-xray",
+    "version": 2
+  },
+  "audience": "public-demo",
+  "startedAt": "2026-11-25T18:08:43.387Z",
+  "finishedAt": "2026-11-25T18:12:50.501Z",
+  "durationMs": 247114,
+  "trialsPerCase": 1,
+  "promptVersions": {
+    "planner": 3,
+    "quarantine-reader": 1,
+    "repo-xray-architect": 1,
+    "repo-xray-improver": 2,
+    "critic": 2,
+    "editor": 2,
+    "repo-judge": 1
+  },
+  "models": [
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 4
+    },
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 9
+    },
+    {
+      "role": "planner",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 2
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 4
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 12
+    }
+  ],
+  "judgeModels": [
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 1
+    },
+    {
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 1
+    }
+  ],
+  "totals": {
+    "trials": 2,
+    "costMicroUsd": 0,
+    "tokens": 110029
+  },
+  "cases": [
+    {
+      "caseId": "ky",
+      "company": "sindresorhus/ky",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-08-43-387Z_ky_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.4375,
+          "latencyMs": 115581,
+          "costMicroUsd": 0,
+          "tokens": 45306,
+          "metrics": {
+            "factRecall": 1,
+            "improvements": 8,
+            "modules": 31,
+            "hotspots": 2,
+            "citationsChecked": 98
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "click",
+      "company": "pallets/click",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-08-43-387Z_click_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.6875,
+          "latencyMs": 232260,
+          "costMicroUsd": 0,
+          "tokens": 64723,
+          "metrics": {
+            "factRecall": 1,
+            "improvements": 8,
+            "modules": 17,
+            "hotspots": 3,
+            "citationsChecked": 115
+          }
+        }
+      ]
+    }
+  ],
+  "agreement": {
+    "status": "no_human_labels",
+    "labels": 0
+  },
+  "judgeCriteria": {
+    "accuracy": {
+      "mean": 0.5,
+      "lower": 0,
+      "upper": 1,
+      "n": 2
+    },
+    "specificity": {
+      "mean": 0.75,
+      "lower": 0.75,
+      "upper": 0.75,
+      "n": 2
+    },
+    "actionability": {
+      "mean": 0.375,
+      "lower": 0,
+      "upper": 1,
+      "n": 2
+    },
+    "onboardingClarity": {
+      "mean": 0.625,
+      "lower": 0,
+      "upper": 1,
+      "n": 2
+    },
+    "overall": {
+      "mean": 0.5625,
+      "lower": 0,
+      "upper": 1,
+      "n": 2
+    }
+  },
+  "missionMetrics": {
+    "citationsChecked": {
+      "mean": 106.5,
+      "lower": -1.502740257484433,
+      "upper": 214.50274025748445,
+      "n": 2
+    },
+    "factRecall": {
+      "mean": 1,
+      "lower": 1,
+      "upper": 1,
+      "n": 2
+    },
+    "hotspots": {
+      "mean": 2.5,
+      "lower": -3.8531023680873204,
+      "upper": 8.85310236808732,
+      "n": 2
+    },
+    "improvements": {
+      "mean": 8,
+      "lower": 8,
+      "upper": 8,
+      "n": 2
+    },
+    "modules": {
+      "mean": 24,
+      "lower": -64.94343315322247,
+      "upper": 112.94343315322247,
+      "n": 2
+    }
+  }
+}

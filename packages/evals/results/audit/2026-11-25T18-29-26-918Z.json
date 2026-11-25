@@ -1,0 +1,237 @@
+{
+  "version": 1,
+  "id": "2026-11-25T18-29-26-918Z",
+  "mission": "audit",
+  "mode": "live",
+  "dataset": {
+    "name": "automation-audit",
+    "version": 1
+  },
+  "audience": "public-demo",
+  "startedAt": "2026-11-25T18:29:26.918Z",
+  "finishedAt": "2026-11-25T18:33:54.216Z",
+  "durationMs": 267298,
+  "trialsPerCase": 1,
+  "promptVersions": {
+    "planner": 3,
+    "quarantine-reader": 1,
+    "company-xray-researcher": 1,
+    "automation-audit-analyst": 2,
+    "automation-audit-editor": 1,
+    "critic": 2,
+    "editor": 2,
+    "audit-judge": 1
+  },
+  "models": [
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 6
+    },
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 55
+    },
+    {
+      "role": "planner",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 3
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 7
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 18
+    }
+  ],
+  "judgeModels": [
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 2
+    },
+    {
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 1
+    }
+  ],
+  "totals": {
+    "trials": 3,
+    "costMicroUsd": 0,
+    "tokens": 262934
+  },
+  "cases": [
+    {
+      "caseId": "companies-house",
+      "company": "Companies House",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-29-26-918Z_companies-house_0_0",
+          "outcome": "completed",
+          "passed": false,
+          "score": 0.9285714285714286,
+          "citationsVerified": true,
+          "judgeOverall": 0.5,
+          "latencyMs": 109570,
+          "costMicroUsd": 0,
+          "tokens": 90683,
+          "metrics": {
+            "opportunities": 7,
+            "eurPerMonth": 17538,
+            "departmentRecall": 0,
+            "workflowRecall": 0.5,
+            "verifiedShare": 1,
+            "genericIdeas": 0,
+            "evidenceCitations": 21
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "wikimedia-foundation",
+      "company": "Wikimedia Foundation",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-29-26-918Z_wikimedia-foundation_0_0",
+          "outcome": "completed",
+          "passed": false,
+          "score": 0.9285714285714286,
+          "citationsVerified": true,
+          "judgeOverall": 0.375,
+          "latencyMs": 105131,
+          "costMicroUsd": 0,
+          "tokens": 78911,
+          "metrics": {
+            "opportunities": 5,
+            "eurPerMonth": 12295,
+            "departmentRecall": 0.25,
+            "workflowRecall": 0.6666666666666666,
+            "verifiedShare": 1,
+            "genericIdeas": 0,
+            "evidenceCitations": 12
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "37signals",
+      "company": "37signals",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-29-26-918Z_37signals_0_0",
+          "outcome": "completed",
+          "passed": false,
+          "score": 0.9285714285714286,
+          "citationsVerified": true,
+          "judgeOverall": 0.375,
+          "latencyMs": 123382,
+          "costMicroUsd": 0,
+          "tokens": 93340,
+          "metrics": {
+            "opportunities": 5,
+            "eurPerMonth": 5620,
+            "departmentRecall": 0.3333333333333333,
+            "workflowRecall": 0.6666666666666666,
+            "verifiedShare": 1,
+            "genericIdeas": 0,
+            "evidenceCitations": 10
+          }
+        }
+      ]
+    }
+  ],
+  "agreement": {
+    "status": "no_human_labels",
+    "labels": 0
+  },
+  "judgeCriteria": {
+    "specificity": {
+      "mean": 0.5833333333333334,
+      "lower": 0.22477893918755854,
+      "upper": 0.9418877274791082,
+      "n": 3
+    },
+    "evidenceSupport": {
+      "mean": 0.3333333333333333,
+      "lower": 0,
+      "upper": 0.6918877274791082,
+      "n": 3
+    },
+    "roiPlausibility": {
+      "mean": 0.25,
+      "lower": 0.25,
+      "upper": 0.25,
+      "n": 3
+    },
+    "actionability": {
+      "mean": 0.5,
+      "lower": 0.5,
+      "upper": 0.5,
+      "n": 3
+    },
+    "overall": {
+      "mean": 0.4166666666666667,
+      "lower": 0.23738946959377927,
+      "upper": 0.5959438637395541,
+      "n": 3
+    }
+  },
+  "missionMetrics": {
+    "departmentRecall": {
+      "mean": 0.19444444444444442,
+      "lower": -0.23648430660072778,
+      "upper": 0.6253731954896167,
+      "n": 3
+    },
+    "eurPerMonth": {
+      "mean": 11817.666666666666,
+      "lower": -3020.885827031805,
+      "upper": 26656.219160365137,
+      "n": 3
+    },
+    "evidenceCitations": {
+      "mean": 14.333333333333334,
+      "lower": -0.22238533215788614,
+      "upper": 28.889051998824556,
+      "n": 3
+    },
+    "genericIdeas": {
+      "mean": 0,
+      "lower": 0,
+      "upper": 0,
+      "n": 3
+    },
+    "opportunities": {
+      "mean": 5.666666666666667,
+      "lower": 2.7982315135004683,
+      "upper": 8.535101819832866,
+      "n": 3
+    },
+    "verifiedShare": {
+      "mean": 1,
+      "lower": 1,
+      "upper": 1,
+      "n": 3
+    },
+    "workflowRecall": {
+      "mean": 0.611111111111111,
+      "lower": 0.37207484834726123,
+      "upper": 0.8501473738749609,
+      "n": 3
+    }
+  }
+}

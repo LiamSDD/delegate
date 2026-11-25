@@ -1,0 +1,211 @@
+{
+  "version": 1,
+  "id": "2026-11-25T18-13-00-419Z",
+  "mission": "goal",
+  "mode": "live",
+  "dataset": {
+    "name": "custom-goal",
+    "version": 2
+  },
+  "audience": "public-demo",
+  "startedAt": "2026-11-25T18:13:00.419Z",
+  "finishedAt": "2026-11-25T18:17:40.345Z",
+  "durationMs": 279926,
+  "trialsPerCase": 1,
+  "promptVersions": {
+    "planner": 3,
+    "quarantine-reader": 1,
+    "company-xray-researcher": 1,
+    "custom-goal-synthesis": 3,
+    "custom-goal-connectors": 1,
+    "critic": 2,
+    "editor": 2,
+    "goal-judge": 1
+  },
+  "models": [
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 6
+    },
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 20
+    },
+    {
+      "role": "planner",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 11
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 1
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 7
+    },
+    {
+      "role": "planner",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 1
+    }
+  ],
+  "judgeModels": [
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 3
+    }
+  ],
+  "totals": {
+    "trials": 3,
+    "costMicroUsd": 0,
+    "tokens": 98738
+  },
+  "cases": [
+    {
+      "caseId": "marketing-brand-possessive",
+      "company": "Grow Patagonia's brand marketing in Europe without paid social",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-13-00-419Z_marketing-brand-possessive_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.3125,
+          "latencyMs": 192490,
+          "costMicroUsd": 0,
+          "tokens": 36919,
+          "metrics": {
+            "actions": 3,
+            "findings": 4,
+            "sources": 3,
+            "targetResolved": 1
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "engineering-no-company",
+      "company": "Reduce flaky tests and speed up CI for our open-source monorepo",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-13-00-419Z_engineering-no-company_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.1875,
+          "latencyMs": 139170,
+          "costMicroUsd": 0,
+          "tokens": 24633,
+          "metrics": {
+            "actions": 4,
+            "findings": 4,
+            "sources": 1,
+            "targetResolved": 1
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "brand-only-lowercase",
+      "company": "I want to achieve nike's marketing and agentic work",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-13-00-419Z_brand-only-lowercase_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.6875,
+          "latencyMs": 129166,
+          "costMicroUsd": 0,
+          "tokens": 37186,
+          "metrics": {
+            "actions": 5,
+            "findings": 10,
+            "sources": 7,
+            "targetResolved": 1
+          }
+        }
+      ]
+    }
+  ],
+  "agreement": {
+    "status": "no_human_labels",
+    "labels": 0
+  },
+  "judgeCriteria": {
+    "relevance": {
+      "mean": 0.4166666666666667,
+      "lower": 0,
+      "upper": 1,
+      "n": 3
+    },
+    "specificity": {
+      "mean": 0.3333333333333333,
+      "lower": 0,
+      "upper": 1,
+      "n": 3
+    },
+    "actionability": {
+      "mean": 0.5,
+      "lower": 0,
+      "upper": 1,
+      "n": 3
+    },
+    "citationFaithfulness": {
+      "mean": 0.3333333333333333,
+      "lower": 0,
+      "upper": 0.6918877274791082,
+      "n": 3
+    },
+    "overall": {
+      "mean": 0.3958333333333333,
+      "lower": 0,
+      "upper": 1,
+      "n": 3
+    }
+  },
+  "missionMetrics": {
+    "actions": {
+      "mean": 4,
+      "lower": 1.5158622882497648,
+      "upper": 6.484137711750235,
+      "n": 3
+    },
+    "findings": {
+      "mean": 6,
+      "lower": -2.605305459498595,
+      "upper": 14.605305459498595,
+      "n": 3
+    },
+    "sources": {
+      "mean": 3.6666666666666665,
+      "lower": -3.9224994005265637,
+      "upper": 11.255832733859897,
+      "n": 3
+    },
+    "targetResolved": {
+      "mean": 1,
+      "lower": 1,
+      "upper": 1,
+      "n": 3
+    }
+  }
+}

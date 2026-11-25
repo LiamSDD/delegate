@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "id": "2026-11-25T18-34-11-708Z",
+  "mission": "build",
+  "mode": "live",
+  "dataset": {
+    "name": "build-agent",
+    "version": 1
+  },
+  "audience": "public-demo",
+  "startedAt": "2026-11-25T18:34:11.708Z",
+  "finishedAt": "2026-11-25T18:41:13.194Z",
+  "durationMs": 421486,
+  "trialsPerCase": 1,
+  "promptVersions": {
+    "planner": 3,
+    "build-agent-designer": 1,
+    "build-agent-evalgen": 1,
+    "build-agent-grader": 1,
+    "build-agent-gaps": 1,
+    "assistant-answer": 1,
+    "retrieval-rerank": 1,
+    "critic": 2,
+    "editor": 2,
+    "build-judge": 1
+  },
+  "models": [
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 3
+    },
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 47
+    },
+    {
+      "role": "planner",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 1
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 4
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 7
+    },
+    {
+      "role": "planner",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 1
+    }
+  ],
+  "judgeModels": [
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 2
+    }
+  ],
+  "totals": {
+    "trials": 2,
+    "costMicroUsd": 0,
+    "tokens": 186575
+  },
+  "cases": [
+    {
+      "caseId": "sqlite",
+      "company": "SQLite",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-34-11-708Z_sqlite_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.8125,
+          "latencyMs": 223531,
+          "costMicroUsd": 0,
+          "tokens": 93980,
+          "metrics": {
+            "answerAccuracy": 1,
+            "falseRefusalRate": 0,
+            "outOfScopeRefusalRate": 1,
+            "citedAnswerRate": 1,
+            "questionsAvailable": 11,
+            "pages": 244,
+            "chunks": 1915,
+            "selfEvalPassRate": 0.9166666666666666
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "curl",
+      "company": "curl",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T18-34-11-708Z_curl_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.875,
+          "latencyMs": 173479,
+          "costMicroUsd": 0,
+          "tokens": 92595,
+          "metrics": {
+            "answerAccuracy": 1,
+            "falseRefusalRate": 0,
+            "outOfScopeRefusalRate": 1,
+            "citedAnswerRate": 1,
+            "questionsAvailable": 11,
+            "pages": 232,
+            "chunks": 1892,
+            "selfEvalPassRate": 1
+          }
+        }
+      ]
+    }
+  ],
+  "agreement": {
+    "status": "no_human_labels",
+    "labels": 0
+  },
+  "judgeCriteria": {
+    "correctness": {
+      "mean": 1,
+      "lower": 1,
+      "upper": 1,
+      "n": 2
+    },
+    "groundedness": {
+      "mean": 0.625,
+      "lower": 0,
+      "upper": 1,
+      "n": 2
+    },
+    "refusalQuality": {
+      "mean": 1,
+      "lower": 1,
+      "upper": 1,
+      "n": 2
+    },
+    "concision": {
+      "mean": 0.75,
+      "lower": 0.75,
+      "upper": 0.75,
+      "n": 2
+    },
+    "overall": {
+      "mean": 0.84375,
+      "lower": 0.4466811019945425,
+      "upper": 1,
+      "n": 2
+    }
+  },
+  "missionMetrics": {
+    "answerAccuracy": {
+      "mean": 1,
+      "lower": 1,
+      "upper": 1,
+      "n": 2
+    },
+    "chunks": {
+      "mean": 1903.5,
+      "lower": 1757.3786455339916,
+      "upper": 2049.6213544660086,
+      "n": 2
+    },
+    "citedAnswerRate": {
+      "mean": 1,
+      "lower": 1,
+      "upper": 1,
+      "n": 2
+    },
+    "falseRefusalRate": {
+      "mean": 0,
+      "lower": 0,
+      "upper": 0,
+      "n": 2
+    },
+    "outOfScopeRefusalRate": {
+      "mean": 1,
+      "lower": 1,
+      "upper": 1,
+      "n": 2
+    },
+    "pages": {
+      "mean": 238,
+      "lower": 161.76277158295215,
+      "upper": 314.23722841704785,
+      "n": 2
+    },
+    "questionsAvailable": {
+      "mean": 11,
+      "lower": 11,
+      "upper": 11,
+      "n": 2
+    },
+    "selfEvalPassRate": {
+      "mean": 0.9583333333333333,
+      "lower": 0.42890813599272304,
+      "upper": 1.4877585306739434,
+      "n": 2
+    }
+  }
+}
