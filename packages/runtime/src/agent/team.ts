@@ -113,7 +113,7 @@ export function mergeFindings(results: readonly SubAgentResult[]): SubAgentResul
   };
 }
 
-export const TEAM_REDUCERS: Record<
+const REDUCER_FUNCTIONS: Record<
   TeamReducer,
   (results: readonly SubAgentResult[]) => SubAgentResult
 > = {
@@ -333,7 +333,7 @@ export function createTeamHandle(options: TeamHandleOptions): TeamHandle {
       const finished = members.flatMap((member) =>
         member.result === undefined ? [] : [member.result],
       );
-      const reduce = run.reduce ?? TEAM_REDUCERS[team.reducer];
+      const reduce = run.reduce ?? REDUCER_FUNCTIONS[team.reducer];
       return { result: SubAgentResultSchema.parse(reduce(finished)), members };
     },
   };
