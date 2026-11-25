@@ -12,6 +12,7 @@ import {
 } from "../models";
 import { type ModelProvider } from "../providers/types";
 import { type ToolApprovalGate } from "../tools/approvals";
+import { type RegisteredTool } from "../tools/registry";
 import { ModelRouter } from "../router";
 import { type RunEmitter } from "./emitter";
 
@@ -66,6 +67,7 @@ export interface RunContext {
   gate: ProviderGate;
   quality?: QualitySettings;
   approvals?: ToolApprovalGate;
+  connectorTools?: readonly RegisteredTool[];
 }
 
 export interface ProviderGate {
@@ -130,6 +132,7 @@ export interface RunContextOptions {
   latency?: LatencyMode;
   quality?: QualitySettings;
   approvals?: ToolApprovalGate;
+  connectorTools?: readonly RegisteredTool[];
   signal?: AbortSignal;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
@@ -219,5 +222,6 @@ export function createRunContext(options: RunContextOptions): RunContext {
     gate: createProviderGate((role) => resolveChain(role, options.env, routing)[0]),
     ...(options.quality === undefined ? {} : { quality: options.quality }),
     ...(options.approvals === undefined ? {} : { approvals: options.approvals }),
+    ...(options.connectorTools === undefined ? {} : { connectorTools: options.connectorTools }),
   };
 }

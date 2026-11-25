@@ -3,12 +3,16 @@ import { after } from "next/server";
 import { isFakeRunnerEnabled } from "@/flags";
 
 import type { ApiDeps } from "./api";
+import type { ConnectionsDeps } from "./connections-api";
+import { defaultOpenEndpoint, loadMissionConnections } from "./connectors";
+import { githubAppConfig } from "./github-connect";
 import { getAppDatabase } from "./db";
 import { createFakeRunner } from "./fake-runner";
 import type { MissionRunner } from "./mission-runner";
 import { runRegistry } from "./run-registry";
-import { createRuntimeRunner } from "./runtime-runner";
+import { createRuntimeRunner, loadRepoPrompts } from "./runtime-runner";
 import type { Execution } from "./runs";
+import { secretBoxFromEnv } from "./secrets";
 import { guestRunLimiter, networkRunLimiter, sessionSecret } from "./session";
 
 export function selectRunner(env: Record<string, string | undefined>): {
@@ -31,5 +35,24 @@ export function apiDeps(): ApiDeps {
       after(task);
     },
     production: process.env.NODE_ENV === "production",
+    connections: (app, session) => loadMissionConnections(app, session, connectorDeps(process.env)),
+  };
+}
+
+export function connectorDeps(env: Record<string, string | undefined>) {
+  return {
+    production: env.NODE_ENV === "production",
+    box: secretBoxFromEnv(env),
+    open: defaultOpenEndpoint(),
+    readerPrompt: loadRepoPrompts().reader.body,
+  };
+}
+
+export function connectionsDeps(): ConnectionsDeps {
+  return {
+    api: apiDeps(),
+    connectors: () => connectorDeps(process.env),
+    github: () => githubAppConfig(process.env),
+    fetch,
   };
 }

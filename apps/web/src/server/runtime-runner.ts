@@ -61,6 +61,7 @@ export function createRuntimeRunner(options: RuntimeRunnerOptions): MissionRunne
     awaitPlanApproval,
     planApprover,
     resumeFrom,
+    connections,
   }) => {
     prompts ??= loadPrompts();
     const shared = {
@@ -75,6 +76,7 @@ export function createRuntimeRunner(options: RuntimeRunnerOptions): MissionRunne
       awaitPlanApproval,
       planApprover,
       ...assistantStores(),
+      ...(connections === undefined ? {} : { connections }),
     };
     if (resumeFrom !== undefined) {
       const result = await resumeMission({ ...shared, events: resumeFrom });

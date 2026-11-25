@@ -377,6 +377,9 @@ importers:
       '@delegate/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@delegate/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.6.0

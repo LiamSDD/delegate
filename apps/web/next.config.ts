@@ -15,7 +15,14 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   agentRules: false,
-  transpilePackages: ["@delegate/runtime", "@delegate/db", "@delegate/evals"],
+  transpilePackages: [
+    "@delegate/runtime",
+    "@delegate/db",
+    "@delegate/evals",
+    "@delegate/mcp-server",
+    "@delegate/sdk",
+    "@delegate/policy",
+  ],
   serverExternalPackages: ["@electric-sql/pglite", "@electric-sql/pglite-pgvector"],
   outputFileTracingRoot: monorepoRoot,
   outputFileTracingIncludes: {

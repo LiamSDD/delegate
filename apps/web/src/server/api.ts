@@ -6,12 +6,13 @@ import { COMPANY_URL_REJECTION_MESSAGES, normaliseCompanyUrl } from "@/lib/runs/
 import { validatePlanEdit } from "@/lib/runs/plan";
 import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 
+import { authenticateBearer, hasBearer } from "./api-tokens";
 import type { AppDatabase } from "./db";
 import { reviveOrSweep } from "./durable";
 import { executeRun } from "./execute-run";
 import { createForkRecord, planRunFork } from "./fork";
 import { createDbLease } from "./leases";
-import type { MissionRunner } from "./mission-runner";
+import type { MissionConnections, MissionRunner } from "./mission-runner";
 import { pendingPlanApproval, PlanDecisionError, recordPlanDecision } from "./plan-approval";
 import type { RunRegistry } from "./run-registry";
 import {
@@ -21,6 +22,7 @@ import {
   type Execution,
   getRunRecord,
   isTerminalEventType,
+  listRuns,
   missionInputOf,
   readAllEvents,
   readEvents,
@@ -36,7 +38,9 @@ import {
   sessionCookieOptions,
   signSession,
 } from "./session";
+import { buildRunView } from "./run-view-api";
 import { createRunEventStream, parseResumeSeq, type RunStreamOptions, SSE_HEADERS } from "./sse";
+import { readAutomation } from "./workspace-settings";
 
 export interface ApiDeps {
   app: () => Promise<AppDatabase>;
@@ -49,6 +53,10 @@ export interface ApiDeps {
   production: boolean;
   now?: () => Date;
   stream?: Pick<RunStreamOptions, "pollMs" | "heartbeatMs" | "idleHookMs">;
+  connections?: (
+    app: AppDatabase,
+    session: GuestSession,
+  ) => Promise<MissionConnections | undefined>;
 }
 
 export type ApiErrorCode =
@@ -67,6 +75,7 @@ export type ApiErrorCode =
   | "run_not_finished"
   | "invalid_step"
   | "unavailable"
+  | "unauthorized"
   | "internal";
 
 const MAX_BODY_BYTES = 8 * 1024;
@@ -206,20 +215,107 @@ async function readJson(
   }
 }
 
+function allowedOrigin(request: Request): boolean {
+  return isSameOrigin(request) || hasBearer(request);
+}
+
+export function unauthorized(): Response {
+  return apiError(401, "unauthorized", "The API token is missing, invalid or revoked.", {
+    headers: { "WWW-Authenticate": 'Bearer realm="delegate"' },
+  });
+}
+
+export type StartRunResult = { ok: true; runId: string } | { ok: false; response: Response };
+
+export async function startRunForSession(
+  app: AppDatabase,
+  session: GuestSession,
+  request: CreateRunRequest,
+  deps: ApiDeps,
+  options: { autoApprovePlan: boolean; headers?: Record<string, string> },
+): Promise<StartRunResult> {
+  const headers = options.headers ?? {};
+  const url = normaliseCompanyUrl(request.input.url);
+  if (!url.ok)
+    return {
+      ok: false,
+      response: apiError(400, "invalid_url", COMPANY_URL_REJECTION_MESSAGES[url.reason], {
+        headers,
+      }),
+    };
+  const quota = deps.guestLimiter.take(session.userId);
+  if (!quota.ok) {
+    return {
+      ok: false,
+      response: apiError(429, "rate_limited", "Demo runs are limited per hour. Try again later.", {
+        headers: { "Retry-After": retryAfterSeconds(quota.retryAfterMs), ...headers },
+      }),
+    };
+  }
+  const parentRunId =
+    request.parentRunId === undefined
+      ? undefined
+      : (await getRunRecord(app, session.userId, request.parentRunId))?.id;
+  if (request.parentRunId !== undefined && parentRunId === undefined) {
+    return {
+      ok: false,
+      response: apiError(400, "invalid_request", "The parent run is not visible to this session.", {
+        headers,
+      }),
+    };
+  }
+  const input = missionInput(request, url.url, parentRunId);
+  const runner = deps.runner();
+  const { runId } = await createRunRecord(app, session, {
+    missionId: request.missionId,
+    input,
+    execution: runner.execution,
+    ...(parentRunId === undefined ? {} : { parentRunId }),
+  });
+  const automation = await readAutomation(app, session);
+  const autoApprovePlan = options.autoApprovePlan || automation.autoApprovePlans;
+  const connections =
+    runner.execution === "live" && deps.connections !== undefined
+      ? await deps.connections(app, session).catch((error: unknown) => {
+          console.error(
+            "loading connectors failed",
+            runId,
+            error instanceof Error ? error.name : "",
+          );
+          return undefined;
+        })
+      : undefined;
+  const ctx = { runId, workspaceId: session.workspaceId, userId: session.userId };
+  deps.schedule(() =>
+    executeRun({
+      app,
+      ctx,
+      missionId: request.missionId,
+      input,
+      runner: runner.run,
+      registry: deps.registry,
+      autoApprovePlan,
+      ...(connections === undefined ? {} : { connections }),
+      ...(runner.execution === "live" ? { lease: createDbLease(app, ctx) } : {}),
+    }),
+  );
+  return { ok: true, runId };
+}
+
+function invalidRequest(error: z.ZodError, message: string): Response {
+  return apiError(400, "invalid_request", message, {
+    issues: error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`),
+  });
+}
+
 export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<Response> {
-  if (!isSameOrigin(request)) {
+  if (!allowedOrigin(request)) {
     return apiError(403, "forbidden_origin", "Cross-origin requests cannot start runs.");
   }
   const body = await readJson(request);
   if (body instanceof Response) return body;
   const parsed = CreateRunRequestSchema.safeParse(body.value);
-  if (!parsed.success) {
-    return apiError(400, "invalid_request", "The run request is not valid.", {
-      issues: parsed.error.issues.map(
-        (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
-      ),
-    });
-  }
+  if (!parsed.success) return invalidRequest(parsed.error, "The run request is not valid.");
   const url = normaliseCompanyUrl(parsed.data.input.url);
   if (!url.ok) return apiError(400, "invalid_url", COMPANY_URL_REJECTION_MESSAGES[url.reason]);
 
@@ -232,54 +328,33 @@ export async function handleCreateRun(request: Request, deps: ApiDeps): Promise<
 
   try {
     const app = await deps.app();
+    if (hasBearer(request)) {
+      const session = await authenticateBearer(app, request);
+      if (session === null) return unauthorized();
+      const started = await startRunForSession(app, session, parsed.data, deps, {
+        autoApprovePlan: false,
+      });
+      if (!started.ok) return started.response;
+      return Response.json({ runId: started.runId }, { status: 201, headers: NO_STORE });
+    }
     const secret = deps.secret();
     const { session, issued } = await resolveGuest(
       app,
       readCookie(request, SESSION_COOKIE),
       secret,
     );
-    const quota = deps.guestLimiter.take(session.userId);
     const cookieHeaders: Record<string, string> = issued
       ? { "Set-Cookie": serializeSessionCookie(signSession(session, secret), deps.production) }
       : {};
-    if (!quota.ok) {
-      return apiError(429, "rate_limited", "Demo runs are limited per hour. Try again later.", {
-        headers: { "Retry-After": retryAfterSeconds(quota.retryAfterMs), ...cookieHeaders },
-      });
-    }
-
-    const parentRunId =
-      parsed.data.parentRunId === undefined
-        ? undefined
-        : (await getRunRecord(app, session.userId, parsed.data.parentRunId))?.id;
-    if (parsed.data.parentRunId !== undefined && parentRunId === undefined) {
-      return apiError(400, "invalid_request", "The parent run is not visible to this session.", {
-        headers: cookieHeaders,
-      });
-    }
-    const input = missionInput(parsed.data, url.url, parentRunId);
-    const runner = deps.runner();
-    const { runId } = await createRunRecord(app, session, {
-      missionId: parsed.data.missionId,
-      input,
-      execution: runner.execution,
-      ...(parentRunId === undefined ? {} : { parentRunId }),
+    const started = await startRunForSession(app, session, parsed.data, deps, {
+      autoApprovePlan: readCookie(request, AUTO_APPROVE_COOKIE) === "1",
+      headers: cookieHeaders,
     });
-    const autoApprovePlan = readCookie(request, AUTO_APPROVE_COOKIE) === "1";
-    const ctx = { runId, workspaceId: session.workspaceId, userId: session.userId };
-    deps.schedule(() =>
-      executeRun({
-        app,
-        ctx,
-        missionId: parsed.data.missionId,
-        input,
-        runner: runner.run,
-        registry: deps.registry,
-        autoApprovePlan,
-        ...(runner.execution === "live" ? { lease: createDbLease(app, ctx) } : {}),
-      }),
+    if (!started.ok) return started.response;
+    return Response.json(
+      { runId: started.runId },
+      { status: 201, headers: { ...NO_STORE, ...cookieHeaders } },
     );
-    return Response.json({ runId }, { status: 201, headers: { ...NO_STORE, ...cookieHeaders } });
   } catch (error: unknown) {
     console.error("create run failed", error);
     return apiError(500, "internal", "The run could not be created.");
@@ -308,14 +383,20 @@ export function missionInput(
   };
 }
 
-async function guestFor(
+export async function callerFor(
   request: Request,
   deps: ApiDeps,
-): Promise<{ app: AppDatabase; session: GuestSession } | null> {
+): Promise<{ app: AppDatabase; session: GuestSession; bearer: boolean } | Response> {
   const app = await deps.app();
+  if (hasBearer(request)) {
+    const session = await authenticateBearer(app, request);
+    return session === null ? unauthorized() : { app, session, bearer: true };
+  }
   const session = await readGuest(app, readCookie(request, SESSION_COOKIE), deps.secret());
-  return session === null ? null : { app, session };
+  return session === null ? notFound() : { app, session, bearer: false };
 }
+
+const guestFor = callerFor;
 
 async function freshRecord(
   app: AppDatabase,
@@ -355,10 +436,37 @@ export async function handleGetRun(
   deps: ApiDeps,
 ): Promise<Response> {
   const guest = await guestFor(request, deps);
-  if (guest === null) return notFound();
+  if (guest instanceof Response) return guest;
   const record = await freshRecord(guest.app, guest.session, runId, deps);
   if (record === null) return notFound();
+  if (new URL(request.url).searchParams.get("view") === "1") {
+    const view = await buildRunView(guest.app, guest.session.userId, record);
+    return Response.json({ run: runSummary(record), view }, { headers: NO_STORE });
+  }
   return Response.json({ run: runSummary(record) }, { headers: NO_STORE });
+}
+
+export const LIST_RUNS_MAX = 50;
+
+export async function handleListRuns(request: Request, deps: ApiDeps): Promise<Response> {
+  const guest = await callerFor(request, deps);
+  if (guest instanceof Response) return guest.status === 404 ? Response.json({ runs: [] }) : guest;
+  const raw = Number(new URL(request.url).searchParams.get("limit") ?? "20");
+  const limit = Number.isInteger(raw) ? Math.min(LIST_RUNS_MAX, Math.max(1, raw)) : 20;
+  const rows = await listRuns(guest.app, guest.session, limit);
+  return Response.json(
+    {
+      runs: rows.map((row) => ({
+        id: row.id,
+        mission: row.mission,
+        target: row.target,
+        status: row.status,
+        createdAt: row.createdAt.toISOString(),
+        finishedAt: row.finishedAt?.toISOString() ?? null,
+      })),
+    },
+    { headers: NO_STORE },
+  );
 }
 
 export async function handleRunEvents(
@@ -367,7 +475,7 @@ export async function handleRunEvents(
   deps: ApiDeps,
 ): Promise<Response> {
   const guest = await guestFor(request, deps);
-  if (guest === null) return notFound();
+  if (guest instanceof Response) return guest;
   const { app, session } = guest;
   const record = await freshRecord(app, session, runId, deps);
   if (record === null) return notFound();
@@ -401,11 +509,11 @@ export async function handleCancelRun(
   runId: string,
   deps: ApiDeps,
 ): Promise<Response> {
-  if (!isSameOrigin(request)) {
+  if (!allowedOrigin(request)) {
     return apiError(403, "forbidden_origin", "Cross-origin requests cannot stop runs.");
   }
   const guest = await guestFor(request, deps);
-  if (guest === null) return notFound();
+  if (guest instanceof Response) return guest;
   const record = await getRunRecord(guest.app, guest.session.userId, runId);
   if (record === null) return notFound();
   try {
@@ -434,7 +542,7 @@ export async function handleGetArtifact(
   deps: ApiDeps,
 ): Promise<Response> {
   const guest = await guestFor(request, deps);
-  if (guest === null) return notFound();
+  if (guest instanceof Response) return guest;
   if (artifactId.length > 200) return notFound();
   const artifact = await artifactContent(guest.app, guest.session.userId, runId, artifactId);
   if (artifact === null) return apiError(404, "not_found", "No artifact with that id.");
@@ -446,11 +554,11 @@ export async function handlePlanDecision(
   runId: string,
   deps: ApiDeps,
 ): Promise<Response> {
-  if (!isSameOrigin(request)) {
+  if (!allowedOrigin(request)) {
     return apiError(403, "forbidden_origin", "Cross-origin requests cannot decide plans.");
   }
   const guest = await guestFor(request, deps);
-  if (guest === null) return notFound();
+  if (guest instanceof Response) return guest;
   const record = await getRunRecord(guest.app, guest.session.userId, runId);
   if (record === null) return notFound();
   const body = await readJson(request, MAX_PLAN_BODY_BYTES);
@@ -530,7 +638,7 @@ export async function handleForkRun(
   runId: string,
   deps: ApiDeps,
 ): Promise<Response> {
-  if (!isSameOrigin(request)) {
+  if (!allowedOrigin(request)) {
     return apiError(403, "forbidden_origin", "Cross-origin requests cannot fork runs.");
   }
   const body = await readJson(request);
@@ -551,7 +659,7 @@ export async function handleForkRun(
   }
   try {
     const guest = await guestFor(request, deps);
-    if (guest === null) return notFound();
+    if (guest instanceof Response) return guest;
     const { app, session } = guest;
     const parent = await getRunRecord(app, session.userId, runId);
     if (parent?.workspaceId !== session.workspaceId) return notFound();

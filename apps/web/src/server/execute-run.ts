@@ -4,7 +4,7 @@ import { redactPii, type RunEvent } from "@delegate/runtime";
 import type { AppDatabase } from "./db";
 import type { RunnableMissionId } from "@/lib/m2-contract";
 
-import type { MissionRunner } from "./mission-runner";
+import type { MissionConnections, MissionRunner } from "./mission-runner";
 import { type AwaitPlanApproval, createPlanApprovalWaiter } from "./plan-approval";
 import type { RunRegistry } from "./run-registry";
 import {
@@ -36,6 +36,7 @@ export interface ExecuteRunOptions {
   awaitPlanApproval?: AwaitPlanApproval;
   lease?: RunLease;
   resumeFrom?: readonly RunEvent[];
+  connections?: MissionConnections;
 }
 
 export async function executeRun(options: ExecuteRunOptions): Promise<void> {
@@ -86,6 +87,7 @@ async function executeHeld(
       emit,
       signal,
       ...(options.resumeFrom === undefined ? {} : { resumeFrom: options.resumeFrom }),
+      ...(options.connections === undefined ? {} : { connections: options.connections }),
       planApprover:
         options.autoApprovePlan === true
           ? { type: "system", id: "auto-approve" }

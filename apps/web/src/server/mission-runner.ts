@@ -1,4 +1,5 @@
 import type { Actor, RunEvent } from "@delegate/runtime";
+import type { MissionConnections } from "@delegate/runtime/server";
 
 import type { RunnableMissionId } from "@/lib/m2-contract";
 
@@ -14,6 +15,9 @@ export interface MissionRunArgs {
   awaitPlanApproval: AwaitPlanApproval;
   planApprover: Actor;
   resumeFrom?: readonly RunEvent[];
+  connections?: MissionConnections;
 }
+
+export type { MissionConnections };
 
 export type MissionRunner = (args: MissionRunArgs) => Promise<{ status: "completed" | "failed" }>;

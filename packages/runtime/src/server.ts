@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { lookup } from "node:dns/promises";
 
-import { defaultPolicy, ownerDefaultPolicy } from "@delegate/policy";
+import { defaultPolicy, ownerDefaultPolicy, withConnectorAccess } from "@delegate/policy";
 
 import {
   createRunContext,
@@ -46,6 +46,8 @@ import { createOpenAICompatibleProvider } from "./providers/openai-compatible";
 import { type ModelProvider } from "./providers/types";
 import { createFetcher, type ResolveDns } from "./tools/fetch";
 import { createPinnedFetch } from "./tools/node-fetch";
+import { type ToolApprovalGate } from "./tools/approvals";
+import { type RegisteredTool } from "./tools/registry";
 
 export * from "./index";
 
@@ -74,6 +76,13 @@ export interface RunMissionOptions {
   assistants?: AssistantStore;
   memory?: MemoryStore;
   embeddings?: EmbeddingProvider | null;
+  connections?: MissionConnections;
+}
+
+export interface MissionConnections {
+  tools: readonly RegisteredTool[];
+  hosts: readonly string[];
+  approvals?: ToolApprovalGate;
 }
 
 export const RUNTIME_PROMPT_FILES = {
@@ -257,7 +266,20 @@ async function executeMission(
     env: options.env,
     emitter: createRunEmitter(emit),
     budget: new Budget({ run: RUN_BUDGETS[audience] }),
-    policies: [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy],
+    policies: [
+      withConnectorAccess(
+        audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy,
+        options.connections?.hosts ?? [],
+      ),
+    ],
+    ...(options.connections === undefined
+      ? {}
+      : {
+          connectorTools: options.connections.tools,
+          ...(options.connections.approvals === undefined
+            ? {}
+            : { approvals: options.connections.approvals }),
+        }),
     createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
     environment: "server",
     ...(options.latency === undefined ? {} : { latency: options.latency }),
