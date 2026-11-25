@@ -552,9 +552,14 @@ function metaTags(html: string): { meta: Record<string, string>; robots: MetaRob
     const content = collapse(attributes.get("content") ?? "");
     if (content === "") continue;
     if (key === "robots" || key === "delegatebot") {
-      const directives = content.toLowerCase();
-      if (/\b(noindex|none)\b/.test(directives)) robots.noindex = true;
-      if (/\b(nofollow|none)\b/.test(directives)) robots.nofollow = true;
+      const directives = new Set(
+        content
+          .toLowerCase()
+          .split(/[,\s]+/)
+          .filter((directive) => directive !== ""),
+      );
+      if (directives.has("noindex") || directives.has("none")) robots.noindex = true;
+      if (directives.has("nofollow") || directives.has("none")) robots.nofollow = true;
     }
     if (META_KEYS.has(key) && meta[key] === undefined)
       meta[key] = content.slice(0, MAX_STRUCTURED_VALUE);

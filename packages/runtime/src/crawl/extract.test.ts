@@ -81,6 +81,19 @@ describe("extractPage", () => {
       "https://a.example/",
     );
     expect(blocked.robots).toEqual({ noindex: true, nofollow: true });
+    const none = extractPage(
+      '<html><head><meta name="robots" content="NONE"></head><body><p>x</p></body></html>',
+      "https://a.example/",
+    );
+    expect(none.robots).toEqual({ noindex: true, nofollow: true });
+  });
+
+  it("does not read a directive's value as a robots directive (gov.uk, 2026-11-25)", () => {
+    const page = extractPage(
+      '<html><head><meta name="robots" content="max-image-preview:none, max-snippet:-1"></head><body><p>x</p></body></html>',
+      "https://a.example/",
+    );
+    expect(page.robots).toEqual({ noindex: false, nofollow: false });
   });
 
   it("survives deeply nested and unclosed markup", () => {
