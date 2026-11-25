@@ -20,6 +20,12 @@ describe("redactPii", () => {
     ["Amex 378282246310005", "Amex [redacted:card]"],
     ["IBAN GB82 WEST 1234 5698 7654 32", "IBAN [redacted:iban]"],
     ["IBAN DE89370400440532013000.", "IBAN [redacted:iban]."],
+    ["Call 415 555 2671 today", "Call [redacted:phone] today"],
+    ["Call 415.555.2671 today", "Call [redacted:phone] today"],
+    ["Toll free 1-800-555-0199.", "Toll free [redacted:phone]."],
+    ["Toll free 1 (800) 555-0199", "Toll free [redacted:phone]"],
+    ["IBAN de89 3704 0044 0532 0130 00 on file", "IBAN [redacted:iban] on file"],
+    ["IBAN gb82west12345698765432", "IBAN [redacted:iban]"],
   ])("redacts %s", (input, expected) => {
     const result = redactPii(input);
     expect(result.text).toBe(expected);
@@ -41,6 +47,10 @@ describe("redactPii", () => {
     "Range 1200-1450 employees",
     "Account GB00 WEST 1234 5698 7654 32 has a bad checksum",
     "HTTP 429 after 30000 ms; retry-after 60",
+    "Shipped 100 200 3000 units across 3 regions",
+    "Serial 123.456.7890 is retired",
+    "Ticket ab12 cdef 3456 7890 closed",
+    "Release 1.800.555.0199.4 is out",
   ])("leaves %s alone", (input) => {
     expect(redactPii(input)).toEqual({ text: input, count: 0 });
   });
@@ -56,6 +66,8 @@ describe("redactPii", () => {
     expect(luhnValid("4111111111111112")).toBe(false);
     expect(ibanValid("GB82WEST12345698765432")).toBe(true);
     expect(ibanValid("GB83WEST12345698765432")).toBe(false);
+    expect(ibanValid("gb82 west 1234 5698 7654 32")).toBe(true);
+    expect(ibanValid("XX82WEST12345698765432")).toBe(false);
   });
 });
 

@@ -56,7 +56,7 @@ Delegate lets models read untrusted content and take actions with tools. The des
 
 ## PII redaction
 
-`redactPii` replaces emails, phone numbers in international (`+44 20 7946 0958`, `+1 (415) 555-2671`) and common national formats (`(415) 555-2671`, `020 7946 0958`, `415-555-2671`), card numbers that pass both an issuer-prefix and a Luhn check, and IBANs that pass the mod-97 checksum, with `[redacted:<kind>]`. Version numbers, dates, years, prices, timestamps, ISBNs and IP addresses are left alone, so SSRF and egress denials still say which address was blocked. The patterns and their false-positive table live in `privacy/redact.test.ts`.
+`redactPii` replaces emails, phone numbers in international (`+44 20 7946 0958`, `+1 (415) 555-2671`) and common national formats (`(415) 555-2671`, `020 7946 0958`, `415-555-2671`, `415 555 2671`, `415.555.2671`, `1-800-555-0199`; North American numbers must have a valid area code and exchange), card numbers that pass both an issuer-prefix and a Luhn check, and IBANs in any letter case, with or without spaces, that carry a known IBAN country code and pass the mod-97 checksum (matched before phone numbers so no fragment of an IBAN is left behind), with `[redacted:<kind>]`. Version numbers, dates, years, prices, timestamps, ISBNs and IP addresses are left alone, so SSRF and egress denials still say which address was blocked. The patterns and their false-positive table live in `privacy/redact.test.ts`.
 
 **Where it runs.** The run emitter (`packages/runtime/src/agent/emitter.ts`) passes every event through `redactEventDraft` before validation and delivery, so it covers every runtime path into `run_events`. It rewrites:
 
