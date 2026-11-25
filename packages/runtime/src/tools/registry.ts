@@ -4,7 +4,12 @@ import { type z } from "zod";
 import { type RunContext } from "../agent/context";
 import { type Actor } from "../events";
 import { type ToolDefinition } from "../providers/types";
-import { canonicalJson, sha256Text, TOOL_APPROVAL_ARGS_MAX_BYTES } from "./approvals";
+import {
+  canonicalJson,
+  sha256Text,
+  TOOL_APPROVAL_ARGS_MAX_BYTES,
+  type ToolBinding,
+} from "./approvals";
 
 export const TOOL_SUMMARY_MAX_CHARS = 280;
 export const TOOL_RESULT_FOR_MODEL_MAX_CHARS = 8_000;
@@ -50,6 +55,7 @@ export interface RegisteredTool {
   name: string;
   capability: string;
   definition: ToolDefinition;
+  binding?: ToolBinding;
   prepare: (
     rawArguments: unknown,
   ) => { ok: true; call: PreparedCall } | { ok: false; error: string };
@@ -226,6 +232,7 @@ export async function executeToolCall(
       argsSummary: prepared.call.argsSummary,
       argsJson,
       argsSha256: sha256Text(argsJson),
+      ...(tool.binding === undefined ? {} : { binding: tool.binding }),
       policyId: decision.policyId,
       reason: decision.reason,
     });

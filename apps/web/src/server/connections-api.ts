@@ -36,7 +36,12 @@ import {
 } from "./github-connect";
 import { SecretStoreError } from "./secrets";
 import { type GuestSession, readGuest, resolveGuest, SESSION_COOKIE, signSession } from "./session";
-import { AutomationUpdateSchema, readAutomation, updateAutomation } from "./workspace-settings";
+import {
+  AutomationError,
+  AutomationUpdateSchema,
+  readAutomation,
+  updateAutomation,
+} from "./workspace-settings";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 const MAX_SETTINGS_BODY_BYTES = 16 * 1024;
@@ -138,7 +143,7 @@ export async function connectionsOverview(
     return {
       tokens: [],
       connectors: [],
-      automation: { autoApprovePlans: false, preapprovedTools: [] },
+      automation: { autoApprovePlans: false, preapprovedTools: [], changedTools: [] },
       github: {
         configured: github !== null,
         installUrl: github === null ? null : installUrl(github),
@@ -282,8 +287,14 @@ export async function handleUpdateAutomation(request: Request, deps: Connections
       issues: issues(parsed.error),
     });
   const { app, session, headers } = await ensuredSession(request, deps);
-  const automation = await updateAutomation(app, session, parsed.data);
-  return Response.json({ automation }, { headers: { ...NO_STORE, ...headers } });
+  try {
+    const automation = await updateAutomation(app, session, parsed.data);
+    return Response.json({ automation }, { headers: { ...NO_STORE, ...headers } });
+  } catch (error: unknown) {
+    if (error instanceof AutomationError)
+      return apiError(400, "invalid_request", error.message, { headers });
+    throw error;
+  }
 }
 
 export async function handleRemoveInstallation(

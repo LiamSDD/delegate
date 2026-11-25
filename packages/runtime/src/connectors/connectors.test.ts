@@ -14,7 +14,7 @@ import {
 } from "../tools/approvals";
 import { executeToolCall, type ToolCaller } from "../tools/registry";
 import { connectWithTransport, flattenToolResult, type OpenConnection } from "./client";
-import { screenRemoteTool, screenRemoteTools } from "./screen";
+import { screenRemoteTool, screenRemoteTools, toolDefinitionSha256 } from "./screen";
 import { createConnectorTools } from "./tools";
 import { ConnectorUrlError, refuseRedirects, validateConnectorUrl } from "./url";
 
@@ -52,15 +52,31 @@ function fakeServer(calls: string[], options: { hang?: boolean } = {}): OpenConn
   };
 }
 
-async function connectorTools(calls: string[], options: { hang?: boolean } = {}) {
+async function screenedTools(calls: string[], options: { hang?: boolean } = {}) {
   const open = fakeServer(calls, options);
   const connection = await open();
   const tools = screenRemoteTools(await connection.listTools());
   await connection.close();
+  return { open, tools };
+}
+
+async function connectorTools(calls: string[], options: { hang?: boolean } = {}) {
+  const { open, tools } = await screenedTools(calls, options);
   return createConnectorTools({
     readerPrompt: "Quarantined reader.",
     connectors: [{ connectorId: "c1", name: "tickets", host: "mcp.tickets.example", tools, open }],
   });
+}
+
+async function addCommentPreapproval() {
+  const { tools } = await screenedTools([]);
+  const definition = tools.find((tool) => tool.name === "add_comment");
+  if (definition === undefined) throw new Error("add_comment expected");
+  return {
+    tool: "mcp__tickets__add_comment",
+    connectorId: "c1",
+    definitionSha256: toolDefinitionSha256(definition),
+  };
 }
 
 const caller: ToolCaller = {
@@ -233,7 +249,7 @@ describe("connector tools", () => {
     const { ctx, events } = testRun({
       provider,
       policies,
-      approvals: createPreapprovalGate(["mcp__tickets__add_comment"]),
+      approvals: createPreapprovalGate([await addCommentPreapproval()]),
     });
     const outcome = await executeToolCall(
       ctx,
@@ -329,7 +345,9 @@ describe("connector tools", () => {
     const { ctx } = testRun({
       provider: scriptedProvider("fake", []),
       policies,
-      approvals: createPreapprovalGate(["mcp__tickets__something_else"]),
+      approvals: createPreapprovalGate([
+        { ...(await addCommentPreapproval()), tool: "mcp__tickets__something_else" },
+      ]),
     });
     const outcome = await executeToolCall(
       ctx,
@@ -340,6 +358,47 @@ describe("connector tools", () => {
     );
     expect(outcome.ok).toBe(false);
     expect(calls).toEqual([]);
+  });
+
+  it("ignores a pre-approval bound to another connector or an older tool definition", async () => {
+    const preapproval = await addCommentPreapproval();
+    for (const stale of [
+      { ...preapproval, connectorId: "c2" },
+      { ...preapproval, definitionSha256: "0".repeat(64) },
+    ]) {
+      const calls: string[] = [];
+      const tools = await connectorTools(calls);
+      const { ctx } = testRun({
+        provider: scriptedProvider("fake", []),
+        policies,
+        approvals: createPreapprovalGate([stale]),
+      });
+      const outcome = await executeToolCall(
+        ctx,
+        step,
+        tools,
+        { name: "mcp__tickets__add_comment", argumentsJson: '{"id":"1","body":"x"}' },
+        caller,
+      );
+      expect(outcome.ok).toBe(false);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it("hashes the name, description, input schema and annotations of a tool definition", () => {
+    const base = {
+      name: "add_comment",
+      description: "Comment on a ticket.",
+      readOnly: false,
+      withheld: false,
+      inputSchema: { type: "object", properties: { id: { type: "string" } } },
+    };
+    const hash = toolDefinitionSha256(base);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(toolDefinitionSha256({ ...base })).toBe(hash);
+    expect(toolDefinitionSha256({ ...base, description: "Delete a ticket." })).not.toBe(hash);
+    expect(toolDefinitionSha256({ ...base, readOnly: true })).not.toBe(hash);
+    expect(toolDefinitionSha256({ ...base, inputSchema: { type: "object" } })).not.toBe(hash);
   });
 
   it("times out a hanging connector call without leaking remote text", async () => {

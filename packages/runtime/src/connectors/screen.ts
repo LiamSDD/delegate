@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { detectInjection } from "../quarantine/reader";
+import { canonicalJson, sha256Text } from "../tools/approvals";
 
 export const CONNECTOR_LIMITS = {
   descriptionChars: 200,
@@ -30,6 +31,19 @@ export const ScreenedToolSchema = z.object({
   inputSchema: z.record(z.string(), z.unknown()),
 });
 export type ScreenedTool = z.infer<typeof ScreenedToolSchema>;
+
+export function toolDefinitionSha256(
+  tool: Pick<ScreenedTool, "name" | "description" | "inputSchema" | "readOnly">,
+): string {
+  return sha256Text(
+    canonicalJson({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: { readOnlyHint: tool.readOnly },
+    }),
+  );
+}
 
 export type WithheldReason = "invalid_name" | "injection_in_description" | "schema_too_large";
 

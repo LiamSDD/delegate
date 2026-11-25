@@ -19,6 +19,7 @@ import {
   FetchBlockedError,
   HostPoliteness,
   checkPlanSteps,
+  connectorToolName,
   createConnectorTools,
   crawl,
   createFetcher,
@@ -33,6 +34,7 @@ import {
   readUntrusted,
   runAgentLoop,
   screenRemoteTools,
+  toolDefinitionSha256,
   type McpConnection,
   siteScope,
   type PlannerMission,
@@ -540,6 +542,20 @@ async function runConnector(payload: z.infer<typeof ConnectorPayloadSchema>): Pr
     })),
   );
   const withheld = screened.some((source) => source.tools.some((tool) => tool.withheld));
+  const preapprovals = screened.flatMap((source) =>
+    source.tools.flatMap((tool) => {
+      const name = connectorToolName(source.name, tool.name);
+      return payload.preapproved.includes(name)
+        ? [
+            {
+              tool: name,
+              connectorId: source.connectorId,
+              definitionSha256: toolDefinitionSha256(tool),
+            },
+          ]
+        : [];
+    }),
+  );
   const provider = compromisedModel({
     reader: (prompt) => ({
       sources: sourceIdsIn(prompt).map((sourceId) => ({
@@ -557,7 +573,7 @@ async function runConnector(payload: z.infer<typeof ConnectorPayloadSchema>): Pr
         payload.connectors.map((connector) => connector.host),
       ),
     ],
-    approvals: createPreapprovalGate(payload.preapproved),
+    approvals: createPreapprovalGate(preapprovals),
   });
   const traps = honeypots();
   await runAgentLoop({

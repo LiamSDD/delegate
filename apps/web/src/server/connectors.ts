@@ -22,7 +22,7 @@ import { z } from "zod";
 import type { AppDatabase } from "./db";
 import { ENCRYPTION_KEY_MISSING_MESSAGE, type SecretBox } from "./secrets";
 import type { GuestSession } from "./session";
-import { readAutomation } from "./workspace-settings";
+import { forgetConnectorPreapprovals, readPreapprovals } from "./workspace-settings";
 
 export const MAX_CONNECTORS = 10;
 const FORBIDDEN_HEADERS = new Set([
@@ -237,15 +237,17 @@ export async function deleteConnector(
   connectorId: string,
 ): Promise<boolean> {
   if (!z.uuid().safeParse(connectorId).success) return false;
-  const rows = await withTenant(app.db, session.userId, (tx) =>
-    tx
+  return withTenant(app.db, session.userId, async (tx) => {
+    const rows = await tx
       .delete(mcpConnectors)
       .where(
         and(eq(mcpConnectors.id, connectorId), eq(mcpConnectors.workspaceId, session.workspaceId)),
       )
-      .returning({ id: mcpConnectors.id }),
-  );
-  return rows.length === 1;
+      .returning({ id: mcpConnectors.id });
+    if (rows.length !== 1) return false;
+    await forgetConnectorPreapprovals(tx, session.workspaceId, connectorId);
+    return true;
+  });
 }
 
 function endpointFor(row: ConnectorRow, deps: ConnectorDeps): ConnectorEndpoint {
@@ -306,10 +308,10 @@ export async function loadMissionConnections(
 ): Promise<MissionConnections | undefined> {
   const sources = await loadConnectorSources(app, session, deps);
   if (sources.length === 0) return undefined;
-  const automation = await readAutomation(app, session);
+  const preapprovals = await readPreapprovals(app, session);
   return {
     tools: createConnectorTools({ connectors: sources, readerPrompt: deps.readerPrompt }),
     hosts: [...new Set(sources.map((source) => source.host))],
-    approvals: createPreapprovalGate(automation.preapprovedTools, deps.fallback),
+    approvals: createPreapprovalGate(preapprovals, deps.fallback),
   };
 }

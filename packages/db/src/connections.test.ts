@@ -164,9 +164,16 @@ describe("connection tables are isolated per workspace", () => {
           accountType: "Organization",
           repositorySelection: "all",
         });
-        await tx
-          .insert(workspaceSettings)
-          .values({ workspaceId: first.workspaceId, preapprovedTools: ["mcp__tickets__comment"] });
+        await tx.insert(workspaceSettings).values({
+          workspaceId: first.workspaceId,
+          preapprovedTools: [
+            {
+              tool: "mcp__tickets__comment",
+              connectorId: "00000000-0000-4000-8000-000000000001",
+              definitionSha256: "a".repeat(64),
+            },
+          ],
+        });
       }),
     );
     const seen = await asAppLogin(db, () =>

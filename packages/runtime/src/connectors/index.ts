@@ -15,6 +15,7 @@ export {
   connectorToolName,
   screenRemoteTool,
   screenRemoteTools,
+  toolDefinitionSha256,
   type RemoteTool,
   type ScreenedTool,
   type WithheldReason,

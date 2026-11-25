@@ -5,7 +5,12 @@ import { redactPii } from "../privacy/redact";
 import { type QuarantineTask, readUntrusted } from "../quarantine/reader";
 import { type RegisteredTool, TOOL_SUMMARY_MAX_CHARS } from "../tools/registry";
 import { type ConnectorCallResult, type OpenConnection } from "./client";
-import { CONNECTOR_LIMITS, connectorToolName, type ScreenedTool } from "./screen";
+import {
+  CONNECTOR_LIMITS,
+  connectorToolName,
+  toolDefinitionSha256,
+  type ScreenedTool,
+} from "./screen";
 import { ConnectorUrlError } from "./url";
 
 export const CONNECTOR_OUTPUT_KIND = "connector-output";
@@ -71,6 +76,7 @@ function connectorTool(source: ConnectorToolSource, tool: ScreenedTool, readerPr
     name,
     capability,
     definition: { name, description, inputSchema: definitionSchema(tool.inputSchema) },
+    binding: { connectorId: source.connectorId, definitionSha256: toolDefinitionSha256(tool) },
     prepare: (rawArguments) => {
       const parsed = ArgumentsSchema.safeParse(rawArguments ?? {});
       if (!parsed.success) return { ok: false, error: "arguments must be a JSON object" };

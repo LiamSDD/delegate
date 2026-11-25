@@ -23,6 +23,12 @@ export interface StoredConnectorTool {
   inputSchema: Record<string, unknown>;
 }
 
+export interface StoredPreapproval {
+  tool: string;
+  connectorId: string;
+  definitionSha256: string;
+}
+
 export const apiTokens = pgTable(
   "api_tokens",
   {
@@ -141,7 +147,7 @@ export const workspaceSettings = pgTable(
       .primaryKey()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     autoApprovePlans: boolean("auto_approve_plans").notNull().default(false),
-    preapprovedTools: jsonb("preapproved_tools").$type<string[]>().notNull().default([]),
+    preapprovedTools: jsonb("preapproved_tools").$type<StoredPreapproval[]>().notNull().default([]),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

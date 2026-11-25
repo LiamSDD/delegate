@@ -176,6 +176,7 @@ function TokenRow({ token, onRevoke }: { token: Token; onRevoke: (id: string) =>
 function ConnectorCard({
   connector,
   preapproved,
+  changed,
   onTogglePreapproval,
   onRefresh,
   onDelete,
@@ -183,6 +184,7 @@ function ConnectorCard({
 }: {
   connector: Connector;
   preapproved: readonly string[];
+  changed: readonly string[];
   onTogglePreapproval: (tool: string, on: boolean) => void;
   onRefresh: () => void;
   onDelete: () => void;
@@ -236,7 +238,11 @@ function ConnectorCard({
                       onTogglePreapproval(fullName, event.target.checked);
                     }}
                   />
-                  <span className="text-xs">pre-approve for automatic use</span>
+                  <span className="text-xs">
+                    {changed.includes(fullName)
+                      ? "changed since approved: review and pre-approve again"
+                      : "pre-approve for automatic use"}
+                  </span>
                 </label>
               )}
               {tool.description === "" ? null : (
@@ -482,6 +488,7 @@ export function ConnectionsPanel({
                 key={connector.id}
                 connector={connector}
                 preapproved={overview.automation.preapprovedTools}
+                changed={overview.automation.changedTools}
                 busy={busy === "connectors"}
                 onTogglePreapproval={setPreapproval}
                 onRefresh={() => {
@@ -585,6 +592,11 @@ export function ConnectionsPanel({
             ? "No connector tools are pre-approved: every side effect asks first."
             : `Pre-approved: ${overview.automation.preapprovedTools.join(", ")}`}
         </p>
+        {overview.automation.changedTools.length === 0 ? null : (
+          <p className="text-sm text-warning">
+            {`Changed since approved, asking again until re-approved: ${overview.automation.changedTools.join(", ")}`}
+          </p>
+        )}
         <ErrorLine message={errorFor("automation")} />
       </Section>
     </div>

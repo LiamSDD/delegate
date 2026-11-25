@@ -23,6 +23,15 @@ export function sha256Text(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
+export interface ToolBinding {
+  connectorId: string;
+  definitionSha256: string;
+}
+
+export interface ToolPreapproval extends ToolBinding {
+  tool: string;
+}
+
 export interface ToolApprovalRequest {
   approvalId: string;
   toolCallId: string;
@@ -32,6 +41,7 @@ export interface ToolApprovalRequest {
   argsSummary: string;
   argsJson: string;
   argsSha256: string;
+  binding?: ToolBinding;
   policyId: string;
   reason: string;
 }
@@ -49,13 +59,21 @@ export const PREAPPROVABLE_TOOL_PREFIX = "mcp__";
 export const WORKSPACE_PREAPPROVAL_ACTOR: Actor = { type: "system", id: "workspace-preapproval" };
 
 export function createPreapprovalGate(
-  preapprovedTools: readonly string[],
+  preapprovals: readonly ToolPreapproval[],
   fallback?: ToolApprovalGate,
 ): ToolApprovalGate {
-  const allowed = new Set(preapprovedTools);
+  const matches = (request: ToolApprovalRequest) =>
+    request.tool.startsWith(PREAPPROVABLE_TOOL_PREFIX) &&
+    request.binding !== undefined &&
+    preapprovals.some(
+      (entry) =>
+        entry.tool === request.tool &&
+        entry.connectorId === request.binding?.connectorId &&
+        entry.definitionSha256 === request.binding.definitionSha256,
+    );
   return {
     decide(request) {
-      if (request.tool.startsWith(PREAPPROVABLE_TOOL_PREFIX) && allowed.has(request.tool)) {
+      if (matches(request)) {
         return Promise.resolve({
           resolution: "approved",
           resolvedBy: WORKSPACE_PREAPPROVAL_ACTOR,
