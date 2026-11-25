@@ -2,14 +2,44 @@ import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { type LookupAddress } from "node:dns";
 import { isIP } from "node:net";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 
 import { type ResolveDns } from "./fetch";
 import { classifyAddress } from "./ip";
 
+export const PINNED_FETCH_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+export const RESEARCH_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+
 export interface PinnedFetchOptions {
   isAllowedAddress?: (address: string) => boolean;
+  maxResponseBytes?: number;
+}
+
+export class ResponseTooLargeError extends Error {
+  override readonly name = "ResponseTooLargeError";
+  constructor(readonly maxBytes: number) {
+    super(`The response is larger than ${maxBytes} bytes`);
+  }
+}
+
+function capped(stream: Readable, maxBytes: number, abort: () => void): Readable {
+  let total = 0;
+  const limiter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        abort();
+        callback(new ResponseTooLargeError(maxBytes));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+  stream.on("error", (error) => {
+    limiter.destroy(error);
+  });
+  return stream.pipe(limiter);
 }
 
 type LookupCallback = (
@@ -51,6 +81,7 @@ export function createPinnedFetch(
 ): typeof fetch {
   const allowed =
     options.isAllowedAddress ?? ((address: string) => classifyAddress(address).allowed);
+  const maxResponseBytes = options.maxResponseBytes ?? PINNED_FETCH_MAX_RESPONSE_BYTES;
   const lookup = (
     hostname: string,
     lookupOptions: { all?: boolean | undefined },
@@ -128,7 +159,13 @@ export function createPinnedFetch(
           const stream = nullBody ? undefined : decoded(response);
           if (nullBody) response.resume();
           const body =
-            stream === undefined ? null : (Readable.toWeb(stream) as ReadableStream<Uint8Array>);
+            stream === undefined
+              ? null
+              : (Readable.toWeb(
+                  capped(stream, maxResponseBytes, () => {
+                    request.destroy();
+                  }),
+                ) as ReadableStream<Uint8Array>);
           try {
             resolve(
               new Response(body, {

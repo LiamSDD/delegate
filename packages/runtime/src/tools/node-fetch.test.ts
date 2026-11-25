@@ -4,7 +4,7 @@ import { gzipSync } from "node:zlib";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createPinnedFetch } from "./node-fetch";
+import { createPinnedFetch, PINNED_FETCH_MAX_RESPONSE_BYTES } from "./node-fetch";
 
 let server: Server;
 let port = 0;
@@ -14,6 +14,27 @@ beforeAll(async () => {
     if (request.url === "/gzip") {
       response.writeHead(200, { "content-type": "text/plain", "content-encoding": "gzip" });
       response.end(gzipSync("compressed hello"));
+      return;
+    }
+    if (request.url === "/big") {
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end(Buffer.alloc(PINNED_FETCH_MAX_RESPONSE_BYTES + 1, 97));
+      return;
+    }
+    if (request.url === "/bomb") {
+      response.writeHead(200, { "content-type": "text/plain", "content-encoding": "gzip" });
+      response.end(gzipSync(Buffer.alloc(8 * PINNED_FETCH_MAX_RESPONSE_BYTES)));
+      return;
+    }
+    if (request.url === "/sse") {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      const event = `data: ${"x".repeat(64 * 1024)}\n\n`;
+      const timer = setInterval(() => {
+        if (!response.write(event)) return;
+      }, 1);
+      response.on("close", () => {
+        clearInterval(timer);
+      });
       return;
     }
     if (request.url === "/echo") {
@@ -84,6 +105,38 @@ describe("createPinnedFetch", () => {
     const redirect = await pinned(`http://pinned.test:${port}/redirect`, { redirect: "manual" });
     expect(redirect.status).toBe(302);
     expect(redirect.headers.get("location")).toBe("/plain");
+  });
+
+  it("aborts a response whose decoded body passes the size cap, compressed or not", async () => {
+    const pinned = createPinnedFetch(() => Promise.resolve(["127.0.0.1"]), {
+      isAllowedAddress: () => true,
+    });
+    for (const path of ["/big", "/bomb"]) {
+      const response = await pinned(`http://pinned.test:${port}${path}`);
+      await expect(response.arrayBuffer()).rejects.toThrow(/larger than/);
+    }
+  });
+
+  it("caps a streaming event-stream response the same way", async () => {
+    const pinned = createPinnedFetch(() => Promise.resolve(["127.0.0.1"]), {
+      isAllowedAddress: () => true,
+      maxResponseBytes: 256 * 1024,
+    });
+    const response = await pinned(`http://pinned.test:${port}/sse`);
+    const body: ReadableStream<Uint8Array> | null = response.body;
+    if (body === null) throw new Error("body expected");
+    const reader = body.getReader();
+    let total = 0;
+    await expect(
+      (async () => {
+        for (;;) {
+          const { done, value } = (await reader.read()) as { done: boolean; value?: Uint8Array };
+          if (done || value === undefined) return;
+          total += value.byteLength;
+        }
+      })(),
+    ).rejects.toThrow(/larger than/);
+    expect(total).toBeLessThanOrEqual(256 * 1024);
   });
 
   it("honours abort signals", async () => {

@@ -70,7 +70,7 @@ import { createOpenAICompatibleProvider } from "./providers/openai-compatible";
 import { type ModelProvider } from "./providers/types";
 import { HostPoliteness } from "./crawl/politeness";
 import { createFetcher, type ResolveDns } from "./tools/fetch";
-import { createPinnedFetch } from "./tools/node-fetch";
+import { createPinnedFetch, RESEARCH_MAX_RESPONSE_BYTES } from "./tools/node-fetch";
 import { type ToolApprovalGate } from "./tools/approvals";
 import { type RegisteredTool } from "./tools/registry";
 
@@ -392,7 +392,9 @@ async function executeMission(
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   const fetcher = createFetcher({
-    fetchImpl: options.fetchImpl ?? createPinnedFetch(resolveDns),
+    fetchImpl:
+      options.fetchImpl ??
+      createPinnedFetch(resolveDns, { maxResponseBytes: RESEARCH_MAX_RESPONSE_BYTES }),
     resolveDns,
     now,
     maxPages: fetchPagesFor(mission.id),
@@ -722,7 +724,12 @@ export { memoryNotes, recordRunMemory, MEMORY_KEYS } from "./knowledge/workspace
 export { assistantIdForRun } from "./missions/build-agent/run";
 export * from "./connectors";
 export * from "./tools/approvals";
-export { createPinnedFetch } from "./tools/node-fetch";
+export {
+  createPinnedFetch,
+  PINNED_FETCH_MAX_RESPONSE_BYTES,
+  RESEARCH_MAX_RESPONSE_BYTES,
+  ResponseTooLargeError,
+} from "./tools/node-fetch";
 export { type FindInstallation } from "./missions/ship-a-pr/run";
 export { readGitHubAppConfig, type GitHubAppClient } from "./github/app";
 export { createSandboxProvider, sandboxKindFor } from "./sandbox";

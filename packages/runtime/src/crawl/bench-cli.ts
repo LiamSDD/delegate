@@ -2,7 +2,7 @@ import { lookup } from "node:dns/promises";
 import { parseArgs } from "node:util";
 
 import { createFetcher } from "../tools/fetch";
-import { createPinnedFetch } from "../tools/node-fetch";
+import { createPinnedFetch, RESEARCH_MAX_RESPONSE_BYTES } from "../tools/node-fetch";
 import { siteScope } from "../tools/research";
 import { benchScenarios, formatBench, runBenchScenario } from "./bench";
 import { crawl, formatProgress } from "./engine";
@@ -43,7 +43,7 @@ async function real(
   const perHost = Math.min(values.perHost, SAFE_PER_HOST);
   const politeness = new HostPoliteness({ perHost });
   const fetcher = createFetcher({
-    fetchImpl: createPinnedFetch(resolveDns),
+    fetchImpl: createPinnedFetch(resolveDns, { maxResponseBytes: RESEARCH_MAX_RESPONSE_BYTES }),
     resolveDns,
     maxPages: values.pages * 4,
     hostGate: politeness,
