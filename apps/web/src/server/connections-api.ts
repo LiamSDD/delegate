@@ -57,7 +57,7 @@ function issues(error: z.ZodError): string[] {
   return error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`);
 }
 
-async function readBody(request: Request): Promise<unknown> {
+export async function readBody(request: Request): Promise<unknown> {
   if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json"))
     return Symbol.for("unsupported");
   const text = await request.text();
@@ -70,7 +70,7 @@ async function readBody(request: Request): Promise<unknown> {
   }
 }
 
-function bodyError(value: unknown): Response | null {
+export function bodyError(value: unknown): Response | null {
   if (value === Symbol.for("unsupported"))
     return apiError(415, "unsupported_media_type", "Send the request body as application/json.");
   if (value === Symbol.for("too-large"))
@@ -80,7 +80,7 @@ function bodyError(value: unknown): Response | null {
   return null;
 }
 
-function guardMutation(request: Request): Response | null {
+export function guardMutation(request: Request): Response | null {
   if (hasBearer(request))
     return apiError(403, "forbidden", "Settings can only be changed from the Delegate web app.");
   if (!isSameOrigin(request))
@@ -88,9 +88,9 @@ function guardMutation(request: Request): Response | null {
   return null;
 }
 
-async function existingSession(
+export async function existingSession(
   request: Request,
-  deps: ConnectionsDeps,
+  deps: Pick<ConnectionsDeps, "api">,
 ): Promise<{ app: AppDatabase; session: GuestSession | null }> {
   const app = await deps.api.app();
   return {
@@ -99,9 +99,9 @@ async function existingSession(
   };
 }
 
-async function ensuredSession(
+export async function ensuredSession(
   request: Request,
-  deps: ConnectionsDeps,
+  deps: Pick<ConnectionsDeps, "api">,
 ): Promise<{ app: AppDatabase; session: GuestSession; headers: Record<string, string> }> {
   const app = await deps.api.app();
   const secret = deps.api.secret();

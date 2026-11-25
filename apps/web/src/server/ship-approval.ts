@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { AppDatabase } from "./db";
 import type { RunContext } from "./runs";
 import { abortableSleep } from "./sse";
+import { notifyApprovalRequested } from "./webhooks/outbox";
 
 export const SHIP_APPROVAL_STEP = "ship";
 export const SHIP_POLL_MS = 500;
@@ -226,6 +227,12 @@ export function createShipApprovalWaiter(options: ShipApprovalWaiterOptions): Aw
   const now = options.now ?? Date.now;
   return async (request, signal) => {
     const row = await findOrOpen(app, ctx, request);
+    if (row.status === "pending")
+      await notifyApprovalRequested(app, ctx, {
+        id: row.id,
+        kind: "ship",
+        summary: `${request.mode === "pull_request" ? "Open a pull request on" : "Prepare a patch for"} ${request.repo}: ${request.title}`,
+      });
     const deadline = row.requestedAt.getTime() + timeoutMs;
     for (;;) {
       if (signal?.aborted === true)

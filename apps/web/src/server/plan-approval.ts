@@ -15,6 +15,7 @@ import { PlanStepsSchema } from "@/lib/m2-contract";
 import type { AppDatabase } from "./db";
 import type { RunContext } from "./runs";
 import { abortableSleep } from "./sse";
+import { notifyApprovalRequested } from "./webhooks/outbox";
 
 export const PLAN_APPROVAL_STEP = "plan";
 export const PLAN_POLL_MS = 300;
@@ -210,6 +211,11 @@ export function createPlanApprovalWaiter(options: PlanApprovalWaiterOptions): Aw
       await recordPlanDecision(app, ctx, approvalId, { decision: "approved", auto: true });
       return { decision: "approved", auto: true };
     }
+    await notifyApprovalRequested(app, ctx, {
+      id: approvalId,
+      kind: "plan",
+      summary: `A plan with ${plan.steps.length} steps is waiting for approval.`,
+    });
     const deadline = now() + timeoutMs;
     for (;;) {
       if (signal?.aborted === true) {

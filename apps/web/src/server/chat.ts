@@ -49,7 +49,7 @@ export function formatAnswerFrame(event: AnswerEvent): string {
   return `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
-function answerStream(
+export function answerStream(
   events: AsyncIterable<AnswerEvent>,
   controller: AbortController,
 ): ReadableStream<Uint8Array> {

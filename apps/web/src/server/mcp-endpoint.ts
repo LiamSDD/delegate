@@ -30,7 +30,7 @@ export const MCP_MISSIONS = RUNNABLE_MISSION_IDS.map((id) => ({
   description: MISSIONS[id].description,
 }));
 
-function siteOrigin(request: Request): string {
+export function siteOrigin(request: Request): string {
   const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
   const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
   const url = new URL(request.url);
