@@ -45,6 +45,13 @@ function targetOf(input: unknown): string | null {
   }
 }
 
+const recordedByThisRun = sql`${runEvents.seq} > coalesce((
+  select (fork_origin.payload->'forkedFrom'->>'seededThrough')::int
+  from ${runEvents} as fork_origin
+  where fork_origin.run_id = ${runEvents.runId} and fork_origin.type = 'run.created'
+  limit 1
+), 0)`;
+
 const countRow = z.object({ decision: z.string().nullable(), count: z.coerce.number().int() });
 
 export async function listPolicyDecisions(
@@ -56,6 +63,7 @@ export async function listPolicyDecisions(
     const scope = and(
       eq(runEvents.workspaceId, session.workspaceId),
       eq(runEvents.type, "policy.decided"),
+      recordedByThisRun,
     );
     const rows = await tx
       .select({ event: runEvents, mission: runs.mission, input: runs.input })
