@@ -62,4 +62,13 @@ describe("parseRobots", () => {
     expect(robots.isAllowed("/a%20b/c", AGENT)).toBe(false);
     expect(robots.isAllowed("/page?session=1", AGENT)).toBe(false);
   });
+
+  it("reads Crawl-delay for the matching group, falling back to *", () => {
+    const robots = parseRobots(
+      "User-agent: *\nCrawl-delay: 2\n\nUser-agent: DelegateBot\nCrawl-delay: 5\nDisallow: /x\n",
+    );
+    expect(robots.crawlDelaySeconds(AGENT)).toBe(5);
+    expect(robots.crawlDelaySeconds("OtherBot")).toBe(2);
+    expect(parseRobots("User-agent: *\nDisallow:\n").crawlDelaySeconds(AGENT)).toBeUndefined();
+  });
 });

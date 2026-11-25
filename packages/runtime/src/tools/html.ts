@@ -162,7 +162,7 @@ function collapse(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function parseAttributes(source: string): Map<string, string> {
+export function parseAttributes(source: string): Map<string, string> {
   const attributes = new Map<string, string>();
   for (const match of source.matchAll(ATTRIBUTE)) {
     const name = match[1]?.toLowerCase();
@@ -172,7 +172,7 @@ function parseAttributes(source: string): Map<string, string> {
   return attributes;
 }
 
-function isHidden(attributes: Map<string, string>): boolean {
+export function isHidden(attributes: Map<string, string>): boolean {
   if (attributes.has("hidden")) return true;
   if (attributes.get("aria-hidden")?.trim().toLowerCase() === "true") return true;
   const style = (attributes.get("style") ?? "").toLowerCase().replace(/\s+/g, "");

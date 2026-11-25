@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { FetchBlockedError, USER_AGENT, createFetcher, type FetcherOptions } from "./fetch";
+import {
+  FetchBlockedError,
+  USER_AGENT,
+  createFetcher,
+  parseRetryAfter,
+  type FetcherOptions,
+  type HostGate,
+  type HostOutcome,
+} from "./fetch";
 
 type Handler = (url: URL, init: RequestInit | undefined) => Response;
 
@@ -359,6 +367,61 @@ describe("fetcher behaviour", () => {
       fetcher.fetch({ url: "https://acme.example/c" }),
     ]);
     expect(h.sleeps.filter((ms) => ms > 0).sort((a, b) => a - b)).toEqual([1000, 2000, 3000]);
+  });
+
+  it("routes every hop through the host gate and reports outcomes, Retry-After and Crawl-delay", async () => {
+    const acquired: string[] = [];
+    const outcomes: HostOutcome[] = [];
+    const delays: [string, number][] = [];
+    const gate: HostGate = {
+      acquire: (host) => {
+        acquired.push(host);
+        return Promise.resolve((outcome) => {
+          outcomes.push(outcome);
+        });
+      },
+      setCrawlDelay: (host, ms) => {
+        delays.push([host, ms]);
+      },
+    };
+    const h = harness(
+      {
+        "https://acme.example/robots.txt": () =>
+          new Response("User-agent: *\nCrawl-delay: 2\n", {
+            headers: { "content-type": "text/plain" },
+          }),
+        "https://acme.example/old": () => redirect("https://docs.acme.example/new"),
+        "https://docs.acme.example/new": () => html("ok"),
+        "https://acme.example/busy": () =>
+          new Response("slow down", { status: 429, headers: { "retry-after": "7" } }),
+      },
+      {},
+      { hostGate: gate },
+    );
+    const fetcher = createFetcher(h.options);
+    expect(fetcher.gate).toBe(gate);
+    await fetcher.fetch({ url: "https://acme.example/old" });
+    expect(acquired).toEqual([
+      "acme.example",
+      "acme.example",
+      "docs.acme.example",
+      "docs.acme.example",
+    ]);
+    expect(delays).toEqual([["acme.example", 2000]]);
+    const error = await fetcher
+      .fetch({ url: "https://acme.example/busy" })
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "http_error", status: 429, retryAfterMs: 7000 });
+    expect(outcomes.at(-1)).toMatchObject({ status: 429, retryAfterMs: 7000, failed: true });
+    expect(h.sleeps).toEqual([]);
+  });
+
+  it("parses Retry-After as seconds or an HTTP date", () => {
+    const now = Date.parse("2026-11-25T10:00:00Z");
+    expect(parseRetryAfter("120", now)).toBe(120_000);
+    expect(parseRetryAfter("Wed, 25 Nov 2026 10:00:30 GMT", now)).toBe(30_000);
+    expect(parseRetryAfter("soon", now)).toBeUndefined();
+    expect(parseRetryAfter(null, now)).toBeUndefined();
   });
 
   it("enforces the per-run page cap", async () => {
