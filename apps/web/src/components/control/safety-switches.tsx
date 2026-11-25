@@ -203,7 +203,8 @@ function StopAll({ activeRuns }: { activeRuns: number }) {
       )}
       {stopped === null ? null : (
         <p role="status" className="text-sm text-text-muted">
-          Stopped {plural(stopped, "run")}. The audit log has the record.
+          Stopped {plural(stopped, "run")}. It is recorded in the workspace audit trail and listed
+          below.
         </p>
       )}
       <ErrorLine message={error} />
@@ -232,8 +233,8 @@ export function SafetySwitches({
       </div>
       {activity.length === 0 ? (
         <p className="text-sm text-text-subtle">
-          Neither switch has been used in this workspace. Each use is written to the audit log
-          before it takes effect and listed here.
+          Neither switch has been used in this workspace. Each use is written to the workspace audit
+          trail before it takes effect and listed here.
         </p>
       ) : (
         <ol aria-label="Recent switch activity" className="flex flex-col gap-1">

@@ -129,7 +129,8 @@ export function DataView({
               <code className="font-mono text-text">&quot;truncated&quot;: null</code>.
             </li>
             <li>
-              Up to {exportFacts.perHour} exports an hour. Each one is recorded in the audit log.
+              Up to {exportFacts.perHour} exports an hour. Each one is recorded in the workspace
+              audit trail before the file starts.
             </li>
           </ul>
           <button type="submit" disabled={!hasWorkspace} className={`${actionButton} self-start`}>

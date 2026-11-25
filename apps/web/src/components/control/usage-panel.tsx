@@ -190,7 +190,7 @@ export function UsagePanel({ usage }: { usage: WorkspaceUsage }) {
           />
           <Note>
             {sandbox.commands === 0
-              ? "No sandbox command has run. Missions that execute code (Repo X-ray tests, Ship-a-PR) log each command with its duration, and the durations are summed here. "
+              ? "No sandbox command has run. A mission that runs code in a sandbox, such as Ship-a-PR, logs each command with its duration, and the durations are summed here. "
               : null}
             Free-tier allowance: {VERCEL_SANDBOX_HOBBY.activeCpuHoursPerMonth} hours of Active CPU a
             month on Vercel Hobby (

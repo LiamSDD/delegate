@@ -37,14 +37,16 @@ Each item shows the time left, computed from `requested_at` and the timeout cons
 
 ### 4. Usage shows only what the log holds
 
-Every figure carries its unit and window. Runs in the last 60 minutes are shown against `GUEST_RUNS_PER_HOUR`; tokens by mission, model fallbacks, sandbox command seconds and crawled pages cover the last 7 days (the retention window) and are summed from events the run recorded itself, so events seeded into a fork are not counted twice. Sandbox time is the wall-clock duration of `sandbox.command` events, shown next to `VERCEL_SANDBOX_HOBBY`, the allowance Vercel publishes (5 hours of Active CPU a month, source and check date in the constant). The two are different measures and the page says so. Migration 0012 adds `run_events (workspace_id, type, created_at)`; these aggregates and the existing audit listing filter on exactly those columns.
+Every figure carries its unit and window. Runs in the last 60 minutes are shown against `GUEST_RUNS_PER_HOUR`, with the count since 00:00 UTC beside it; tokens by mission, model fallbacks, sandbox command seconds and crawled pages cover the last 7 days (the retention window) and are summed from events the run recorded itself, so events seeded into a fork are not counted twice. Sandbox time is the wall-clock duration of `sandbox.command` events, shown next to `VERCEL_SANDBOX_HOBBY`, the allowance Vercel publishes (5 hours of Active CPU a month, source and check date in the constant). The two are different measures and the page says so. Migration 0012 adds `run_events (workspace_id, type, created_at)`; these aggregates and the existing audit listing filter on exactly those columns.
 
 ### 5. Settings
 
-- **Overview**: workspace id, tier (guest or connected, the same test Autopilot uses), creation date, and the retention period read from `workspaces.retention_days`.
+- **Overview**: workspace id, tier (guest or connected, the same test Autopilot uses), creation date, and the retention period read from `workspaces.retention_days`; links to Connections, Webhooks (`/settings/webhooks`, built separately), Policies, Data and Automation; the theme, which stays in the browser.
 - **Policies**: the policy sets a run in this workspace gets, per mission and per way of starting it, built from `@delegate/policy` with the workspace's connector hosts. The selection mirrors `policiesFor` in `packages/runtime/src/server.ts`, which is not exported; a test pins that function's source so a change there fails here. The dry-run simulator resolves the request to a tool, capability, host, caller and provider, then calls the real `evaluateAll` and `evaluate`. No model is called and nothing is written.
 - **Data**: export and delete (below).
-- **Automation**: the existing defaults (auto-approve plans, pre-approved connector tools) on their own page, using the existing route.
+- **Automation**: the existing defaults (auto-approve plans, pre-approved connector tools) on their own page, using the existing route. Tools are still chosen per connector on Connections, which keeps its own copy of the section; this page shows the whole list and can take a tool off it.
+
+Every page has a loading state and empty states that say what will appear. Phone width is guarded twice: a test checks the rendered markup of every view for what forces a page wider than 320 px (unbreakable tokens, tables and preformatted text outside a scroller, fixed widths), and the pages were measured in a browser at 320 and 375 px.
 
 ### 6. Export
 

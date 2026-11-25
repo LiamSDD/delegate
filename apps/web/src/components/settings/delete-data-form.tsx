@@ -14,22 +14,27 @@ const receiptSchema = z.object({
   counts: z.record(z.string(), z.number().int().nonnegative()),
 });
 
-const COUNT_LABEL: Record<string, string> = {
-  runs: "runs",
-  events: "run events",
-  artifacts: "artifacts",
-  approvals: "approval requests",
-  assistants: "assistants",
-  documents: "documents",
-  memories: "memories",
-  playbooks: "workspace playbooks",
-  policies: "workspace policies",
-  connectors: "MCP connectors",
-  githubInstallations: "GitHub installations",
-  apiTokens: "API tokens",
-  settings: "settings records",
-  auditEntries: "earlier audit entries",
+const COUNT_LABEL: Record<string, readonly [one: string, many: string]> = {
+  runs: ["run", "runs"],
+  events: ["run event", "run events"],
+  artifacts: ["artifact", "artifacts"],
+  approvals: ["approval request", "approval requests"],
+  assistants: ["assistant", "assistants"],
+  documents: ["document", "documents"],
+  memories: ["memory", "memories"],
+  playbooks: ["workspace playbook", "workspace playbooks"],
+  policies: ["workspace policy", "workspace policies"],
+  connectors: ["MCP connector", "MCP connectors"],
+  githubInstallations: ["GitHub installation", "GitHub installations"],
+  apiTokens: ["API token", "API tokens"],
+  settings: ["settings record", "settings records"],
+  auditEntries: ["earlier audit entry", "earlier audit entries"],
 };
+
+export function removedLabel(name: string, count: number): string {
+  const label = COUNT_LABEL[name];
+  return label === undefined ? name : label[count === 1 ? 0 : 1];
+}
 
 export function normaliseConfirmation(typed: string): string {
   return typed.trim().replace(/\s+/g, " ").toLowerCase();
@@ -79,7 +84,7 @@ export function DeleteDataForm({ phrase, disabled }: { phrase: string; disabled:
             {removed.map(([name, count]) => (
               <li key={name}>
                 <span className="font-mono text-text tabular">{count}</span>{" "}
-                {COUNT_LABEL[name] ?? name}
+                {removedLabel(name, count)}
               </li>
             ))}
           </ul>

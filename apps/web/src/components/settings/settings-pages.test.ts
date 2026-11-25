@@ -15,7 +15,7 @@ import { EMPTY_INVENTORY } from "@/server/data/inventory";
 
 import { AutomationView, NO_AUTOMATION } from "./automation-view";
 import { DataView, parseExportOutcome } from "./data-view";
-import { normaliseConfirmation } from "./delete-data-form";
+import { normaliseConfirmation, removedLabel } from "./delete-data-form";
 import { SettingsOverview } from "./overview";
 import { PoliciesView } from "./policies-view";
 import { SETTINGS_PAGES } from "./settings-frame";
@@ -220,6 +220,12 @@ describe("settings data", () => {
   it("accepts in the browser exactly what the server accepts as confirmation", () => {
     for (const typed of ["delete my data", "  Delete   My Data ", "delete my data.", "delete", ""])
       expect(normaliseConfirmation(typed) === DELETE_CONFIRMATION).toBe(isConfirmed(typed));
+  });
+
+  it("names what a deletion removed, one or many, and passes an unknown kind through", () => {
+    expect(removedLabel("settings", 1)).toBe("settings record");
+    expect(removedLabel("events", 64)).toBe("run events");
+    expect(removedLabel("somethingNew", 2)).toBe("somethingNew");
   });
 
   it("explains an export that was turned away", () => {
