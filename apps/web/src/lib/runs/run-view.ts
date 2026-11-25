@@ -498,6 +498,11 @@ function stepStatus(status: RunState["steps"][number]["status"]): StepViewStatus
   return status;
 }
 
+export function repoTarget(repoUrl: string): string | null {
+  const match = /^https:\/\/github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(repoUrl.trim());
+  return match?.[1] ?? null;
+}
+
 export function buildRunView(events: readonly RunEvent[]): RunView {
   let state: RunState;
   try {
@@ -517,6 +522,7 @@ export function buildRunView(events: readonly RunEvent[]): RunView {
       target = null;
     }
   }
+  if (target === null && typeof input.repoUrl === "string") target = repoTarget(input.repoUrl);
   const objectives = new Map((state.plan?.steps ?? []).map((step) => [step.id, step]));
   const steps = state.steps.map((step): StepView => {
     const planned = objectives.get(step.id);

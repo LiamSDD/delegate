@@ -1,6 +1,6 @@
-import { analyseForResume } from "@delegate/runtime/server";
+import { analyseForResume, type FindInstallation } from "@delegate/runtime/server";
 
-import type { RunnableMissionId } from "@/lib/m2-contract";
+import { isExecutableMission } from "@/lib/m2-contract";
 import { MAX_RESUMES, resumeDecision, resumeMarkerDraft, resumeNotices } from "@/lib/runs/resume";
 
 import type { AppDatabase } from "./db";
@@ -23,6 +23,7 @@ export interface DurableDeps {
   registry: RunRegistry;
   runner: () => { execution: Execution; run: MissionRunner };
   schedule: (task: () => Promise<void>) => void;
+  shipInstallations?: (workspaceId: string) => FindInstallation;
   now?: () => Date;
 }
 
@@ -31,10 +32,6 @@ const holder = globalThis as typeof globalThis & { __delegateResuming?: Set<stri
 function resuming(): Set<string> {
   holder.__delegateResuming ??= new Set();
   return holder.__delegateResuming;
-}
-
-function isRunnable(mission: string): mission is RunnableMissionId {
-  return mission === "company-xray" || mission === "automation-audit" || mission === "build-agent";
 }
 
 async function failWorkerLost(
@@ -70,7 +67,7 @@ async function resumeRun(
     return;
   }
   const analysis = analyseForResume(events);
-  if (analysis.kind === "finished" || !isRunnable(record.mission)) {
+  if (analysis.kind === "finished" || !isExecutableMission(record.mission)) {
     await lease.release();
     return;
   }
@@ -97,6 +94,9 @@ async function resumeRun(
       registry: deps.registry,
       lease,
       resumeFrom,
+      ...(missionId === "ship-a-pr" && deps.shipInstallations !== undefined
+        ? { findInstallation: deps.shipInstallations(record.workspaceId) }
+        : {}),
     }),
   );
 }

@@ -59,6 +59,8 @@ export function createRuntimeRunner(options: RuntimeRunnerOptions): MissionRunne
     emit,
     signal,
     awaitPlanApproval,
+    awaitShipApproval,
+    findInstallation,
     planApprover,
     resumeFrom,
   }) => {
@@ -73,6 +75,8 @@ export function createRuntimeRunner(options: RuntimeRunnerOptions): MissionRunne
       latency: "interactive" as const,
       prompts,
       awaitPlanApproval,
+      ...(awaitShipApproval === undefined ? {} : { awaitShipApproval }),
+      ...(findInstallation === undefined ? {} : { findInstallation }),
       planApprover,
       ...assistantStores(),
     };

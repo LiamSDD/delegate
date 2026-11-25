@@ -27,6 +27,7 @@ import { PlanApprovalCard } from "./plan-approval-card";
 import { PlanPanel } from "./plan-panel";
 import { Eyebrow, useNow } from "./primitives";
 import { ReplayBar, ReplayButton } from "./replay-bar";
+import { ShipPanel } from "./ship-panel";
 import { OutcomeBanner, ResumedBanner, StreamBanner } from "./run-status";
 import { RunTopBar } from "./run-top-bar";
 import { SummaryStrip } from "./summary-strip";
@@ -150,7 +151,9 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
       : parseBrief(ready.brief.content);
   const isAudit = (ready?.missionId ?? missionId) === "automation-audit";
   const isBuild = (ready?.missionId ?? missionId) === "build-agent";
+  const isShip = (ready?.missionId ?? missionId) === "ship-a-pr";
   const hasBrief =
+    isShip ||
     (ready?.brief !== null && ready?.brief !== undefined) ||
     (ready?.audit !== null && ready?.audit !== undefined) ||
     (isBuild && Object.values(ready?.state.artifacts ?? {}).some((a) => a.kind === "assistant"));
@@ -159,7 +162,18 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
   const TABS: { id: TabId; label: string }[] = [
     { id: "plan", label: pendingPlan === null ? "Plan" : "Approve plan" },
     { id: "activity", label: "Agents" },
-    { id: "brief", label: isAudit ? "Audit" : isBuild ? "Assistant" : "Brief" },
+    {
+      id: "brief",
+      label: isShip
+        ? ready?.state.ship?.approval?.status === "pending"
+          ? "Review & ship"
+          : "Ship"
+        : isAudit
+          ? "Audit"
+          : isBuild
+            ? "Assistant"
+            : "Brief",
+    },
   ];
   const actions =
     ready === null
@@ -399,7 +413,9 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
             )}
           >
             <NextActions runId={runId} actions={actions} />
-            {isBuild ? (
+            {isShip ? (
+              <ShipPanel runId={runId} events={events} running={running} />
+            ) : isBuild ? (
               <BuildAgentPanel events={events} running={running} />
             ) : isAudit ? (
               <AuditPanel

@@ -24,6 +24,15 @@ import type { RoiInputs } from "@delegate/runtime";
 export const RUNNABLE_MISSION_IDS = ["company-xray", "automation-audit", "build-agent"] as const;
 export type RunnableMissionId = (typeof RUNNABLE_MISSION_IDS)[number];
 
+export const SHIP_MISSION_ID = "ship-a-pr" as const;
+export type ExecutableMissionId = RunnableMissionId | typeof SHIP_MISSION_ID;
+
+export function isExecutableMission(mission: string): mission is ExecutableMissionId {
+  return (
+    mission === SHIP_MISSION_ID || (RUNNABLE_MISSION_IDS as readonly string[]).includes(mission)
+  );
+}
+
 export const ROI_INPUT_KEYS = [
   "frequencyPerMonth",
   "minutesPerTask",
@@ -38,6 +47,7 @@ export const MISSION_LABELS: Record<string, string> = {
   "company-xray": "Company X-ray",
   "automation-audit": "Automation Audit",
   "build-agent": "Build-an-Agent",
+  "ship-a-pr": "Ship-a-PR",
 };
 
 export function missionLabel(id: string): string {

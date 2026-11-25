@@ -1,4 +1,5 @@
 import { type ForkPlan, MAX_FORK_OBJECTIVE_CHARS } from "@delegate/runtime";
+import type { FindInstallation } from "@delegate/runtime/server";
 import { z } from "zod";
 
 import { RUNNABLE_MISSION_IDS } from "@/lib/m2-contract";
@@ -49,9 +50,12 @@ export interface ApiDeps {
   production: boolean;
   now?: () => Date;
   stream?: Pick<RunStreamOptions, "pollMs" | "heartbeatMs" | "idleHookMs">;
+  shipEnabled?: boolean;
+  shipInstallations?: (workspaceId: string) => FindInstallation;
 }
 
 export type ApiErrorCode =
+  | "no_pending_ship"
   | "forbidden_origin"
   | "unsupported_media_type"
   | "payload_too_large"
@@ -72,7 +76,7 @@ export type ApiErrorCode =
 const MAX_BODY_BYTES = 8 * 1024;
 const MAX_PLAN_BODY_BYTES = 64 * 1024;
 
-const NO_STORE = { "Cache-Control": "no-store" };
+export const NO_STORE = { "Cache-Control": "no-store" };
 
 export function apiError(
   status: number,
@@ -183,11 +187,11 @@ export function serializeSessionCookie(value: string, production: boolean): stri
   ].join("; ");
 }
 
-function retryAfterSeconds(ms: number): string {
+export function retryAfterSeconds(ms: number): string {
   return String(Math.max(1, Math.ceil(ms / 1000)));
 }
 
-async function readJson(
+export async function readJson(
   request: Request,
   maxBytes = MAX_BODY_BYTES,
 ): Promise<{ ok: true; value: unknown } | Response> {
@@ -308,7 +312,7 @@ export function missionInput(
   };
 }
 
-async function guestFor(
+export async function guestFor(
   request: Request,
   deps: ApiDeps,
 ): Promise<{ app: AppDatabase; session: GuestSession } | null> {

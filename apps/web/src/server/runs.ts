@@ -360,7 +360,9 @@ export function isStale(record: RunRecord, now: Date): boolean {
   const age = now.getTime() - record.createdAt.getTime();
   const silence = now.getTime() - (record.lastEventAt ?? record.createdAt).getTime();
   const quietLimit =
-    record.lastEventType === "plan.proposed" ? PLAN_APPROVAL_GRACE_MS : STALE_AFTER_MS;
+    record.lastEventType === "plan.proposed" || record.lastEventType === "ship.approval.requested"
+      ? PLAN_APPROVAL_GRACE_MS
+      : STALE_AFTER_MS;
   return age > MAX_RUN_DURATION_MS && silence > quietLimit;
 }
 
