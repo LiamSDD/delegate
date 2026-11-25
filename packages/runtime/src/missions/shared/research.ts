@@ -13,6 +13,7 @@ import {
   type SubAgentTask,
 } from "../../agent/subagent";
 import { type ModelRole } from "../../events";
+import { type FollowUpCandidate } from "./deep-research";
 import { type PromptFile } from "../../prompts";
 import {
   READER_DEFAULTS,
@@ -170,12 +171,23 @@ export interface ResearchKit {
   env: ResearchEnvironment;
   documents: () => SourceDocument[];
   executors: StepExecutor[];
+  followUps: (task: SubAgentTask) => FollowUpCandidate[];
+}
+
+function pathLabel(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return decodeURIComponent(`${parsed.pathname}${parsed.search}`).replace(/[-_]+/g, " ");
+  } catch {
+    return url;
+  }
 }
 
 export function createResearchKit(options: ResearchKitOptions): ResearchKit {
   const { ctx } = options;
   const quarantineSteps = new Set<string>();
   const gapFacts = new Map<string, TopicFact[]>();
+  const callFacts = new Map<string, TopicFact[]>();
 
   const readerEntry = () => {
     const entry = chainHead(ctx, "fast");
@@ -223,6 +235,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
       const readings = await read(execution.stepId, documents);
       const found = readings.flatMap((reading) => reading.facts);
       gapFacts.set(execution.stepId, [...(gapFacts.get(execution.stepId) ?? []), ...found]);
+      callFacts.set(execution.toolCallId, found);
       const flagged = readings
         .filter((reading) => reading.injectionSuspected)
         .map((reading) => reading.sourceId);
@@ -453,9 +466,58 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
     },
   };
 
+  const followUps = (task: SubAgentTask): FollowUpCandidate[] => {
+    const call = async (name: string, args: unknown): Promise<TopicFact[]> => {
+      quarantineSteps.add(task.step.id);
+      const outcome = await runTool(task, name, args);
+      const facts = callFacts.get(outcome.toolCallId) ?? [];
+      callFacts.delete(outcome.toolCallId);
+      return facts;
+    };
+    const fetched = new Set(env.sources.all().map((document) => document.record.url));
+    const kinds = new Set(env.sources.all().map((document) => document.record.kind));
+    const candidates: FollowUpCandidate[] = env.discoveries.unfetched
+      .filter((url) => !fetched.has(url))
+      .map((url) => ({
+        key: `page:${url}`,
+        kind: "page" as const,
+        label: pathLabel(url),
+        hints: "",
+        execute: () => call("fetch_page", { url }),
+      }));
+    for (const feed of env.discoveries.feeds)
+      if (!fetched.has(feed))
+        candidates.push({
+          key: `feed:${feed}`,
+          kind: "feed",
+          label: `feed ${pathLabel(feed)}`,
+          hints: "news announcements press blog updates",
+          execute: () => call("read_feed", { url: feed }),
+        });
+    const org = env.discoveries.githubOrgs[0];
+    if (!kinds.has("github") && org !== undefined && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(org))
+      candidates.push({
+        key: `github:${org}`,
+        kind: "github",
+        label: `GitHub organisation ${org}`,
+        hints: "engineering open source repositories tech stack developers",
+        execute: () => call("github_org", { org }),
+      });
+    if (!kinds.has("wikipedia") && env.discoveries.names.length > 0)
+      candidates.push({
+        key: `wikipedia:${env.discoveries.names.slice(0, 2).join("|")}`,
+        kind: "wikipedia",
+        label: `Wikipedia and Wikidata entry for ${env.discoveries.names.slice(0, 2).join(", ")}`,
+        hints: "company history founded headquarters industry market competitors revenue employees",
+        execute: () => call("wikipedia_lookup", { names: env.discoveries.names.slice(0, 2) }),
+      });
+    return candidates;
+  };
+
   return {
     env,
     documents: () => env.sources.all(),
     executors: [researchSite, researchExternal, readSite, fillGaps],
+    followUps,
   };
 }
