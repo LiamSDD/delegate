@@ -21,6 +21,7 @@ import { AuditPanel } from "./audit-panel";
 import { BriefPanel } from "./brief-panel";
 import { BuildAgentPanel } from "./build-agent-panel";
 import { ForkBanner } from "./fork-banner";
+import { GoalBriefPanel } from "./goal-panel";
 import { ForkButton, ForkPanel } from "./fork-panel";
 import { NextActions, nextActionsFor } from "./next-actions";
 import { PlanApprovalCard } from "./plan-approval-card";
@@ -150,16 +151,21 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
       : parseBrief(ready.brief.content);
   const isAudit = (ready?.missionId ?? missionId) === "automation-audit";
   const isBuild = (ready?.missionId ?? missionId) === "build-agent";
+  const isGoal = (ready?.missionId ?? missionId) === "custom-goal";
   const hasBrief =
     (ready?.brief !== null && ready?.brief !== undefined) ||
     (ready?.audit !== null && ready?.audit !== undefined) ||
+    (ready?.goal !== null && ready?.goal !== undefined) ||
     (isBuild && Object.values(ready?.state.artifacts ?? {}).some((a) => a.kind === "assistant"));
   const pendingPlan = replay.active ? null : (ready?.pendingPlan ?? null);
   const tab: TabId = chosenTab ?? (pendingPlan !== null ? "plan" : hasBrief ? "brief" : "activity");
   const TABS: { id: TabId; label: string }[] = [
     { id: "plan", label: pendingPlan === null ? "Plan" : "Approve plan" },
     { id: "activity", label: "Agents" },
-    { id: "brief", label: isAudit ? "Audit" : isBuild ? "Assistant" : "Brief" },
+    {
+      id: "brief",
+      label: isAudit ? "Audit" : isBuild ? "Assistant" : isGoal ? "Goal brief" : "Brief",
+    },
   ];
   const actions =
     ready === null
@@ -196,26 +202,37 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
     tabRefs.current[next.id]?.focus();
   };
 
+  const goalText = (() => {
+    const created = events[0];
+    return created?.type === "run.created"
+      ? optionalText(created.payload.input, "goal")
+      : undefined;
+  })();
   const input =
-    ready?.url === null || ready?.url === undefined || !isRunnable(ready.missionId)
-      ? null
-      : (() => {
-          const created = events[0];
-          const raw = created?.type === "run.created" ? created.payload.input : {};
-          const fields = ["focus", "department", "goal", "name", "opportunityId"] as const;
-          const extra = Object.fromEntries(
-            fields.flatMap((key) => {
-              const value = optionalText(raw, key);
-              return value === undefined ? [] : [[key, value]];
-            }),
-          );
-          const parentRunId = optionalText(raw, "parentRunId");
-          return {
-            missionId: ready.missionId,
-            input: { url: ready.url, ...extra },
-            ...(parentRunId === undefined ? {} : { parentRunId }),
-          };
-        })();
+    ready !== null && ready.missionId === "custom-goal" && goalText !== undefined
+      ? {
+          missionId: "custom-goal" as const,
+          input: { goal: goalText, ...(ready.url === null ? {} : { url: ready.url }) },
+        }
+      : ready?.url === null || ready?.url === undefined || !isRunnable(ready.missionId)
+        ? null
+        : (() => {
+            const created = events[0];
+            const raw = created?.type === "run.created" ? created.payload.input : {};
+            const fields = ["focus", "department", "goal", "name", "opportunityId"] as const;
+            const extra = Object.fromEntries(
+              fields.flatMap((key) => {
+                const value = optionalText(raw, key);
+                return value === undefined ? [] : [[key, value]];
+              }),
+            );
+            const parentRunId = optionalText(raw, "parentRunId");
+            return {
+              missionId: ready.missionId,
+              input: { url: ready.url, ...extra },
+              ...(parentRunId === undefined ? {} : { parentRunId }),
+            };
+          })();
 
   return (
     <div className="flex flex-col">
@@ -399,7 +416,9 @@ export function RunView({ runId, target, simulated, missionId }: RunViewProps) {
             )}
           >
             <NextActions runId={runId} actions={actions} />
-            {isBuild ? (
+            {isGoal ? (
+              <GoalBriefPanel artifact={ready?.goal ?? null} running={running} />
+            ) : isBuild ? (
               <BuildAgentPanel events={events} running={running} />
             ) : isAudit ? (
               <AuditPanel
