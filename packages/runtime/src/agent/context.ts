@@ -3,7 +3,6 @@ import { type Policy } from "@delegate/policy";
 import { type Budget } from "../budget";
 import { type ModelRole } from "../events";
 import {
-  resolveChain,
   type ChainEntry,
   type DataClassification,
   type Env,
@@ -11,6 +10,7 @@ import {
   type ModelsConfig,
 } from "../models";
 import { type ModelProvider } from "../providers/types";
+import { type LearnedRouting } from "../routing/learned";
 import { type ToolApprovalGate } from "../tools/approvals";
 import { type RegisteredTool } from "../tools/registry";
 import { ModelRouter } from "../router";
@@ -131,6 +131,8 @@ export interface RunContextOptions {
   localOptIn?: boolean;
   latency?: LatencyMode;
   quality?: QualitySettings;
+  missionId?: string;
+  learnedRouting?: LearnedRouting;
   approvals?: ToolApprovalGate;
   connectorTools?: readonly RegisteredTool[];
   signal?: AbortSignal;
@@ -168,14 +170,6 @@ export function createRunContext(options: RunContextOptions): RunContext {
   const now = options.now ?? (() => new Date());
   let attributedStep: string | undefined;
   const counters = new Map<string, number>();
-  const routing = {
-    config: options.config,
-    audience: options.audience,
-    environment: options.environment ?? "server",
-    classification: options.classification,
-    ...(options.localOptIn === undefined ? {} : { localOptIn: options.localOptIn }),
-    ...(options.latency === undefined ? {} : { latency: options.latency }),
-  } as const;
   const router = new ModelRouter({
     env: options.env,
     context: {
@@ -187,6 +181,8 @@ export function createRunContext(options: RunContextOptions): RunContext {
       ...(options.latency === undefined ? {} : { latency: options.latency }),
     },
     createProvider: options.createProvider,
+    ...(options.missionId === undefined ? {} : { mission: options.missionId }),
+    ...(options.learnedRouting === undefined ? {} : { learned: options.learnedRouting }),
     now: () => now().getTime(),
     emitFallback: (payload) => {
       options.emitter.queue({
@@ -219,7 +215,7 @@ export function createRunContext(options: RunContextOptions): RunContext {
     attributeTo: (stepId) => {
       attributedStep = stepId;
     },
-    gate: createProviderGate((role) => resolveChain(role, options.env, routing)[0]),
+    gate: createProviderGate((role) => router.chain(role)[0]),
     ...(options.quality === undefined ? {} : { quality: options.quality }),
     ...(options.approvals === undefined ? {} : { approvals: options.approvals }),
     ...(options.connectorTools === undefined ? {} : { connectorTools: options.connectorTools }),

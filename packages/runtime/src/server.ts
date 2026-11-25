@@ -68,6 +68,8 @@ import { parsePromptFile, type PromptFile } from "./prompts";
 import { createAnthropicProvider } from "./providers/anthropic";
 import { createOpenAICompatibleProvider } from "./providers/openai-compatible";
 import { type ModelProvider } from "./providers/types";
+import { type LearnedRouting } from "./routing/learned";
+import { checkLearnedRouting, loadLearnedRouting } from "./routing/load";
 import { HostPoliteness } from "./crawl/politeness";
 import { createFetcher, type ResolveDns } from "./tools/fetch";
 import { createPinnedFetch, RESEARCH_MAX_RESPONSE_BYTES } from "./tools/node-fetch";
@@ -100,6 +102,7 @@ export interface RunMissionOptions {
   sleep?: (ms: number) => Promise<void>;
   workspaceId?: string;
   modelsConfig?: unknown;
+  learnedRouting?: unknown;
   prompts?: Partial<RuntimePrompts>;
   latency?: LatencyMode;
   quality?: QualityMode;
@@ -254,6 +257,11 @@ export function loadModelsConfig(override?: unknown): ModelsConfig {
   );
 }
 
+export function resolveLearnedRouting(override?: unknown): LearnedRouting | undefined {
+  if (override === null) return undefined;
+  return override === undefined ? loadLearnedRouting() : checkLearnedRouting(override);
+}
+
 export function loadRuntimePrompts(provided: Partial<RuntimePrompts> = {}): RuntimePrompts {
   const entries = Object.entries(RUNTIME_PROMPT_FILES) as [keyof RuntimePrompts, string][];
   return Object.fromEntries(
@@ -370,6 +378,7 @@ async function executeMission(
       content: artifact.content,
     });
   const config = loadModelsConfig(options.modelsConfig);
+  const learnedRouting = resolveLearnedRouting(options.learnedRouting);
   const ctx = createRunContext({
     runId: options.runId,
     workspaceId: options.workspaceId ?? "unscoped",
@@ -377,6 +386,8 @@ async function executeMission(
     classification: options.context.classification,
     config,
     env: options.env,
+    missionId: mission.id,
+    ...(learnedRouting === undefined ? {} : { learnedRouting }),
     emitter: createRunEmitter(emit),
     budget: new Budget({ run: RUN_BUDGETS[audience] }),
     policies: policiesFor(mission.id, audience, options.findInstallation !== undefined).map(
@@ -756,3 +767,11 @@ export {
 export { type FindInstallation } from "./missions/ship-a-pr/run";
 export { readGitHubAppConfig, type GitHubAppClient } from "./github/app";
 export { createSandboxProvider, sandboxKindFor } from "./sandbox";
+export {
+  LEARNED_ROUTING_FILE,
+  checkLearnedRouting,
+  loadLearnedRouting,
+  resetLearnedRoutingLog,
+  type LearnedRoutingSource,
+  type RoutingLog,
+} from "./routing/load";

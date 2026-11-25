@@ -109,6 +109,10 @@ export const PlanStepsSchema = z.array(PlanStepSchema).superRefine((steps, ctx) 
   }
 });
 
+export const ROUTING_ORDERINGS = ["configured", "learned"] as const;
+export const RoutingOrderingSchema = z.enum(ROUTING_ORDERINGS);
+export type RoutingOrdering = z.infer<typeof RoutingOrderingSchema>;
+
 export const UsageSchema = z.object({
   inputTokens: tokenCount,
   outputTokens: tokenCount,
@@ -118,6 +122,8 @@ export const UsageSchema = z.object({
   provider: id,
   model: id,
   estimated: z.boolean().optional(),
+  role: ModelRoleSchema.optional(),
+  ordering: RoutingOrderingSchema.optional(),
 });
 export type Usage = z.infer<typeof UsageSchema>;
 
@@ -152,6 +158,7 @@ export const ModelFallbackPayloadSchema = z.object({
   to: ServingModelSchema.nullable(),
   reason: FallbackReasonSchema,
   retryAfterMs: z.number().int().nonnegative().optional(),
+  ordering: RoutingOrderingSchema.optional(),
 });
 export type ModelFallbackPayload = z.infer<typeof ModelFallbackPayloadSchema>;
 

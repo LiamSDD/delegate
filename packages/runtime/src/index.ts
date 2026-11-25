@@ -36,3 +36,4 @@ export {
   type ForkSeedEvent,
 } from "./durable/fork";
 export * from "./learning";
+export * from "./routing/learned";

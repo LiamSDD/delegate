@@ -1,16 +1,11 @@
 import { type ModelRole } from "../events";
-import { resolveChain, type ChainEntry } from "../models";
+import { type ChainEntry } from "../models";
 import { type RunContext } from "./context";
 
 export const ASSUMED_CALL_MS = 10_000;
 
 export function chainHead(ctx: RunContext, role: ModelRole): ChainEntry | undefined {
-  return resolveChain(role, ctx.env, {
-    config: ctx.config,
-    audience: ctx.audience,
-    environment: "server",
-    classification: ctx.classification,
-  })[0];
+  return ctx.router.chain(role, { classification: ctx.classification, latency: "interactive" })[0];
 }
 
 export function projectedCallMs(ctx: RunContext, role: ModelRole): number {

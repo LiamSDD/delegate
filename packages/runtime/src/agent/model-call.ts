@@ -1,5 +1,5 @@
 import { costMicroUsd, priceFor } from "../budget";
-import { type ModelRole, type Usage } from "../events";
+import { type ModelRole, type RoutingOrdering, type Usage } from "../events";
 import { type ChainEntry } from "../models";
 import { type StopReason, type ToolCall, type TokenUsage } from "../providers/types";
 import {
@@ -78,7 +78,7 @@ export function withQualityNote(summary: string, calls: readonly ModelCallResult
 }
 
 interface MaxQualityRouting {
-  options: Pick<OpenOptions, "latency" | "offlineTimeouts" | "onAttempt">;
+  options: Pick<OpenOptions, "latency" | "leadWithOffline" | "offlineTimeouts" | "onAttempt">;
   announced: () => Promise<void>;
 }
 
@@ -92,6 +92,7 @@ function maxQualityRouting(
   return {
     options: {
       latency: "offline",
+      leadWithOffline: true,
       offlineTimeouts: { firstTokenMs: settings.firstTokenMs, totalMs: settings.totalMs },
       onAttempt: (entry) => {
         if (entry.interactive || announcement !== undefined) return;
@@ -128,22 +129,25 @@ async function openPatiently(ctx: RunContext, options: ModelCallOptions): Promis
   }
 }
 
-function toUsage(
-  usage: TokenUsage,
-  estimated: boolean,
-  provider: string,
-  model: string,
-  cost: number,
-): Usage {
+interface ServedBy {
+  provider: string;
+  model: string;
+  role: ModelRole;
+  ordering: RoutingOrdering;
+}
+
+function toUsage(usage: TokenUsage, estimated: boolean, served: ServedBy, cost: number): Usage {
   return {
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cacheReadTokens: usage.cacheReadTokens,
     cacheWriteTokens: usage.cacheWriteTokens,
     costMicroUsd: cost,
-    provider,
-    model,
+    provider: served.provider,
+    model: served.model,
     ...(estimated ? { estimated: true } : {}),
+    role: served.role,
+    ordering: served.ordering,
   };
 }
 
@@ -210,7 +214,17 @@ async function streamCall(ctx: RunContext, options: ModelCallOptions): Promise<M
   }
   options.onStreamEnd?.();
   const cost = costMicroUsd(priceFor(ctx.config, routed.provider, routed.model), tokenUsage);
-  const usage = toUsage(tokenUsage, estimated, routed.provider, routed.model, cost);
+  const usage = toUsage(
+    tokenUsage,
+    estimated,
+    {
+      provider: routed.provider,
+      model: routed.model,
+      role: options.role,
+      ordering: routed.ordering,
+    },
+    cost,
+  );
   await ctx.emitter.emit({
     runId: ctx.runId,
     type: "usage.updated",
