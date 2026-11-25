@@ -17,7 +17,7 @@ export const LearnedModelSchema = z
     p50LatencyMs: z.number().nonnegative().nullable(),
   })
   .refine((model) => model.ci[0] <= model.ci[1], {
-    message: "ci lower bound is above its upper bound",
+    error: "ci lower bound is above its upper bound",
     path: ["ci"],
   });
 export type LearnedModel = z.infer<typeof LearnedModelSchema>;

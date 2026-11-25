@@ -48,6 +48,8 @@ describe("callModel", () => {
           costMicroUsd: 0,
           provider: "fake",
           model: "fake-worker",
+          role: "worker",
+          ordering: "configured",
         },
       },
     ]);

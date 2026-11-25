@@ -218,6 +218,7 @@ describe("ModelRouter", () => {
         to: { provider: "b", model: "b-1" },
         reason: "rate_limited",
         retryAfterMs: 5000,
+        ordering: "configured",
       },
     ]);
 
@@ -423,6 +424,7 @@ describe("ModelRouter", () => {
       from: { provider: "b", model: "b-1" },
       to: { provider: "c", model: "c-1" },
       reason: "exceeds_provider_capacity",
+      ordering: "configured",
     });
   });
 
