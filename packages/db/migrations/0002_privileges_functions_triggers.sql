@@ -219,6 +219,8 @@ BEGIN
 END
 $$;
 --> statement-breakpoint
+GRANT CREATE ON SCHEMA public TO delegate_definer;
+--> statement-breakpoint
 ALTER FUNCTION app_keep_workspace_owner() OWNER TO delegate_definer;
 --> statement-breakpoint
 CREATE TRIGGER members_keep_owner
@@ -472,6 +474,8 @@ ALTER FUNCTION add_run_usage(uuid, bigint, bigint, bigint, bigint, bigint) OWNER
 ALTER FUNCTION visible_user_email(uuid) OWNER TO delegate_definer;
 --> statement-breakpoint
 ALTER FUNCTION purge_expired_demo_runs() OWNER TO delegate_definer;
+--> statement-breakpoint
+REVOKE CREATE ON SCHEMA public FROM delegate_definer;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION
   app_keep_workspace_owner(),

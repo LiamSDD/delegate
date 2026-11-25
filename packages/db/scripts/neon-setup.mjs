@@ -67,7 +67,10 @@ try {
   process.stdout.write("Database ready.\n");
 } catch (error) {
   const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
-  const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
+  const message =
+    error instanceof Error
+      ? error.message.split("\n").slice(0, 2).join(" ").slice(0, 300)
+      : String(error);
   console.error(`\nSetup failed: ${message}${cause === "" ? "" : `\nPostgres said: ${cause}`}`);
   process.exitCode = 1;
 } finally {

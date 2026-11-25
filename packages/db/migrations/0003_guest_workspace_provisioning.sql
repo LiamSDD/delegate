@@ -37,7 +37,11 @@ BEGIN
 END
 $$;
 --> statement-breakpoint
+GRANT CREATE ON SCHEMA public TO delegate_definer;
+--> statement-breakpoint
 ALTER FUNCTION create_guest_workspace() OWNER TO delegate_definer;
+--> statement-breakpoint
+REVOKE CREATE ON SCHEMA public FROM delegate_definer;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION create_guest_workspace() FROM PUBLIC;
 --> statement-breakpoint
