@@ -70,3 +70,14 @@ Append one entry per completed task: date, shipped, next, known issues, metrics.
 - Two migration fixes found on real Postgres (non-superuser owner): `GRANT delegate_definer ... WITH SET TRUE`, and a temporary `CREATE ON SCHEMA public` for `delegate_definer` around each `OWNER TO`, revoked straight after.
 - First live run: Company X-ray on plausible.io finished in 2m41s, 21/21 citations resolved, citation accuracy 86%, $0. MiniMax returned server errors from Vercel's region and every call fell back to Nemotron 3.5 Super VL.
 - Home page now shows the live model chain and marks shipped missions as Live.
+
+## 2026-11-25 · M4 trust layer
+
+- **Red-team suite** (`pnpm redteam`, in `pnpm check`): 56 deterministic attacks across indirect injection, exfiltration, SSRF, capability escalation, approval bypass and quote forgery, run against the real guards with a scripted compromised model. ASR 0%. Building it found and fixed four real gaps: mid-word quote matches, injected instructions relayed as facts, zero-width/fullwidth trigger phrases, and plan steps granted capabilities their executor does not declare.
+- **Fork from step, replay, run compare** (ADR 0009): forks seed a new run from the parent's event log and continue through the durable resume path. Local fork: 7 ms seed, first new event 1.1 s. Replay plays the log back client-side; `/runs/compare` diffs briefs claim by claim.
+- **`/evals` scoreboard**: Wilson and t intervals, Pareto chart (tokens vs quality), judge calibration with a kappa interval, red-team card. Reads committed result files only.
+- **PII redaction** in the runtime emitter (emails, phones, Luhn-checked cards, mod-97 IBANs), counts only. **Audit log** at `/control/audit` from `policy.decided` events, RLS-scoped, fork-seeded copies excluded.
+- Milestone review found two real bugs (audit double-count on forks; quote boundary check rejecting CJK and compound quotes) and four smaller issues; all fixed with tests.
+- Live eval found that pages over 2 MB failed the whole X-ray; the fetcher now keeps the capped prefix. Eval CLI now uses the same NVIDIA chain as the deployed site.
+- **Live X-ray eval** (8 companies × 2 trials, NVIDIA free tier): pass 81% [57%, 93%], deterministic score 0.91 ± 0.09, judge 0.75 ± 0.10, p50 61 s, p95 81 s, $0. LEGO blocks automated fetches (403); one Rakuten trial failed synthesis validation.
+- Not done: judge-human agreement has no human labels yet; Audit and Build it have no eval datasets yet.

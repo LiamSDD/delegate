@@ -1,0 +1,325 @@
+{
+  "version": 1,
+  "id": "2026-11-25T07-58-43-473Z",
+  "mission": "xray",
+  "mode": "live",
+  "dataset": {
+    "name": "company-xray",
+    "version": 1
+  },
+  "audience": "public-demo",
+  "startedAt": "2026-11-25T07:58:43.473Z",
+  "finishedAt": "2026-11-25T08:07:30.010Z",
+  "durationMs": 526537,
+  "trialsPerCase": 2,
+  "promptVersions": {
+    "quarantine-reader": 1,
+    "company-xray-researcher": 1,
+    "company-xray-synthesis": 1,
+    "xray-judge": 1
+  },
+  "models": [
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 44
+    },
+    {
+      "role": "fast",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 122
+    },
+    {
+      "role": "planner",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 14
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 14
+    },
+    {
+      "role": "worker",
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 62
+    },
+    {
+      "role": "planner",
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 2
+    }
+  ],
+  "judgeModels": [
+    {
+      "provider": "nvidia",
+      "model": "minimaxai/minimax-m3.1-flash",
+      "calls": 3
+    },
+    {
+      "provider": "nvidia",
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "calls": 10
+    }
+  ],
+  "totals": {
+    "trials": 16,
+    "costMicroUsd": 0,
+    "tokens": 494070
+  },
+  "cases": [
+    {
+      "caseId": "atlassian",
+      "company": "Atlassian",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T07-58-43-473Z_atlassian_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.75,
+          "latencyMs": 64902,
+          "costMicroUsd": 0,
+          "tokens": 45781
+        },
+        {
+          "trial": 1,
+          "runId": "eval_2026-11-25T07-58-43-473Z_atlassian_1_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.75,
+          "latencyMs": 51122,
+          "costMicroUsd": 0,
+          "tokens": 40164
+        }
+      ]
+    },
+    {
+      "caseId": "adyen",
+      "company": "Adyen",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T07-58-43-473Z_adyen_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.8125,
+          "latencyMs": 63302,
+          "costMicroUsd": 0,
+          "tokens": 37373
+        },
+        {
+          "trial": 1,
+          "runId": "eval_2026-11-25T07-58-43-473Z_adyen_1_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.8125,
+          "latencyMs": 76248,
+          "costMicroUsd": 0,
+          "tokens": 41172
+        }
+      ]
+    },
+    {
+      "caseId": "zed",
+      "company": "Zed Industries",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T07-58-43-473Z_zed_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.5,
+          "latencyMs": 58828,
+          "costMicroUsd": 0,
+          "tokens": 33184
+        },
+        {
+          "trial": 1,
+          "runId": "eval_2026-11-25T07-58-43-473Z_zed_1_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.75,
+          "latencyMs": 81048,
+          "costMicroUsd": 0,
+          "tokens": 40177
+        }
+      ]
+    },
+    {
+      "caseId": "lego",
+      "company": "The LEGO Group",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T07-58-43-473Z_lego_0_0",
+          "outcome": "errored",
+          "failureCode": "site_unreachable",
+          "passed": false,
+          "score": 0.5333333333333333,
+          "citationsVerified": null,
+          "judgeOverall": null,
+          "latencyMs": 14710,
+          "costMicroUsd": 0,
+          "tokens": 2443
+        },
+        {
+          "trial": 1,
+          "runId": "eval_2026-11-25T07-58-43-473Z_lego_1_0",
+          "outcome": "errored",
+          "failureCode": "site_unreachable",
+          "passed": false,
+          "score": 0.5333333333333333,
+          "citationsVerified": null,
+          "judgeOverall": null,
+          "latencyMs": 11956,
+          "costMicroUsd": 0,
+          "tokens": 2365
+        }
+      ]
+    },
+    {
+      "caseId": "hilti",
+      "company": "Hilti Group",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T07-58-43-473Z_hilti_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.8125,
+          "latencyMs": 49145,
+          "costMicroUsd": 0,
+          "tokens": 20695
+        },
+        {
+          "trial": 1,
+          "runId": "eval_2026-11-25T07-58-43-473Z_hilti_1_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.9375,
+          "latencyMs": 68484,
+          "costMicroUsd": 0,
+          "tokens": 23786
+        }
+      ]
+    },
+    {
+      "caseId": "rakuten",
+      "company": "Rakuten Group",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T07-58-43-473Z_rakuten_0_0",
+          "outcome": "failed",
+          "failureCode": "synthesis_invalid",
+          "passed": false,
+          "score": 0.5333333333333333,
+          "citationsVerified": false,
+          "judgeOverall": null,
+          "latencyMs": 63724,
+          "costMicroUsd": 0,
+          "tokens": 22564
+        },
+        {
+          "trial": 1,
+          "runId": "eval_2026-11-25T07-58-43-473Z_rakuten_1_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.9375,
+          "latencyMs": 60876,
+          "costMicroUsd": 0,
+          "tokens": 18420
+        }
+      ]
+    },
+    {
+      "caseId": "cern",
+      "company": "CERN",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T07-58-43-473Z_cern_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.875,
+          "latencyMs": 57154,
+          "costMicroUsd": 0,
+          "tokens": 29508
+        },
+        {
+          "trial": 1,
+          "runId": "eval_2026-11-25T07-58-43-473Z_cern_1_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.875,
+          "latencyMs": 58400,
+          "costMicroUsd": 0,
+          "tokens": 40401
+        }
+      ]
+    },
+    {
+      "caseId": "mistral-ai",
+      "company": "Mistral AI",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "eval_2026-11-25T07-58-43-473Z_mistral-ai_0_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.5,
+          "latencyMs": 64756,
+          "costMicroUsd": 0,
+          "tokens": 49222
+        },
+        {
+          "trial": 1,
+          "runId": "eval_2026-11-25T07-58-43-473Z_mistral-ai_1_0",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": 0.5,
+          "latencyMs": 71391,
+          "costMicroUsd": 0,
+          "tokens": 46815
+        }
+      ]
+    }
+  ],
+  "agreement": {
+    "status": "no_human_labels",
+    "labels": 0
+  }
+}

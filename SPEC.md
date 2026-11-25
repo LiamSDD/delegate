@@ -279,9 +279,9 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 - [ ] *Done when:* **Demo A works end to end** and killing the server mid-run still completes the run
 
 ### M4 · Trust layer
-- [ ] Policy engine fully enforced, audit log, red-team suite in the local gate, PII redaction
-- [ ] Deterministic replay, fork-from-step, run compare
-- [ ] `/evals` with CIs, Pareto chart and judge calibration
+- [x] Policy engine fully enforced, audit log, red-team suite in the local gate, PII redaction
+- [x] Deterministic replay, fork-from-step, run compare
+- [x] `/evals` with CIs, Pareto chart and judge calibration
 - [ ] *Done when:* attack success rate is 0% and a fork-and-diff starts in under 10 s
 
 ### M5 · Engineering missions

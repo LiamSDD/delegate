@@ -12,7 +12,7 @@ Paste a company URL, a GitHub repo or a goal. Delegate plans the work, runs spec
 
 **Live demo: [delegate-beryl.vercel.app](https://delegate-beryl.vercel.app)**. Paste a company URL and watch the agents work. Free models, $0, no sign-up.
 
-> **Status: M3 shipped.** Company X-ray, AI Automation Audit and Build it run live end to end on free NVIDIA-hosted models with a keyless fallback, with durable resume from the event log and 1,171 tests. Next is M4, the trust layer: red-team suite, replay and fork-from-step. Every number on this page comes from code in this repo; see [`docs/PROGRESS.md`](docs/PROGRESS.md).
+> **Status: M4 shipped.** Company X-ray, AI Automation Audit and Build it run live end to end on free NVIDIA-hosted models with a keyless fallback. The trust layer is in: a 56-attack red-team suite at 0% attack success in the local gate, fork from any step, replay and run compare from the event log, PII redaction, an audit log, and an [`/evals`](https://delegate-beryl.vercel.app/evals) scoreboard with confidence intervals. Latest live X-ray eval: 81% pass (95% CI 57–93%, n=16), p50 61 s, $0. 1,310 tests. Every number on this page comes from code in this repo; see [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 ## Why it exists
 
