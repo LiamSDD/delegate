@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { CAPABILITIES, defaultPolicy, ownerDefaultPolicy } from "./defaults";
+import {
+  CAPABILITIES,
+  GITHUB_API_HOST,
+  GITHUB_OPEN_PR_TOOL,
+  SANDBOX_CAPABILITIES,
+  defaultPolicy,
+  ownerDefaultPolicy,
+  shipConnectedPolicy,
+  shipDemoPolicy,
+  shipOwnerPolicy,
+} from "./defaults";
 import { evaluate } from "./engine";
 import { type PolicyContext } from "./types";
 
@@ -50,6 +60,69 @@ describe("ownerDefaultPolicy", () => {
       "deny",
     );
     expect(evaluate([ownerDefaultPolicy], { ...base, spentDayMicroUsd: 10_000_001 }).decision).toBe(
+      "deny",
+    );
+  });
+});
+
+describe("ship-a-pr policies", () => {
+  const sandbox = (capability: string): PolicyContext => ({
+    ...base,
+    tool: "write_file",
+    capability,
+    grantedCapabilities: [capability],
+    argsSummary: "src/index.ts",
+    targetDomain: undefined,
+    provider: { id: "groq", terms: "public-demo-ok" },
+  });
+  const openPr: PolicyContext = {
+    ...base,
+    actor: { type: "system", id: "ship-a-pr" },
+    tool: GITHUB_OPEN_PR_TOOL,
+    capability: CAPABILITIES.repoWrite,
+    grantedCapabilities: [CAPABILITIES.repoWrite],
+    argsSummary: "PR on owner/repo",
+    targetDomain: GITHUB_API_HOST,
+    provider: undefined,
+  };
+
+  it("allows sandbox reads, writes and commands for guests and the owner", () => {
+    for (const capability of SANDBOX_CAPABILITIES) {
+      expect(evaluate([shipDemoPolicy], sandbox(capability)).decision).toBe("allow");
+      expect(evaluate([shipOwnerPolicy], sandbox(capability)).decision).toBe("allow");
+    }
+  });
+
+  it("denies a pull request to guests and requires approval for the owner", () => {
+    expect(evaluate([shipDemoPolicy], openPr).decision).toBe("deny");
+    expect(evaluate([shipOwnerPolicy], openPr).decision).toBe("require_approval");
+  });
+
+  it("requires approval for a connected visitor and keeps zero spend", () => {
+    expect(evaluate([shipConnectedPolicy], openPr).decision).toBe("require_approval");
+    expect(
+      evaluate([shipConnectedPolicy], { ...openPr, targetDomain: "attacker.example" }).decision,
+    ).toBe("deny");
+    expect(
+      evaluate([shipConnectedPolicy], {
+        ...sandbox(CAPABILITIES.sandboxWrite),
+        spentRunMicroUsd: 1,
+      }).decision,
+    ).toBe("deny");
+  });
+
+  it("never lets a pull request reach a host other than the GitHub API", () => {
+    expect(
+      evaluate([shipOwnerPolicy], { ...openPr, targetDomain: "attacker.example" }).decision,
+    ).toBe("deny");
+    expect(evaluate([shipOwnerPolicy], { ...openPr, targetDomain: undefined }).decision).toBe(
+      "deny",
+    );
+  });
+
+  it("keeps the research policies closed to sandbox capabilities", () => {
+    expect(evaluate([defaultPolicy], sandbox(CAPABILITIES.sandboxExec)).decision).toBe("deny");
+    expect(evaluate([ownerDefaultPolicy], sandbox(CAPABILITIES.sandboxWrite)).decision).toBe(
       "deny",
     );
   });

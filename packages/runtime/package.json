@@ -38,14 +38,15 @@
     "live:build-agent": "vitest run --config vitest.live.config.ts src/live/build-agent.live.test.ts"
   },
   "dependencies": {
-    "@delegate/policy": "workspace:*",
     "@anthropic-ai/sdk": "catalog:",
+    "@delegate/policy": "workspace:*",
     "@opentelemetry/api": "catalog:",
     "@opentelemetry/context-async-hooks": "catalog:",
     "@opentelemetry/exporter-trace-otlp-http": "catalog:",
     "@opentelemetry/resources": "catalog:",
     "@opentelemetry/sdk-trace": "catalog:",
     "@opentelemetry/semantic-conventions": "catalog:",
+    "@vercel/sandbox": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

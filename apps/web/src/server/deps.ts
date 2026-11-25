@@ -2,7 +2,7 @@ import { createDbPlaybookStore } from "@delegate/db";
 import type { PlaybookStore } from "@delegate/runtime";
 import { after } from "next/server";
 
-import { isFakeRunnerEnabled } from "@/flags";
+import { isFakeRunnerEnabled, isShipAPrEnabled } from "@/flags";
 
 import type { ApiDeps } from "./api";
 import { getAppDatabase } from "./db";
@@ -41,5 +41,6 @@ export function apiDeps(): ApiDeps {
       after(task);
     },
     production: process.env.NODE_ENV === "production",
+    shipEnabled: isShipAPrEnabled(process.env),
   };
 }

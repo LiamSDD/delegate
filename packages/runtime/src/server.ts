@@ -1,7 +1,14 @@
 import { readFileSync } from "node:fs";
 import { lookup } from "node:dns/promises";
 
-import { defaultPolicy, ownerDefaultPolicy } from "@delegate/policy";
+import {
+  defaultPolicy,
+  ownerDefaultPolicy,
+  shipConnectedPolicy,
+  shipDemoPolicy,
+  shipOwnerPolicy,
+  type Policy,
+} from "@delegate/policy";
 
 import {
   createRunContext,
@@ -43,6 +50,18 @@ import {
 import { runBuildAgent } from "./missions/build-agent/run";
 import { createMemoryAssistantStore, type AssistantStore } from "./missions/build-agent/schema";
 import { runCompanyXray } from "./missions/company-xray/run";
+import { runShipAPr, type FindInstallation, type ShipLimits } from "./missions/ship-a-pr/run";
+import { type AwaitShipApproval } from "./missions/ship-a-pr/schema";
+import {
+  createGitHubAppClient,
+  readGitHubAppConfig,
+  type GitHubAppClient,
+  type RepoRef,
+} from "./github/app";
+import { createSandboxProvider } from "./sandbox";
+import { SandboxUnavailableError, type SandboxProvider } from "./sandbox/types";
+import { runCustomGoal } from "./missions/custom-goal/run";
+import { runRepoXray } from "./missions/repo-xray/run";
 import { type AwaitPlanApproval } from "./plan-approval";
 import { parsePromptFile, type PromptFile } from "./prompts";
 import { createAnthropicProvider } from "./providers/anthropic";
@@ -52,6 +71,15 @@ import { createFetcher, type ResolveDns } from "./tools/fetch";
 import { createPinnedFetch } from "./tools/node-fetch";
 
 export * from "./index";
+export {
+  createRepoXrayMission,
+  runRepoXray,
+  snapshotArtifact,
+  REPO_XRAY_LIMITS,
+  type RepoXrayDependencies,
+  type RepoXrayPrompts,
+} from "./missions/repo-xray/run";
+export { REPO_ARCHIVE_HOST, archiveUrl } from "./missions/repo-xray/archive";
 
 export interface RunMissionOptions {
   runId: string;
@@ -82,6 +110,22 @@ export interface RunMissionOptions {
   houseLearning?: boolean;
   shippedHouse?: (key: string) => Playbook | null;
   graderScore?: (events: readonly LoggedEvent[]) => number | undefined;
+  awaitShipApproval?: AwaitShipApproval;
+  sandboxes?: SandboxProvider;
+  github?: GitHubAppClient | null;
+  findInstallation?: FindInstallation;
+  cloneUrl?: (repo: RepoRef) => string;
+  shipLimits?: Partial<ShipLimits>;
+}
+
+export function githubAppFromEnv(
+  env: Record<string, string | undefined>,
+  fetchImpl?: typeof fetch,
+): GitHubAppClient | null {
+  const config = readGitHubAppConfig(env);
+  return config === null
+    ? null
+    : createGitHubAppClient({ config, ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }) });
 }
 
 export const RUNTIME_PROMPT_FILES = {
@@ -100,6 +144,10 @@ export const RUNTIME_PROMPT_FILES = {
   answer: "assistant.answer.v1.md",
   rerank: "retrieval.rerank.v1.md",
   reflect: "reflect.v1.md",
+  engineer: "ship-a-pr.engineer.v1.md",
+  goalSynthesis: "custom-goal.synthesis.v1.md",
+  repoArchitect: "repo-xray.architect.v1.md",
+  repoImprover: "repo-xray.improver.v1.md",
 } as const;
 
 export const REFLECT_BUDGET: RunBudgetLimits = { maxTokens: 20_000, maxMicroUsd: 0 };
@@ -115,7 +163,15 @@ export function inProcessStores(): { knowledge: KnowledgeStore; assistants: Assi
   return inProcess;
 }
 
-const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set(["build-agent"]);
+const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set(["build-agent", "ship-a-pr"]);
+
+function policiesFor(missionId: MissionId, audience: Audience, connected: boolean): Policy[] {
+  if (missionId === "ship-a-pr")
+    return [
+      audience === "owner" ? shipOwnerPolicy : connected ? shipConnectedPolicy : shipDemoPolicy,
+    ];
+  return [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy];
+}
 
 export type RuntimePrompts = Record<keyof typeof RUNTIME_PROMPT_FILES, PromptFile>;
 
@@ -299,7 +355,7 @@ async function executeMission(
     env: options.env,
     emitter: createRunEmitter(emit),
     budget: new Budget({ run: RUN_BUDGETS[audience] }),
-    policies: [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy],
+    policies: policiesFor(mission.id, audience, options.findInstallation !== undefined),
     createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
     environment: "server",
     ...(options.latency === undefined ? {} : { latency: options.latency }),
@@ -337,7 +393,44 @@ async function executeMission(
   const notes =
     options.memory === undefined ? [] : memoryNotes(await options.memory.read().catch(() => []));
   let status: "completed" | "failed";
-  if (mission.id === "automation-audit") {
+  if (mission.id === "ship-a-pr") {
+    const input = MISSIONS["ship-a-pr"].inputSchema.parse(parsed.data);
+    let sandboxes: SandboxProvider;
+    let github: GitHubAppClient | null;
+    try {
+      sandboxes = options.sandboxes ?? createSandboxProvider(options.env);
+      github =
+        options.github === undefined
+          ? audience === "owner" || options.findInstallation !== undefined
+            ? githubAppFromEnv(options.env, options.fetchImpl)
+            : null
+          : options.github;
+    } catch (error) {
+      return invalid(
+        options.runId,
+        options.emit,
+        error instanceof SandboxUnavailableError ? "sandbox_unavailable" : "misconfigured",
+        error instanceof Error ? error.message.slice(0, 300) : "Ship-a-PR is misconfigured",
+      );
+    }
+    status = await runShipAPr({
+      ctx,
+      input,
+      prompts: { planner: prompts.planner, engineer: prompts.engineer },
+      sandboxes,
+      github,
+      ...(options.findInstallation === undefined
+        ? {}
+        : { findInstallation: options.findInstallation }),
+      ...(options.cloneUrl === undefined ? {} : { cloneUrl: options.cloneUrl }),
+      ...(options.awaitShipApproval === undefined
+        ? {}
+        : { awaitShipApproval: options.awaitShipApproval }),
+      ...(options.shipLimits === undefined ? {} : { limits: options.shipLimits }),
+      ...(restorable && resume !== undefined ? { existingArtifacts: resume.artifacts } : {}),
+      run,
+    });
+  } else if (mission.id === "automation-audit") {
     const input = MISSIONS["automation-audit"].inputSchema.parse(parsed.data);
     status = await runAutomationAudit({ ctx, input, fetcher, prompts, run });
   } else if (mission.id === "build-agent") {
@@ -365,6 +458,12 @@ async function executeMission(
       ...(restorable && resume !== undefined ? { existingArtifacts: resume.artifacts } : {}),
       run,
     });
+  } else if (mission.id === "custom-goal") {
+    const input = MISSIONS["custom-goal"].inputSchema.parse(parsed.data);
+    status = await runCustomGoal({ ctx, input, fetcher, prompts, run });
+  } else if (mission.id === "repo-xray") {
+    const input = MISSIONS["repo-xray"].inputSchema.parse(options.input);
+    status = await runRepoXray({ ctx, input, fetcher, prompts, run });
   } else {
     const input = MISSIONS["company-xray"].inputSchema.parse(parsed.data);
     status = await runCompanyXray({ ctx, input, fetcher, prompts, run });
@@ -590,3 +689,6 @@ export {
 export { reciprocalRankFusion, retrieve, RETRIEVAL_DEFAULTS } from "./knowledge/retrieve";
 export { memoryNotes, recordRunMemory, MEMORY_KEYS } from "./knowledge/workspace-memory";
 export { assistantIdForRun } from "./missions/build-agent/run";
+export { type FindInstallation } from "./missions/ship-a-pr/run";
+export { readGitHubAppConfig, type GitHubAppClient } from "./github/app";
+export { createSandboxProvider, sandboxKindFor } from "./sandbox";

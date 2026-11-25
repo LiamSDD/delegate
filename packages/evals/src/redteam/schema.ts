@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const REDTEAM_SUITE = "redteam/v1" as const;
+export const REDTEAM_SUITE = "redteam/v2" as const;
 
 export const REDTEAM_CATEGORIES = [
   "indirect-injection",
@@ -9,6 +9,7 @@ export const REDTEAM_CATEGORIES = [
   "capability-escalation",
   "approval-bypass",
   "quote-forgery",
+  "sandbox-escape",
   "playbook-poisoning",
 ] as const;
 export const RedteamCategorySchema = z.enum(REDTEAM_CATEGORIES);
@@ -86,6 +87,18 @@ export const ReaderPayloadSchema = z.strictObject({
   forgedQuotes: z.array(z.string()).default([]),
 });
 
+export const RepoPayloadSchema = z.strictObject({
+  repo: z.string().regex(/^[A-Za-z0-9-]+\/[\w.-]+$/),
+  files: z.record(z.string(), z.string()),
+  readerFacts: z.array(ReaderFactSchema).default([]),
+  architect: z.unknown().optional(),
+  improver: z.unknown().optional(),
+  workerCalls: z.array(ToolCallSchema).default([]),
+  injectedText: z.string().min(8).optional(),
+  falseClaims: z.array(z.string().min(4)).default([]),
+  forbiddenHosts: z.array(host).default([]),
+});
+
 export const PolicyPayloadSchema = z.strictObject({
   policies: z.array(PolicyRefSchema),
   context: z.unknown(),
@@ -109,6 +122,14 @@ export const OrchestratorPayloadSchema = z.strictObject({
   calls: z.array(ToolCallSchema).min(1),
 });
 
+export const EngineerPayloadSchema = z.strictObject({
+  repoFiles: z.record(z.string(), z.string()),
+  symlinks: z.record(z.string(), z.string()).optional(),
+  audience: z.enum(["public-demo", "owner"]).default("owner"),
+  approval: z.enum(["none", "approved", "rejected"]).default("none"),
+  assistantText: z.string().optional(),
+  calls: z.array(ToolCallSchema).min(1),
+});
 export const INJECTION_POINTS = [
   "plan.rationale",
   "step.summary",
@@ -171,6 +192,7 @@ export const RedteamCaseSchema = z.discriminatedUnion("target", [
   z.strictObject({ ...base, target: z.literal("agent"), payload: AgentPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("pipeline"), payload: PipelinePayloadSchema }),
   z.strictObject({ ...base, target: z.literal("reader"), payload: ReaderPayloadSchema }),
+  z.strictObject({ ...base, target: z.literal("repo"), payload: RepoPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("policy"), payload: PolicyPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("plan"), payload: PlanPayloadSchema }),
   z.strictObject({
@@ -178,6 +200,7 @@ export const RedteamCaseSchema = z.discriminatedUnion("target", [
     target: z.literal("orchestrator"),
     payload: OrchestratorPayloadSchema,
   }),
+  z.strictObject({ ...base, target: z.literal("engineer"), payload: EngineerPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("playbook"), payload: PlaybookPayloadSchema }),
 ]);
 export type RedteamCase = z.infer<typeof RedteamCaseSchema>;

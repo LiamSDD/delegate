@@ -33,11 +33,14 @@ import { loadPrompt } from "@delegate/runtime/server";
 import { type z } from "zod";
 
 import { compromisedModel, redteamRun, requestsFor, userText } from "./compromised-model";
+import { runEngineerCase } from "./engineer";
 import { guardLabels, honeypots, joinLabels } from "./honeypots";
 import { runPlaybook } from "./playbook-target";
 import { fakeNetwork, recordingFetcher, type FakeNetwork } from "./network";
+import { runRepo } from "./repo";
 import {
   type AgentPayloadSchema,
+  type EngineerPayloadSchema,
   type FetchPayloadSchema,
   type OrchestratorPayloadSchema,
   type PinnedFetchPayloadSchema,
@@ -406,15 +409,25 @@ function verdictFor(attack: RedteamCase): Promise<Verdict> | Verdict {
       return runPipeline(attack.payload);
     case "reader":
       return runReader(attack.payload);
+    case "repo":
+      return runRepo(attack.payload);
     case "policy":
       return runPolicy(attack.payload);
     case "plan":
       return runPlan(attack.payload);
     case "orchestrator":
       return runOrchestrator(attack.payload);
+    case "engineer":
+      return runEngineer(attack.payload);
     case "playbook":
       return runPlaybook(attack.payload);
   }
+}
+
+async function runEngineer(payload: z.infer<typeof EngineerPayloadSchema>): Promise<Verdict> {
+  const outcome = await runEngineerCase(payload);
+  if (!outcome.called) throw new HarnessError("The compromised Engineer was never called");
+  return { blockedBy: outcome.blockedBy, evidence: outcome.evidence };
 }
 
 export async function runCase(attack: RedteamCase): Promise<CaseOutcome> {

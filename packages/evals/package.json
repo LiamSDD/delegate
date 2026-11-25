@@ -27,6 +27,7 @@
     "gate": "tsx src/gate.ts",
     "agreement": "tsx src/agreement.ts",
     "redteam": "tsx src/redteam/cli.ts",
+    "redteam:schema": "tsx src/redteam/write-schema.ts",
     "evolve": "tsx src/evolve/cli.ts"
   },
   "dependencies": {

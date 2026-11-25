@@ -13,6 +13,8 @@ export const LESSON_KINDS = [
   "step_slow",
   "source",
   "tool",
+  "sandbox",
+  "approval",
 ] as const;
 export const LessonKindSchema = z.enum(LESSON_KINDS);
 export type LessonKind = z.infer<typeof LessonKindSchema>;
@@ -94,12 +96,74 @@ function firstSegment(raw: string): string {
   }
 }
 
+export const GOAL_CATEGORIES = {
+  competitors: [
+    "competitor",
+    "competition",
+    "rival",
+    "alternative",
+    "versus",
+    "compare",
+    "benchmark",
+  ],
+  growth: [
+    "growth",
+    "sales",
+    "revenue",
+    "lead",
+    "customer",
+    "market",
+    "pricing",
+    "acquisition",
+    "churn",
+  ],
+  automation: ["automate", "automation", "workflow", "process", "efficiency", "agent", "manual"],
+  engineering: [
+    "code",
+    "repo",
+    "repository",
+    "bug",
+    "test",
+    "api",
+    "engineering",
+    "technical",
+    "architecture",
+  ],
+  hiring: ["hire", "hiring", "recruit", "talent", "team", "job", "role"],
+  risk: ["risk", "security", "compliance", "regulation", "legal", "privacy", "gdpr"],
+  research: ["research", "understand", "learn", "overview", "analyse", "analyze", "investigate"],
+} as const satisfies Record<string, readonly string[]>;
+
+export type GoalCategory = keyof typeof GOAL_CATEGORIES | "general";
+
+export function goalCategory(goal: string): GoalCategory {
+  const words = new Set(goal.toLowerCase().match(/[a-z]+/g) ?? []);
+  let best: GoalCategory = "general";
+  let bestHits = 0;
+  for (const [category, stems] of Object.entries(GOAL_CATEGORIES) as [
+    keyof typeof GOAL_CATEGORIES,
+    readonly string[],
+  ][]) {
+    const hits = stems.filter((stem) =>
+      [...words].some((word) => word === stem || word.startsWith(stem)),
+    ).length;
+    if (hits > bestHits) {
+      best = category;
+      bestHits = hits;
+    }
+  }
+  return best;
+}
+
 export function playbookKey(missionId: string, input: unknown): string {
   const mission = safeIdent(missionId)?.replace(/[_.]/g, "-") ?? "mission";
   const category = z.object({ category: z.string() }).safeParse(input);
+  const goal = z.object({ goal: z.string() }).safeParse(input);
   const suffix = category.success
     ? safeIdent(category.data.category)?.replace(/[_.]/g, "-")
-    : undefined;
+    : goal.success
+      ? goalCategory(goal.data.goal)
+      : undefined;
   const key = suffix === undefined ? mission : `${mission}:${suffix}`;
   return PlaybookKeySchema.safeParse(key).success ? key : mission;
 }
@@ -146,9 +210,16 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-function inputUrl(input: unknown): string | undefined {
+function siteRoot(input: unknown): string | undefined {
   const parsed = z.object({ url: z.string() }).safeParse(input);
-  return parsed.success ? parsed.data.url : undefined;
+  if (!parsed.success) return undefined;
+  try {
+    return new URL(parsed.data.url).pathname.replace(/\/+$/, "") === ""
+      ? parsed.data.url
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function runSuccess(events: readonly LoggedEvent[], graderScore?: number): number {
@@ -325,7 +396,7 @@ function slowSteps(events: readonly LoggedEvent[]): Lesson[] {
 }
 
 function sources(events: readonly LoggedEvent[], frame: RunFrame): Lesson[] {
-  const own = safeHost(inputUrl(frame.input));
+  const own = safeHost(siteRoot(frame.input));
   const latest = new Map<string, { kind: string; content: unknown }>();
   for (const event of events) {
     if (event.type === "artifact.created")
@@ -400,10 +471,50 @@ function tools(events: readonly LoggedEvent[]): Lesson[] {
   });
 }
 
+function sandbox(events: readonly LoggedEvent[]): Lesson[] {
+  const stats = new Map<string, { runs: number; failed: number; timedOut: number }>();
+  for (const event of events) {
+    if (event.type !== "sandbox.command") continue;
+    const purpose = event.payload.purpose;
+    const current = stats.get(purpose) ?? { runs: 0, failed: 0, timedOut: 0 };
+    stats.set(purpose, {
+      runs: current.runs + 1,
+      failed: current.failed + (event.payload.exitCode === 0 ? 0 : 1),
+      timedOut: current.timedOut + (event.payload.timedOut ? 1 : 0),
+    });
+  }
+  return [...stats.entries()].flatMap(([purpose, value]) => {
+    if (value.failed === 0) return [];
+    const made = lesson({
+      key: `sandbox:${purpose}:failing`,
+      kind: "sandbox",
+      polarity: "avoid",
+      text: `Sandbox ${purpose} commands failed ${value.failed} of ${plural(value.runs, "run")}${value.timedOut > 0 ? ` (${value.timedOut} timed out)` : ""}.`,
+    });
+    return made === undefined ? [] : [made];
+  });
+}
+
+function approvals(events: readonly LoggedEvent[]): Lesson[] {
+  const rejected = events.filter(
+    (event) => event.type === "ship.approval.decided" && event.payload.decision === "rejected",
+  ).length;
+  if (rejected === 0) return [];
+  const made = lesson({
+    key: "approval:ship_rejected",
+    kind: "approval",
+    polarity: "avoid",
+    text: `The reviewer rejected the proposed change${rejected === 1 ? "" : ` ${rejected} times`}.`,
+  });
+  return made === undefined ? [] : [made];
+}
+
 export function extractLessonCandidates(events: readonly LoggedEvent[], frame: RunFrame): Lesson[] {
   const all = [
     ...planShape(events),
     ...failures(events),
+    ...approvals(events),
+    ...sandbox(events),
     ...critic(events),
     ...fallbacks(events),
     ...slowSteps(events),

@@ -67,15 +67,15 @@ Checked numerically and enforced by `src/styles/tokens.test.ts` (text pairs ≥ 
 
 Skip link to `#main`; `header`, `nav`, `main` and `footer` landmarks; one `h1` per page with an ordered heading outline; visible `:focus-visible` rings on every interactive element; the command palette is a native modal `<dialog>` (background inert, focus kept in the search field, Escape and backdrop close, focus restored) with the combobox/listbox pattern and arrow, Home and End navigation; the detected mission is announced through a polite live region.
 
-## Model chain status
+## Home pipeline strip
 
-The home page reads `config/models.json` at build time (`src/lib/model-chain-file.ts`, validated with zod in `src/lib/model-chain.ts`) and lists the keyless providers a public visitor would use. It shows configuration only: no health checks or latency until `pnpm smoke` exists. If the file is missing or invalid, the line says so.
+Under the mission input, `src/components/run-pipeline.tsx` shows what pressing Run does: plan, your approval, agents in parallel, every citation checked, deliverable. A highlight walks the five stages only when `prefers-reduced-motion` allows it. The one number it shows, attacks blocked, is read at build time from the committed `packages/evals/results/redteam.json` and validated with zod; if the file is missing or malformed the number is left out.
 
 ## Runs: storage, sessions and streaming (ADR 0005)
 
 | Route | Purpose |
 |---|---|
-| `POST /api/runs` | `{ missionId: "company-xray", input: { url, focus? } }` → `201 { runId }`. Same-origin `Origin` required (CSRF), JSON only, 8 KB cap. The URL is normalised to its `https://host/` homepage; IP literals, ports, credentials and local suffixes (`localhost`, `.local`, `.internal`, `.arpa`, …) are rejected. Rate limited per guest (5/hour) and per client IP (20/hour), in memory per process; Upstash replaces this later. |
+| `POST /api/runs` | `{ missionId: "company-xray", input: { url, focus? } }` (or `{ missionId: "custom-goal", input: { goal, url? } }`) → `201 { runId }`. Same-origin `Origin` required (CSRF), JSON only, 8 KB cap. The URL is normalised to its `https://host/` homepage; IP literals, ports, credentials and local suffixes (`localhost`, `.local`, `.internal`, `.arpa`, …) are rejected. Rate limited per guest (5/hour) and per client IP (20/hour), in memory per process; Upstash replaces this later. |
 | `GET /api/runs/:id` | Run summary (status, totals, timestamps) for the session's workspace. |
 | `GET /api/runs/:id/events` | Server-Sent Events. Replays events after `Last-Event-ID` (or `?after=`), then polls every 250 ms until terminal or disconnect. `id` = seq, `event` = type, `data` = the event JSON; control frames `stream.replay {count}`, `stream.live`, `stream.end`; heartbeat comments every 15 s. `204` once a terminal run is fully delivered, so `EventSource` stops reconnecting. |
 | `POST /api/runs/:id/cancel` | Appends `run.failed` (`cancelled`, "cancelled by user") and aborts the in-process runner. `409` when the run already finished. |

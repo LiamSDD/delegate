@@ -28,6 +28,15 @@ export {
   type ResolveDns,
 } from "./tools/fetch";
 export { classifyAddress, isIpLiteral } from "./tools/ip";
+export { runShipAPr, type ShipAPrDependencies } from "./missions/ship-a-pr/run";
+export { createLocalSandboxProvider } from "./sandbox/local";
+export { isProtectedPath } from "./sandbox/paths";
+export {
+  type FileChange,
+  type GitHubAppClient,
+  type PullRequestChange,
+  type RepoSession,
+} from "./github/app";
 export { createPinnedFetch } from "./tools/node-fetch";
 export {
   defineTool,

@@ -38,6 +38,7 @@ export interface PlannedMission {
   defaultPlan: readonly PlanStep[];
   clock: MissionClock;
   finish: (outcome: OrchestrationResult) => Promise<MissionFinish>;
+  fixedPlan?: string;
 }
 
 export interface ResumePoint extends OrchestratorResume {
@@ -125,7 +126,10 @@ export async function runPlannedMission(
     if (resume === undefined) {
       if (playbook !== undefined)
         await emit({ runId, type: "playbook.applied", payload: playbook });
-      const planner = plannerUsable(ctx);
+      const planner =
+        mission.fixedPlan === undefined
+          ? plannerUsable(ctx)
+          : { usable: false, reason: mission.fixedPlan };
       const proposed = await proposePlan(ctx, {
         mission: plannerMission,
         defaultPlan: mission.defaultPlan,
@@ -229,6 +233,7 @@ export async function runPlannedMission(
         ? {}
         : { resume: { completed: resume.completed, failed: resume.failed } }),
       replan: async (state) => {
+        if (mission.fixedPlan !== undefined) return null;
         if (!plannerUsable(ctx).usable || !mission.clock.fits(["planner"])) return null;
         return revisePlan(ctx, { mission: plannerMission, prompt: options.plannerPrompt, state });
       },

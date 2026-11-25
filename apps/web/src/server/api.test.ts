@@ -3,11 +3,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   type ApiDeps,
+  CreateRunRequestSchema,
   handleCancelRun,
   handleCreateRun,
   handleGetArtifact,
   handleGetRun,
   handleRunEvents,
+  missionInput,
 } from "./api";
 import { type AppDatabase, createPgliteAppDatabase } from "./db";
 import { createFakeRunner } from "./fake-runner";
@@ -102,6 +104,24 @@ describe("POST /api/runs", () => {
     expect(d.tasks).toHaveLength(1);
   });
 
+  it("starts a Repo X-ray from a GitHub URL and keeps a tree ref", async () => {
+    const d = deps();
+    const response = await handleCreateRun(
+      post({ missionId: "repo-xray", input: { url: "github.com/pallets/click/tree/8.1.x" } }),
+      d,
+    );
+    expect(response.status).toBe(201);
+    expect(d.tasks).toHaveLength(1);
+    const request = CreateRunRequestSchema.parse({
+      missionId: "repo-xray",
+      input: { url: "https://github.com/sindresorhus/ky", ref: "v1.0.0" },
+    });
+    expect(missionInput(request, "https://github.com/sindresorhus/ky", undefined)).toEqual({
+      url: "https://github.com/sindresorhus/ky",
+      ref: "v1.0.0",
+    });
+  });
+
   it("rejects cross-origin and origin-less requests (CSRF)", async () => {
     const d = deps();
     const evil = await handleCreateRun(post(validBody, { origin: "https://evil.example" }), d);
@@ -120,7 +140,18 @@ describe("POST /api/runs", () => {
     const d = deps();
     const cases: [unknown, number, string][] = [
       ["{not json", 400, "invalid_json"],
-      [{ missionId: "repo-xray", input: { url: "acme.com" } }, 400, "invalid_request"],
+      [{ missionId: "repo-xray", input: { url: "acme.com" } }, 400, "invalid_url"],
+      [{ missionId: "ship-a-pr", input: { url: "github.com/a/b" } }, 400, "invalid_request"],
+      [
+        { missionId: "company-xray", input: { url: "acme.com", ref: "main" } },
+        400,
+        "invalid_request",
+      ],
+      [
+        { missionId: "repo-xray", input: { url: "github.com/a/b", ref: "../x" } },
+        400,
+        "invalid_request",
+      ],
       [{ missionId: "company-xray", input: { url: "acme.com", extra: 1 } }, 400, "invalid_request"],
       [{ missionId: "company-xray", input: { url: "http://127.0.0.1" } }, 400, "invalid_url"],
       [{ missionId: "company-xray", input: { url: "localhost" } }, 400, "invalid_url"],
@@ -205,6 +236,48 @@ describe("POST /api/runs", () => {
       d,
     );
     expect(stray.status).toBe(400);
+  });
+
+  it("starts a live custom-goal run from free text, the path /runs/new takes", async () => {
+    let scheduled: { missionId: string; input: Record<string, unknown> } | undefined;
+    const runner: MissionRunner = (args) => {
+      scheduled = { missionId: args.missionId, input: args.input };
+      return Promise.resolve({ status: "completed" });
+    };
+    const d = deps({ runner: () => ({ execution: "live", run: runner }) });
+    const goal = "I want to achieve nike's marketing and agentic work";
+    const response = await handleCreateRun(post({ missionId: "custom-goal", input: { goal } }), d);
+    expect(response.status).toBe(201);
+    const { runId } = (await response.json()) as { runId: string };
+    const cookie = cookieFrom(response);
+    const summary = await handleGetRun(get(`/api/runs/${runId}`, cookie), runId, d);
+    expect(await summary.json()).toMatchObject({
+      run: { mission: "custom-goal", input: { goal }, target: goal },
+    });
+    expect(d.tasks).toHaveLength(1);
+    await d.tasks[0]?.();
+    expect(scheduled).toEqual({ missionId: "custom-goal", input: { goal } });
+  });
+
+  it("validates custom-goal requests", async () => {
+    const d = deps();
+    const cases: [unknown, number, string][] = [
+      [{ missionId: "custom-goal", input: {} }, 400, "invalid_request"],
+      [{ missionId: "custom-goal", input: { goal: "hi" } }, 400, "invalid_request"],
+      [{ missionId: "custom-goal", input: { goal: "Grow", focus: "x" } }, 400, "invalid_request"],
+      [{ missionId: "custom-goal", input: { goal: "Grow", url: "localhost" } }, 400, "invalid_url"],
+      [{ missionId: "company-xray", input: {} }, 400, "invalid_request"],
+    ];
+    for (const [body, status, code] of cases) {
+      const response = await handleCreateRun(post(body), d);
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ error: { code } });
+    }
+    const withUrl = await handleCreateRun(
+      post({ missionId: "custom-goal", input: { goal: "Grow EU sales", url: "acme.com" } }),
+      d,
+    );
+    expect(withUrl.status).toBe(201);
   });
 
   it("rate limits run creation per guest", async () => {
