@@ -66,7 +66,9 @@ try {
   writeFileSync(outFile, `${lines.join("\n")}\n`, { mode: 0o600 });
   process.stdout.write("Database ready.\n");
 } catch (error) {
-  console.error(`\nSetup failed: ${error instanceof Error ? error.message : String(error)}`);
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
+  const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
+  console.error(`\nSetup failed: ${message}${cause === "" ? "" : `\nPostgres said: ${cause}`}`);
   process.exitCode = 1;
 } finally {
   await pool.end();

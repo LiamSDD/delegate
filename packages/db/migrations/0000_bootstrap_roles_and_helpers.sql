@@ -22,7 +22,7 @@ $$;
 --> statement-breakpoint
 GRANT delegate_app TO delegate_app_login;
 --> statement-breakpoint
-GRANT delegate_definer TO CURRENT_USER;
+GRANT delegate_definer TO CURRENT_USER WITH INHERIT FALSE, SET TRUE;
 --> statement-breakpoint
 GRANT USAGE ON SCHEMA public TO delegate_app, delegate_definer, delegate_maintenance;
 --> statement-breakpoint
