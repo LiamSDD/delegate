@@ -1,4 +1,5 @@
 import {
+  API_BASE_PATH,
   buildOpenApiDocument,
   IDEMPOTENCY_KEY_HEADER,
   IDEMPOTENCY_REPLAYED_HEADER,
@@ -121,8 +122,15 @@ async function serialise<Id extends AuthenticatedOperationId>(
   };
 }
 
-export async function handleV1<Id extends AuthenticatedOperationId>(
+function runOperation<Id extends AuthenticatedOperationId>(
   id: Id,
+  context: V1Context<Id>,
+): Promise<JsonReply | Response> {
+  return HANDLERS[id](context).then((result) => serialise(id, result));
+}
+
+export async function handleV1(
+  id: AuthenticatedOperationId,
   request: Request,
   rawParams: Record<string, string> | undefined,
   deps: V1Deps,
@@ -159,8 +167,8 @@ export async function handleV1<Id extends AuthenticatedOperationId>(
       params: spec.params === undefined ? undefined : parsed(spec.params, rawParams, "path"),
       query: spec.query === undefined ? undefined : parsed(spec.query, queryRecord(url), "query"),
       body: parseBody(request, spec, text),
-    } as V1Context<Id>;
-    const execute = async () => serialise(id, await HANDLERS[id](context));
+    } as V1Context<AuthenticatedOperationId>;
+    const execute = () => runOperation(id, context);
     const key = spec.idempotencyKey ? idempotencyKeyOf(request) : null;
     if (key === null) {
       const reply = await execute();
@@ -198,11 +206,28 @@ export async function handleV1<Id extends AuthenticatedOperationId>(
 
 export const OPENAPI_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=86400";
 
+const openApi: { json?: string } = {};
+
 export function handleOpenApi(): Response {
-  return Response.json(buildOpenApiDocument(), {
+  openApi.json ??= JSON.stringify(buildOpenApiDocument());
+  return new Response(openApi.json, {
     headers: {
+      "Content-Type": "application/json",
       "Cache-Control": OPENAPI_CACHE_CONTROL,
       [REQUEST_ID_HEADER]: newRequestId(),
     },
   });
+}
+
+const UNKNOWN_ROUTE_ECHO_MAX_CHARS = 120;
+
+export function handleUnknownRoute(request: Request): Response {
+  const path = new URL(request.url).pathname.slice(0, UNKNOWN_ROUTE_ECHO_MAX_CHARS);
+  return errorResponse(
+    newRequestId(),
+    new V1Error(
+      "not_found",
+      `No v1 operation answers ${request.method} ${path}. The operations are listed in ${API_BASE_PATH}/openapi.json.`,
+    ),
+  );
 }
