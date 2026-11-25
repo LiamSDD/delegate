@@ -35,6 +35,10 @@ const pool = new Pool({ connectionString: ownerUrl });
 try {
   process.stdout.write("Running migrations…\n");
   await migrate(drizzle({ client: pool }), { migrationsFolder });
+  if (process.env.DELEGATE_MIGRATE_ONLY === "1") {
+    process.stdout.write("Migrations applied. Vercel variables unchanged.\n");
+    process.exit(0);
+  }
 
   const password = randomBytes(24).toString("hex");
   await pool.query(`ALTER ROLE delegate_app_login PASSWORD '${password}'`);
