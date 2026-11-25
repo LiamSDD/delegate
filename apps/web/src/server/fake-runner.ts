@@ -1,4 +1,4 @@
-import type { PlanStep } from "@delegate/runtime";
+import { foldRun, type PlanStep, type RunEvent } from "@delegate/runtime";
 import { z } from "zod";
 
 import type { Brief } from "@/lib/runs/brief";
@@ -299,9 +299,42 @@ export function simulatedScript(runId: string, homepage: string): EventDraft[] {
   ];
 }
 
+function succeededSteps(events: readonly RunEvent[]): Set<string> {
+  const done = new Set<string>();
+  for (const event of events) {
+    if (event.type === "step.started") done.delete(event.stepId);
+    if (event.type === "step.completed" && event.payload.outcome === "succeeded")
+      done.add(event.stepId);
+  }
+  return done;
+}
+
+export function resumedScript(
+  runId: string,
+  missionId: string,
+  homepage: string,
+  resumeFrom: readonly RunEvent[],
+): EventDraft[] {
+  const done = succeededSteps(resumeFrom);
+  const steps = foldRun(resumeFrom).plan?.steps;
+  const script =
+    missionId === "company-xray"
+      ? simulatedScript(runId, homepage)
+      : auditScript(
+          runId,
+          homepage,
+          { decision: "approved", ...(steps === undefined ? {} : { steps }) },
+          true,
+        );
+  return script.filter(
+    (draft) =>
+      !draft.type.startsWith("plan.") && (draft.stepId === undefined || !done.has(draft.stepId)),
+  );
+}
+
 export function createFakeRunner(options: { delayMs?: number } = {}): MissionRunner {
   const delayMs = options.delayMs ?? 450;
-  return async ({ runId, missionId, input, emit, signal, awaitPlanApproval }) => {
+  return async ({ runId, missionId, input, emit, signal, awaitPlanApproval, resumeFrom }) => {
     const { url } = inputSchema.parse(input);
     const play = async (drafts: readonly EventDraft[]) => {
       for (const draft of drafts) {
@@ -311,6 +344,11 @@ export function createFakeRunner(options: { delayMs?: number } = {}): MissionRun
       }
       return true;
     };
+    if (resumeFrom !== undefined) {
+      return (await play(resumedScript(runId, missionId, url, resumeFrom)))
+        ? { status: "completed" }
+        : { status: "failed" };
+    }
     if (missionId === "company-xray") {
       return (await play(simulatedScript(runId, url)))
         ? { status: "completed" }

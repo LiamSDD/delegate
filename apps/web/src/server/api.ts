@@ -1,3 +1,4 @@
+import { MAX_FORK_OBJECTIVE_CHARS } from "@delegate/runtime";
 import { z } from "zod";
 
 import { RUNNABLE_MISSION_IDS } from "@/lib/m2-contract";
@@ -8,6 +9,7 @@ import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
 import type { AppDatabase } from "./db";
 import { reviveOrSweep } from "./durable";
 import { executeRun } from "./execute-run";
+import { createForkRecord, planRunFork } from "./fork";
 import { createDbLease } from "./leases";
 import type { MissionRunner } from "./mission-runner";
 import { pendingPlanApproval, PlanDecisionError, recordPlanDecision } from "./plan-approval";
@@ -20,6 +22,7 @@ import {
   getRunRecord,
   isTerminalEventType,
   missionInputOf,
+  readAllEvents,
   readEvents,
   RunAlreadyTerminalError,
   type RunRecord,
@@ -61,6 +64,8 @@ export type ApiErrorCode =
   | "no_pending_plan"
   | "invalid_plan"
   | "forbidden"
+  | "run_not_finished"
+  | "invalid_step"
   | "unavailable"
   | "internal";
 
@@ -123,6 +128,13 @@ export const PlanDecisionRequestSchema = z.discriminatedUnion("decision", [
 ]);
 
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>;
+
+export const ForkRunRequestSchema = z.strictObject({
+  stepId: z.string().trim().min(1).max(120),
+  objective: z.string().trim().min(1).max(MAX_FORK_OBJECTIVE_CHARS).optional(),
+});
+
+export type ForkRunRequest = z.infer<typeof ForkRunRequestSchema>;
 
 function forwardedHost(request: Request): string | null {
   const forwarded = request.headers.get("x-forwarded-host");
@@ -496,4 +508,87 @@ export async function handlePlanDecision(
     { decision: details.decision, edited: "steps" in details && details.steps !== undefined },
     { headers: NO_STORE },
   );
+}
+
+function isRunnableMission(mission: string): mission is (typeof RUNNABLE_MISSION_IDS)[number] {
+  return (RUNNABLE_MISSION_IDS as readonly string[]).includes(mission);
+}
+
+export async function handleForkRun(
+  request: Request,
+  runId: string,
+  deps: ApiDeps,
+): Promise<Response> {
+  if (!isSameOrigin(request)) {
+    return apiError(403, "forbidden_origin", "Cross-origin requests cannot fork runs.");
+  }
+  const body = await readJson(request);
+  if (body instanceof Response) return body;
+  const parsed = ForkRunRequestSchema.safeParse(body.value);
+  if (!parsed.success) {
+    return apiError(400, "invalid_request", "The fork request is not valid.", {
+      issues: parsed.error.issues.map(
+        (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
+      ),
+    });
+  }
+  const ipQuota = deps.ipLimiter.take(clientIp(request));
+  if (!ipQuota.ok) {
+    return apiError(429, "rate_limited", "Too many demo runs from this network. Try again later.", {
+      headers: { "Retry-After": retryAfterSeconds(ipQuota.retryAfterMs) },
+    });
+  }
+  try {
+    const guest = await guestFor(request, deps);
+    if (guest === null) return notFound();
+    const { app, session } = guest;
+    const parent = await getRunRecord(app, session.userId, runId);
+    if (parent?.workspaceId !== session.workspaceId) return notFound();
+    const quota = deps.guestLimiter.take(session.userId);
+    if (!quota.ok) {
+      return apiError(429, "rate_limited", "Demo runs are limited per hour. Try again later.", {
+        headers: { "Retry-After": retryAfterSeconds(quota.retryAfterMs) },
+      });
+    }
+    const missionId = parent.mission;
+    if (!isRunnableMission(missionId)) {
+      return apiError(400, "invalid_request", "This mission cannot be forked.");
+    }
+    const started = Date.now();
+    const fork = planRunFork(await readAllEvents(app, session.userId, parent.id), parsed.data);
+    if (!fork.ok) {
+      return fork.reason === "run_not_finished"
+        ? apiError(409, "run_not_finished", fork.message)
+        : apiError(400, "invalid_step", fork.message);
+    }
+    const runner = deps.runner();
+    const created = await createForkRecord(app, session, parent, fork, runner.execution);
+    const ctx = { runId: created.runId, workspaceId: session.workspaceId, userId: session.userId };
+    deps.schedule(() =>
+      executeRun({
+        app,
+        ctx,
+        missionId,
+        input: missionInputOf(parent.input),
+        runner: runner.run,
+        registry: deps.registry,
+        resumeFrom: created.events,
+        ...(runner.execution === "live" ? { lease: createDbLease(app, ctx) } : {}),
+      }),
+    );
+    return Response.json(
+      {
+        runId: created.runId,
+        parentRunId: parent.id,
+        stepId: fork.stepId,
+        seededEvents: created.origin.seededThrough - 1,
+        reusedSteps: fork.reusedSteps,
+        seedMs: Date.now() - started,
+      },
+      { status: 201, headers: NO_STORE },
+    );
+  } catch (error: unknown) {
+    console.error("fork run failed", runId, error);
+    return apiError(500, "internal", "The run could not be forked.");
+  }
 }
