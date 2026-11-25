@@ -143,7 +143,7 @@ export function githubAppFromEnv(
 export const RUNTIME_PROMPT_FILES = {
   reader: "quarantine-reader.v1.md",
   researcher: "company-xray.researcher.v1.md",
-  synthesis: "company-xray.synthesis.v1.md",
+  synthesis: "company-xray.synthesis.v2.md",
   planner: "planner.v2.md",
   critic: "critic.v2.md",
   editor: "editor.v2.md",

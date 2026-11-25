@@ -9,13 +9,14 @@ export const XRAY_STEP_IDS = {
   read: RESEARCH_STEP_IDS.read,
   gaps: RESEARCH_STEP_IDS.gaps,
   synthesise: "synthesise",
+  deepen: "deepen_research",
   critic: "critic",
 } as const;
 
 export const XRAY_PLAN_VERSION = 1;
 
 export const XRAY_PLANNING_HINTS =
-  "Research the company's own site first; Wikipedia/GitHub lookups and reading the site through the quarantined reader can then run in parallel. Fill gaps only for topics with no evidence. Synthesis writes the brief from quarantined facts; the critic verifies every claim against its quotes and removes what stays unsupported. If the user gives a focus, mention it in the objectives of the steps it affects.";
+  "Research the company's own site first; Wikipedia/GitHub lookups and reading the site through the quarantined reader can then run in parallel. Fill gaps only for topics with no evidence. Synthesis writes the brief from quarantined facts; deepen_research then runs gap analysis on thin sections and redrafts while time allows; the critic verifies every claim against its quotes and whether it is about the company, and removes what stays unsupported. If the user gives a focus, mention it in the objectives of the steps it affects.";
 
 export const XRAY_PLAN: readonly PlanStep[] = [
   {
@@ -73,17 +74,30 @@ export const XRAY_PLAN: readonly PlanStep[] = [
     inputs: [XRAY_STEP_IDS.gaps],
     capabilities: [CAPABILITIES.artifactWrite],
     acceptance: [
-      "Every claim cites at least one fetched source",
+      "Every claim cites at least one fetched source and is about the company",
       "Sections without evidence say so instead of guessing",
     ],
-    budgetShare: 0.3,
+    budgetShare: 0.22,
+  },
+  {
+    id: XRAY_STEP_IDS.deepen,
+    role: "researcher",
+    objective:
+      "Follow up unread pages, the feed, GitHub and Wikipedia for sections with too few supported claims and redraft the brief, for at most two rounds within the time target.",
+    inputs: [XRAY_STEP_IDS.synthesise],
+    capabilities: [CAPABILITIES.webFetch, CAPABILITIES.artifactWrite],
+    acceptance: [
+      "Follow-ups are chosen only from leads the runtime found; new pages are read in quarantine",
+      "Each round is recorded with its thin sections, leads and coverage",
+    ],
+    budgetShare: 0.08,
   },
   {
     id: XRAY_STEP_IDS.critic,
     role: "critic",
     objective:
       "Check every claim against its cited quotes, send unsupported ones to the editor, remove what stays unsupported.",
-    inputs: [XRAY_STEP_IDS.synthesise],
+    inputs: [XRAY_STEP_IDS.deepen],
     capabilities: [CAPABILITIES.artifactWrite],
     acceptance: [
       "Every remaining claim is supported by its cited quotes",

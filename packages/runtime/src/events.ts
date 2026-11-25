@@ -224,6 +224,14 @@ export const ResearchReportSchema = z.object({
 });
 export type ResearchReport = z.infer<typeof ResearchReportSchema>;
 
+export const DeliverableVerificationSchema = z.object({
+  citationAccuracy: z.number().min(0).max(1).nullable(),
+  publishedAccuracy: z.number().min(0).max(1).nullable().optional(),
+  specificity: SpecificityReportSchema,
+  research: ResearchReportSchema.optional(),
+});
+export type DeliverableVerification = z.infer<typeof DeliverableVerificationSchema>;
+
 export const SANDBOX_COMMAND_PURPOSES = [
   "setup",
   "clone",

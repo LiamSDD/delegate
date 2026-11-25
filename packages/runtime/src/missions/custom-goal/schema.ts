@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { keptParts, type CriticClaim, type KeptClaim } from "../../agent/critic";
-import { ResearchReportSchema, SpecificityReportSchema } from "../../events";
+import { DeliverableVerificationSchema } from "../../events";
 import { SourceRecordSchema } from "../../tools/sources";
 import { BriefSourceSchema, ClaimSchema, SourceMixSchema, type Claim } from "../company-xray/brief";
 
@@ -91,12 +91,7 @@ export interface GoalSections {
 
 export const CONTEXT_LINES = 2;
 
-export const GoalVerificationSchema = z.object({
-  citationAccuracy: z.number().min(0).max(1).nullable(),
-  publishedAccuracy: z.number().min(0).max(1).nullable().optional(),
-  specificity: SpecificityReportSchema,
-  research: ResearchReportSchema.optional(),
-});
+export const GoalVerificationSchema = DeliverableVerificationSchema;
 export type GoalVerification = z.infer<typeof GoalVerificationSchema>;
 
 export const GoalCompanySchema = z.object({
