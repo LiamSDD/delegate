@@ -6,7 +6,8 @@ import { type RunMissionOptions, type RunMissionResult } from "@delegate/runtime
 import { describe, expect, it } from "vitest";
 
 import { fixtureBrief, xrayFixtureEvents, type FixtureOptions } from "./testing/xray-fixture";
-import { runEval, type RunEvalDeps, type RunEvalOptions } from "./runner";
+import { EvalResultFileSchema, scoreboard } from "./results";
+import { resultFilePath, runEval, type RunEvalDeps, type RunEvalOptions } from "./runner";
 
 const verdict = JSON.stringify({
   accuracy: { score: 4, rationale: "ok" },
@@ -91,6 +92,23 @@ describe("runEval", () => {
     expect(existsSync(join(runDir, "zed", "1.judge.json"))).toBe(true);
     expect(readFileSync(join(runDir, "summary.md"), "utf8")).toContain("No human labels yet");
     expect(existsSync(join(dir, "baseline.json"))).toBe(false);
+    const file = EvalResultFileSchema.parse(
+      JSON.parse(readFileSync(resultFilePath(dir, summary), "utf8")) as unknown,
+    );
+    expect(resultFilePath(dir, summary)).toBe(join(dir, "xray", `${summary.id}.json`));
+    expect(file).toMatchObject({
+      mission: "xray",
+      mode: "live",
+      trialsPerCase: 2,
+      dataset: { name: "company-xray", version: 1 },
+      agreement: { status: "no_human_labels" },
+    });
+    expect(file.cases.map((entry) => entry.trials.length)).toEqual([2, 2]);
+    expect(file.promptVersions).toMatchObject({ "xray-judge": 1 });
+    const board = scoreboard(file);
+    expect(board.passRate).toMatchObject({ rate: 1, n: 4 });
+    expect(board.citationAccuracy).toMatchObject({ rate: 1, n: 4 });
+    expect(board.judge?.n).toBe(4);
   });
 
   it("replays stored event logs offline with the same deterministic grades", async () => {

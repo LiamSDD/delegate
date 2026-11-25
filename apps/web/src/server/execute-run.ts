@@ -1,5 +1,5 @@
 import { holdLease, type RunLease } from "@delegate/runtime/server";
-import type { RunEvent } from "@delegate/runtime";
+import { redactPii, type RunEvent } from "@delegate/runtime";
 
 import type { AppDatabase } from "./db";
 import type { RunnableMissionId } from "@/lib/m2-contract";
@@ -17,9 +17,12 @@ import {
 
 const MAX_ERROR_MESSAGE = 300;
 
-function publicMessage(error: unknown): string {
-  const text = error instanceof Error ? error.message : "Unknown error";
-  return text.length > MAX_ERROR_MESSAGE ? `${text.slice(0, MAX_ERROR_MESSAGE)}…` : text;
+function publicError(error: unknown): { message: string; redactions: number } {
+  const { text, count } = redactPii(error instanceof Error ? error.message : "Unknown error");
+  return {
+    message: text.length > MAX_ERROR_MESSAGE ? `${text.slice(0, MAX_ERROR_MESSAGE)}…` : text,
+    redactions: count,
+  };
 }
 
 export interface ExecuteRunOptions {
@@ -46,7 +49,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
     );
     if (!held.acquired) console.warn("run lease held by another worker", options.ctx.runId);
   } catch (error: unknown) {
-    console.error("run lease failed", options.ctx.runId, error);
+    console.error("run lease failed", options.ctx.runId, publicError(error).message);
   }
 }
 
@@ -105,10 +108,14 @@ async function executeHeld(
     }
   } catch (error: unknown) {
     if (!progress.terminal && !signal.aborted && !(error instanceof RunAlreadyTerminalError)) {
-      console.error("run failed", ctx.runId, error);
+      const { message, redactions } = publicError(error);
+      console.error("run failed", ctx.runId, message);
       await finish({
         type: "run.failed",
-        payload: { error: { code: "runtime_error", message: publicMessage(error) } },
+        payload: {
+          error: { code: "runtime_error", message },
+          ...(redactions === 0 ? {} : { redactions }),
+        },
       });
     }
   } finally {

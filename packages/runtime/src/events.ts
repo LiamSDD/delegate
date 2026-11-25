@@ -27,6 +27,7 @@ export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
 
 const id = z.string().min(1);
 const tokenCount = z.number().int().nonnegative();
+const redactionCount = z.number().int().positive().optional();
 export const MicroUsdSchema = z.number().int().nonnegative();
 
 export const AGENT_ROLES = [
@@ -233,6 +234,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       durationMs: z.number().int().nonnegative(),
       artifactId: id.optional(),
       error: z.string().optional(),
+      redactions: redactionCount,
     }),
   ),
   event(
@@ -243,6 +245,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
       decision: PolicyDecisionKindSchema,
       policyId: id,
       reason: z.string().min(1),
+      redactions: redactionCount,
     }),
   ),
   event(
@@ -307,7 +310,13 @@ export const RunEventSchema = z.discriminatedUnion("type", [
     }),
   ),
   event("run.completed", z.object({ summary: z.string() })),
-  event("run.failed", z.object({ error: z.object({ code: id, message: z.string() }) })),
+  event(
+    "run.failed",
+    z.object({
+      error: z.object({ code: id, message: z.string() }),
+      redactions: redactionCount,
+    }),
+  ),
   event("model.fallback", ModelFallbackPayloadSchema),
 ]);
 

@@ -13,3 +13,4 @@ export * from "./runner";
 export * from "./redteam/schema";
 export * from "./redteam/report";
 export { HarnessError, runCase, runSuite, type CaseOutcome } from "./redteam/runner";
+export * from "./results";

@@ -33,7 +33,7 @@ Delegate lets models read untrusted content and take actions with tools. The des
 | **Tenant isolation.** RLS on every tenant table; the app connects as a role without `BYPASSRLS`; `app.user_id` is set per transaction. | `packages/db` | Tests that query across workspaces and expect zero rows |
 | **Append-only logs.** `run_events` and `audit_log` have no UPDATE/DELETE grants. | `packages/db` migrations | Migration tests |
 | **Secrets.** Env or a secret manager only; never sent to models, never logged; BYOK keys encrypted at rest; `.env.example` lists names only. | Config + logging | Secret-scanning hook and CI |
-| **Privacy.** PII detection and redaction in traces and logs; public demo runs deleted after 7 days, stated in the UI. | `packages/runtime/src/privacy` | Unit tests; retention job tests |
+| **Privacy.** PII redaction (emails, phone numbers, Luhn-valid card numbers, mod-97-valid IBANs) on tool output summaries, tool errors, policy reasons and run failure messages before they reach `run_events` or server logs; public demo runs deleted after 7 days, stated in the UI. See [PII redaction](#pii-redaction). | `packages/runtime/src/privacy/redact.ts`, applied in `agent/emitter.ts` | `privacy/redact.test.ts` (positive and false-positive tables); retention job tests |
 | **Provider data policies.** Free providers differ: Groq (zero data retention can be enabled), Cerebras and Cloudflare (no training on customer data, per their docs), NVIDIA trial terms, OpenRouter per upstream provider. Workspaces can restrict providers by data classification; `confidential` content only goes to allowlisted providers or BYOK. | `config/models.json` + policy engine | Policy tests per classification |
 | **Spend limits.** Per-step token budgets, per-run and per-day caps, guest quotas in Redis. | Orchestrator + policy | Budget tests |
 
@@ -53,6 +53,22 @@ Delegate lets models read untrusted content and take actions with tools. The des
 | T10 | Secret leakage | Keys appear in prompts, traces or logs | Secret scanning, redaction, keys never placed in prompts | Low |
 | T11 | Supply chain | Malicious dependency or MCP server | Lockfile, Dependabot/audit, MCP connectors allowlisted per workspace | Medium |
 | T12 | Audit tampering | Someone hides an action after the fact | Append-only tables, no UPDATE/DELETE grants | Low |
+
+## PII redaction
+
+`redactPii` replaces emails, phone numbers in international (`+44 20 7946 0958`, `+1 (415) 555-2671`) and common national formats (`(415) 555-2671`, `020 7946 0958`, `415-555-2671`), card numbers that pass both an issuer-prefix and a Luhn check, and IBANs that pass the mod-97 checksum, with `[redacted:<kind>]`. Version numbers, dates, years, prices, timestamps, ISBNs and IP addresses are left alone, so SSRF and egress denials still say which address was blocked. The patterns and their false-positive table live in `privacy/redact.test.ts`.
+
+**Where it runs.** The run emitter (`packages/runtime/src/agent/emitter.ts`) passes every event through `redactEventDraft` before validation and delivery, so it covers every runtime path into `run_events`. It rewrites:
+
+- `tool.result`: `summary` and `error`
+- `policy.decided`: `reason`
+- `run.failed`: `error.message` (also redacted in `apps/web/src/server/execute-run.ts`, which writes its own failure event and logs the message instead of the raw error)
+
+When anything was replaced, the payload gets `redactions: <count>`. The count is the only trace; the original value is never stored or logged.
+
+**What it does not touch, and why.** Citation checks compare the brief's source URLs and verbatim quotes with the page snapshots stored as `artifact.created` content (`packages/evals/src/graders/xray.ts`). Redacting the snapshot but not the brief, or the reverse, would make true quotes fail verification. So the evidence pair stays verbatim: source snapshot artifacts, the brief artifact, and `tool.called.argsSummary` (the fetched URL) are not redacted. This content is already public (crawled public pages), is tenant-scoped by RLS like all artifacts, and is deleted with the run by the retention job. Text sent to the model (`forModel`) is not redacted either: it is a prompt, not a log, and the quarantined reader needs the page as written.
+
+Residual risk: streamed `agent.message` text and artifact content can contain PII that appeared on a public page. Connector data (M5+) is not public, so connector artifacts will need redaction or classification-aware storage before they ship.
 
 ## Red-team suite
 

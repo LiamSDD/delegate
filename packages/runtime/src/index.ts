@@ -8,6 +8,7 @@ export * from "./prompts";
 export * from "./providers";
 export * from "./missions";
 export * from "./plan-approval";
+export { redactPii, redactEventDraft, type PiiKind, type Redaction } from "./privacy/redact";
 export {
   FindingSchema,
   SubAgentResultSchema,

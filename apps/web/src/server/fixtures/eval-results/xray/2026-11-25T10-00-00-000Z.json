@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "id": "2026-11-25T10-00-00-000Z",
+  "mission": "xray",
+  "mode": "replay",
+  "replayOf": "2026-11-24T10-00-00-000Z",
+  "dataset": { "name": "company-xray", "version": 1 },
+  "audience": "public-demo",
+  "startedAt": "2026-11-25T10:00:00.000Z",
+  "finishedAt": "2026-11-25T10:01:00.000Z",
+  "durationMs": 60000,
+  "trialsPerCase": 2,
+  "promptVersions": { "company-xray-synthesis": 2, "xray-judge": 1 },
+  "models": [{ "role": "planner", "provider": "fixture", "model": "small", "calls": 2 }],
+  "judgeModels": [{ "provider": "fixture", "model": "judge", "calls": 2 }],
+  "totals": { "trials": 2, "costMicroUsd": 0, "tokens": 60000 },
+  "cases": [
+    {
+      "caseId": "zed",
+      "company": "Zed Industries",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "fixture-run-5",
+          "outcome": "completed",
+          "passed": false,
+          "score": 0.5,
+          "citationsVerified": true,
+          "judgeOverall": 0.5,
+          "latencyMs": 30000,
+          "costMicroUsd": 0,
+          "tokens": 30000
+        },
+        {
+          "trial": 1,
+          "runId": "fixture-run-6",
+          "outcome": "completed",
+          "passed": false,
+          "score": 0.5,
+          "citationsVerified": true,
+          "judgeOverall": 0.75,
+          "latencyMs": 30000,
+          "costMicroUsd": 0,
+          "tokens": 30000
+        }
+      ]
+    }
+  ],
+  "agreement": {
+    "status": "ok",
+    "labels": 3,
+    "matched": 2,
+    "criteria": [
+      {
+        "criterion": "accuracy",
+        "n": 2,
+        "exactMatchRate": 0.5,
+        "withinOneRate": 1,
+        "kappa": 0.2,
+        "kappaLower": -0.5,
+        "kappaUpper": 0.9
+      }
+    ]
+  }
+}

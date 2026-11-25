@@ -365,6 +365,9 @@ importers:
       '@delegate/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@delegate/evals':
+        specifier: workspace:*
+        version: link:../../packages/evals
       '@delegate/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

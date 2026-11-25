@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { z } from "zod";
 
+import { normalQuantile } from "../stats";
 import { JUDGE_CRITERIA, type JudgeCriterion, type JudgeVerdict } from "./xray-judge";
 
 const score = z.number().int().min(1).max(5);
@@ -53,12 +54,46 @@ export function cohenKappa(a: readonly number[], b: readonly number[]): number |
   return (observed - expected) / (1 - expected);
 }
 
+export interface KappaInterval {
+  kappa: number;
+  lower: number;
+  upper: number;
+}
+
+export function cohenKappaInterval(
+  a: readonly number[],
+  b: readonly number[],
+  confidence = 0.95,
+): KappaInterval | undefined {
+  const kappa = cohenKappa(a, b);
+  if (kappa === undefined) return undefined;
+  const n = a.length;
+  const categories = [...new Set([...a, ...b])];
+  const observed = a.filter((value, index) => value === b[index]).length / n;
+  const expected = categories.reduce(
+    (sum, category) =>
+      sum +
+      (a.filter((value) => value === category).length / n) *
+        (b.filter((value) => value === category).length / n),
+    0,
+  );
+  if (expected === 1) return { kappa, lower: kappa, upper: kappa };
+  const standardError = Math.sqrt((observed * (1 - observed)) / (n * (1 - expected) ** 2));
+  const z = normalQuantile(1 - (1 - confidence) / 2);
+  return {
+    kappa,
+    lower: Math.max(-1, kappa - z * standardError),
+    upper: Math.min(1, kappa + z * standardError),
+  };
+}
+
 export interface CriterionAgreement {
   criterion: JudgeCriterion;
   n: number;
   exactMatchRate: number;
   withinOneRate: number;
   kappa: number | undefined;
+  kappaInterval: KappaInterval | undefined;
 }
 
 export type AgreementReport =
@@ -102,6 +137,7 @@ export function agreementReport(
         withinOneRate:
           human.filter((value, index) => Math.abs(value - (judge[index] ?? 0)) <= 1).length / n,
         kappa: cohenKappa(human, judge),
+        kappaInterval: cohenKappaInterval(human, judge),
       };
     }),
   };

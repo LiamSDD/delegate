@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "id": "2026-11-24T10-00-00-000Z",
+  "mission": "xray",
+  "mode": "live",
+  "dataset": { "name": "company-xray", "version": 1 },
+  "audience": "public-demo",
+  "startedAt": "2026-11-24T10:00:00.000Z",
+  "finishedAt": "2026-11-24T10:10:00.000Z",
+  "durationMs": 600000,
+  "trialsPerCase": 2,
+  "promptVersions": { "company-xray-synthesis": 1, "xray-judge": 1 },
+  "models": [{ "role": "planner", "provider": "fixture", "model": "big", "calls": 4 }],
+  "judgeModels": [],
+  "totals": { "trials": 4, "costMicroUsd": 0, "tokens": 40000 },
+  "cases": [
+    {
+      "caseId": "zed",
+      "company": "Zed Industries",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "fixture-run-1",
+          "outcome": "completed",
+          "passed": true,
+          "score": 1,
+          "citationsVerified": true,
+          "judgeOverall": null,
+          "latencyMs": 40000,
+          "costMicroUsd": 0,
+          "tokens": 10000
+        },
+        {
+          "trial": 1,
+          "runId": "fixture-run-2",
+          "outcome": "completed",
+          "passed": true,
+          "score": 0.9,
+          "citationsVerified": true,
+          "judgeOverall": null,
+          "latencyMs": 50000,
+          "costMicroUsd": 0,
+          "tokens": 10000
+        },
+        {
+          "trial": 2,
+          "runId": "fixture-run-3",
+          "outcome": "completed",
+          "passed": false,
+          "score": 0.6,
+          "citationsVerified": false,
+          "judgeOverall": null,
+          "latencyMs": 60000,
+          "costMicroUsd": 0,
+          "tokens": 10000
+        },
+        {
+          "trial": 3,
+          "runId": "fixture-run-4",
+          "outcome": "errored",
+          "failureCode": "no_model_available",
+          "passed": false,
+          "score": 0,
+          "citationsVerified": null,
+          "judgeOverall": null,
+          "latencyMs": 1000,
+          "costMicroUsd": 0,
+          "tokens": 10000
+        }
+      ]
+    }
+  ],
+  "agreement": { "status": "no_human_labels", "labels": 0 }
+}
