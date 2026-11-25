@@ -49,12 +49,12 @@ export function ReplayBar({
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Chip tone="accent">Replay</Chip>
-        <p className="min-w-0 flex-1 text-sm text-text-muted">
+        <p className="order-last basis-full text-sm text-text-muted sm:order-none sm:min-w-0 sm:flex-1 sm:basis-auto">
           Played back from the recorded event log. Nothing is re-run and no model is called.
         </p>
         <button
           type="button"
-          className={actionButton}
+          className={cn(actionButton, "ml-auto sm:ml-0")}
           onClick={() => {
             dispatch({ type: "exit" });
           }}
@@ -64,7 +64,7 @@ export function ReplayBar({
         </button>
       </div>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             className={cn(actionButton, "w-24")}
