@@ -81,6 +81,7 @@ export interface AutomationAuditDependencies {
 }
 
 export const AUDIT_LIMITS = {
+  minReserves: 4,
   crawlPages: 12,
   crawlBudgetPages: 60,
   crawlBudgetMs: 20_000,
@@ -705,7 +706,7 @@ export function createAutomationAuditMission(deps: AutomationAuditDependencies):
       }
       const opportunities = rankOpportunities(picked);
       const reserves = rankOpportunities(pool.filter((candidate) => !picked.includes(candidate)))
-        .slice(0, Math.max(0, MAX_OPPORTUNITIES - opportunities.length))
+        .slice(0, Math.max(AUDIT_LIMITS.minReserves, MAX_OPPORTUNITIES - opportunities.length))
         .map((opportunity, index) => ({ ...opportunity, id: `reserve-${index + 1}` }));
       const facts = findingsToFacts(inputFindings(task));
       const state: AuditState = {
