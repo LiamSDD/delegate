@@ -36,6 +36,20 @@
       "when": 1795559218486,
       "tag": "0004_m3_build_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795604117331,
+      "tag": "0005_m5_ship_a_pr",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795607811188,
+      "tag": "0006_evolving_playbooks",
+      "breakpoints": true
     }
   ]
 }

@@ -171,6 +171,78 @@ const samples: Record<RunEvent["type"], unknown> = {
       retryAfterMs: 15000,
     },
   },
+  "sandbox.command": {
+    type: "sandbox.command",
+    stepId: "s1",
+    payload: {
+      commandId: "cmd_1",
+      purpose: "baseline",
+      command: "npm test",
+      exitCode: 1,
+      durationMs: 1200,
+      timedOut: false,
+      output: "1 failing",
+      truncated: false,
+    },
+  },
+  "ship.approval.requested": {
+    type: "ship.approval.requested",
+    stepId: "s1",
+    payload: {
+      approvalId: "ship_1",
+      mode: "pull_request",
+      repo: "acme/widgets",
+      base: "main",
+      branch: "delegate/imp-1-add-tests",
+      title: "Add tests for the parser",
+      diffStat: { files: 2, additions: 30, deletions: 1 },
+      patchArtifactId: "art_1",
+      baseline: { command: "npm test", exitCode: 1, passed: false, durationMs: 1200 },
+      after: { command: "npm test", exitCode: 0, passed: true, durationMs: 1300 },
+      reason: "Opening a pull request needs human approval",
+    },
+  },
+  "ship.approval.decided": {
+    type: "ship.approval.decided",
+    stepId: "s1",
+    payload: {
+      approvalId: "ship_1",
+      decision: "approved",
+      decidedBy: { type: "member", id: "m_1" },
+    },
+  },
+  "pr.opened": {
+    type: "pr.opened",
+    stepId: "s1",
+    payload: {
+      url: "https://github.com/acme/widgets/pull/7",
+      number: 7,
+      repo: "acme/widgets",
+      branch: "delegate/imp-1-add-tests",
+      base: "main",
+      commitSha: "a".repeat(40),
+    },
+  },
+  "playbook.applied": {
+    type: "playbook.applied",
+    payload: {
+      key: "company-xray",
+      runs: 4,
+      sources: [{ scope: "workspace", version: 4 }],
+      entries: [
+        {
+          id: "pb_0a1b2c3d",
+          scope: "workspace",
+          kind: "source",
+          polarity: "keep",
+          text: "Cited wikipedia source en.wikipedia.org (1 of 1 fetched page).",
+          evidence: 3,
+          score: 0.7,
+        },
+      ],
+      tokens: 26,
+    },
+  },
 };
 
 function envelope(seq: number, body: unknown): unknown {
@@ -182,9 +254,9 @@ function build(bodies: unknown[]): RunEvent[] {
 }
 
 describe("RunEvent", () => {
-  it("lists exactly the twenty event types", () => {
-    expect(RUN_EVENT_TYPES).toHaveLength(20);
-    expect(new Set(RUN_EVENT_TYPES).size).toBe(20);
+  it("lists exactly the twenty-five event types", () => {
+    expect(RUN_EVENT_TYPES).toHaveLength(25);
+    expect(new Set(RUN_EVENT_TYPES).size).toBe(25);
     expect(Object.keys(samples).sort()).toEqual([...RUN_EVENT_TYPES].sort());
   });
 
@@ -233,6 +305,63 @@ describe("RunEvent", () => {
 
   it("requires stepId on step-scoped events", () => {
     expect(() => parseRunEvent(envelope(1, { type: "step.started", payload: {} }))).toThrow();
+  });
+});
+
+describe("ship events", () => {
+  const shipRun = [
+    samples["run.created"],
+    samples["plan.proposed"],
+    samples["plan.approved"],
+    samples["step.started"],
+    samples["sandbox.command"],
+    samples["ship.approval.requested"],
+  ];
+
+  it("folds commands, the pending ship approval and the opened pull request", () => {
+    const waiting = foldRun(build(shipRun));
+    expect(waiting.status).toBe("awaiting_approval");
+    expect(waiting.ship).toMatchObject({ commands: 1, failedCommands: 1 });
+    expect(waiting.ship?.approval?.status).toBe("pending");
+    expect(waiting.pendingApprovals.map((approval) => approval.approvalId)).toEqual(["ship_1"]);
+
+    const opened = foldRun(
+      build([...shipRun, samples["ship.approval.decided"], samples["pr.opened"]]),
+    );
+    expect(opened.status).toBe("running");
+    expect(opened.pendingApprovals).toEqual([]);
+    expect(opened.ship?.approval?.status).toBe("approved");
+    expect(opened.ship?.pullRequest?.number).toBe(7);
+  });
+
+  it("refuses a pull request that was never approved", () => {
+    expect(() => foldRun(build([...shipRun, samples["pr.opened"]]))).toThrow(EventOrderError);
+    const rejected = {
+      type: "ship.approval.decided",
+      stepId: "s1",
+      payload: {
+        approvalId: "ship_1",
+        decision: "rejected",
+        decidedBy: { type: "system", id: "ship-timeout" },
+        reason: "Timed out",
+      },
+    };
+    expect(() => foldRun(build([...shipRun, rejected, samples["pr.opened"]]))).toThrow(
+      EventOrderError,
+    );
+  });
+
+  it("refuses a decision for an approval that was never requested", () => {
+    expect(() =>
+      foldRun(
+        build([
+          samples["run.created"],
+          samples["plan.proposed"],
+          samples["plan.approved"],
+          samples["ship.approval.decided"],
+        ]),
+      ),
+    ).toThrow(EventOrderError);
   });
 });
 

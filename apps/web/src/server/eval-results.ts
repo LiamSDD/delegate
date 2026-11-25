@@ -16,7 +16,7 @@ import { resolveRepoRoot } from "./db";
 export const RedteamReportSchema = z.object({
   version: z.literal(1),
   generatedAt: z.string().min(1),
-  suite: z.literal("redteam/v1"),
+  suite: z.string().regex(/^redteam\/v\d+$/),
   attacks: z.number().int().nonnegative(),
   successes: z.number().int().nonnegative(),
   asr: z.number().min(0).max(1),
@@ -92,7 +92,7 @@ export function loadEvalResults(resultsDir: string): LoadedResults {
   const invalid: string[] = [];
   for (const name of readdirSync(resultsDir).sort()) {
     const dir = path.join(resultsDir, name);
-    if (!statSync(dir).isDirectory() || isRunDirectory(dir)) continue;
+    if (name === "evolution" || !statSync(dir).isDirectory() || isRunDirectory(dir)) continue;
     for (const entry of readdirSync(dir).sort()) {
       if (!entry.endsWith(".json")) continue;
       const relative = `${name}/${entry}`;

@@ -30,7 +30,12 @@ import {
   type ResearchCrawlSettings,
   type ResearchEnvironment,
 } from "../../tools/research";
-import { SOURCE_KINDS, type SourceDocument, type SourceRecord } from "../../tools/sources";
+import {
+  SOURCE_KINDS,
+  type SourceDocument,
+  type SourceRecord,
+  type SourceStore,
+} from "../../tools/sources";
 
 export const RESEARCH_STEP_IDS = {
   site: "research",
@@ -158,6 +163,7 @@ export interface ResearchKitOptions {
   gapTopics: (facts: readonly TopicFact[]) => string[];
   gapFillDeadlineMs: number;
   callsAfterGapFill: readonly ModelRole[];
+  sources?: SourceStore;
 }
 
 export interface ResearchKit {
@@ -231,6 +237,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
       ].join("\n");
     },
   });
+  if (options.sources !== undefined) env.sources = options.sources;
   const tools = createResearchTools(env);
   const toolNamed = (name: string) => tools.filter((tool) => tool.name === name);
   const caller = (): ToolCaller => {
@@ -417,6 +424,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
         `Feeds found: ${env.discoveries.feeds.length === 0 ? "none" : env.discoveries.feeds.join(", ")}`,
         "Already fetched:",
         ...fetched.map((url) => `- ${url}`),
+        ...(task.guidance ?? []),
       ].join("\n");
       const before = new Set(env.sources.all().map((document) => document.record.sourceId));
       const loop = await runAgentLoop({

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
+import { createMemoryPlaybookStore, type PlaybookStore } from "../../learning/store";
 import { type AwaitPlanApproval } from "../../plan-approval";
 import { runMission } from "../../server";
 import { NextActionsSchema } from "../next-actions";
@@ -222,6 +223,8 @@ async function runFixture(
     input?: unknown;
     extra?: (url: URL, init: RequestInit | undefined) => Response | undefined;
     awaitPlanApproval?: AwaitPlanApproval;
+    playbooks?: PlaybookStore;
+    runId?: string;
   } = {},
 ): Promise<Harness & { status: string }> {
   const providerBodies: WireBody[] = [];
@@ -254,7 +257,7 @@ async function runFixture(
     events.push(parseRunEvent({ ...draft, seq: events.length + 1, at: new Date().toISOString() }));
   };
   append({
-    runId: "run_e2e",
+    runId: options.runId ?? "run_e2e",
     type: "run.created",
     payload: {
       workspaceId: "ws_1",
@@ -265,7 +268,7 @@ async function runFixture(
     },
   });
   const result = await runMission({
-    runId: "run_e2e",
+    runId: options.runId ?? "run_e2e",
     missionId: "company-xray",
     input: options.input ?? { url: `${FIXTURE_ORIGIN}/` },
     context: { audience: "public-demo", classification: "public" },
@@ -281,6 +284,7 @@ async function runFixture(
     ...(options.awaitPlanApproval === undefined
       ? {}
       : { awaitPlanApproval: options.awaitPlanApproval }),
+    ...(options.playbooks === undefined ? {} : { playbooks: options.playbooks }),
   });
   return { status: result.status, events, requested: site.requested, providerBodies };
 }
@@ -529,6 +533,36 @@ describe("plan review", () => {
         }),
     });
     expect(foldRun(invalid.events).error?.code).toBe("invalid_plan");
+  });
+});
+
+describe("playbooks learned from past runs", () => {
+  it("records lessons after a run and applies them, logged, on the next run", async () => {
+    const playbooks = createMemoryPlaybookStore();
+    const first = await runFixture({ playbooks, runId: "run_first" });
+    expect(first.status).toBe("completed");
+    expect(first.events.some((event) => event.type === "playbook.applied")).toBe(false);
+    const learned = await playbooks.read("company-xray");
+    expect(learned.house).toBeNull();
+    expect(learned.workspace).toMatchObject({ version: 1, runs: 1, runIds: ["run_first"] });
+
+    const second = await runFixture({ playbooks, runId: "run_second" });
+    expect(second.status).toBe("completed");
+    const types = second.events.map((event) => event.type);
+    expect(types.indexOf("playbook.applied")).toBeLessThan(types.indexOf("plan.proposed"));
+    const state = foldRun(second.events);
+    expect(state.playbook).toMatchObject({
+      key: "company-xray",
+      runs: 1,
+      sources: [{ scope: "workspace", version: 1 }],
+    });
+    const plannerUser = second.providerBodies
+      .filter((body) => (body.messages[0]?.content ?? "").includes("You are the planner"))
+      .map((body) => body.messages.find((message) => message.role === "user")?.content ?? "")
+      .join("\n");
+    expect(plannerUser).toContain('<playbook key="company-xray" runs="1"');
+    for (const entry of state.playbook?.entries ?? []) expect(plannerUser).toContain(entry.id);
+    expect((await playbooks.read("company-xray")).workspace?.version).toBe(2);
   });
 });
 

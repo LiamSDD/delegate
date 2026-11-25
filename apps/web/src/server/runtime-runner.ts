@@ -4,6 +4,9 @@ import path from "node:path";
 import modelsConfig from "@config/models.json";
 import {
   parsePromptFile,
+  type Playbook,
+  PlaybookSchema,
+  type PlaybookStore,
   type PromptFile,
   resumeMission as runtimeResumeMission,
   type ResumeMissionOptions,
@@ -37,8 +40,25 @@ export function loadRepoPrompts(): RuntimePrompts {
   ) as RuntimePrompts;
 }
 
+export function readShippedPlaybook(key: string, root = resolveRepoRoot()): Playbook | null {
+  try {
+    const file = path.join(
+      root,
+      "packages",
+      "runtime",
+      "playbooks",
+      `${key.replace(":", ".")}.house.json`,
+    );
+    const parsed = PlaybookSchema.safeParse(JSON.parse(readFileSync(file, "utf8")) as unknown);
+    return parsed.success && parsed.data.key === key ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface RuntimeRunnerOptions {
   env: Record<string, string | undefined>;
+  playbooks?: (scope: { workspaceId: string; userId: string }) => PlaybookStore;
   runMission?: (options: RunMissionOptions) => Promise<RunMissionResult>;
   resumeMission?: (options: ResumeMissionOptions) => Promise<ResumeMissionResult>;
   loadPrompts?: () => RuntimePrompts;
@@ -59,10 +79,21 @@ export function createRuntimeRunner(options: RuntimeRunnerOptions): MissionRunne
     emit,
     signal,
     awaitPlanApproval,
+    awaitShipApproval,
+    findInstallation,
     planApprover,
     resumeFrom,
+    scope,
   }) => {
     prompts ??= loadPrompts();
+    const learning =
+      scope === undefined || options.playbooks === undefined
+        ? {}
+        : {
+            workspaceId: scope.workspaceId,
+            playbooks: options.playbooks(scope),
+            shippedHouse: (key: string) => readShippedPlaybook(key),
+          };
     const shared = {
       runId,
       context: { audience, classification: "public" as const },
@@ -73,8 +104,11 @@ export function createRuntimeRunner(options: RuntimeRunnerOptions): MissionRunne
       latency: "interactive" as const,
       prompts,
       awaitPlanApproval,
+      ...(awaitShipApproval === undefined ? {} : { awaitShipApproval }),
+      ...(findInstallation === undefined ? {} : { findInstallation }),
       planApprover,
       ...assistantStores(),
+      ...learning,
     };
     if (resumeFrom !== undefined) {
       const result = await resumeMission({ ...shared, events: resumeFrom });

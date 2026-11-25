@@ -17,6 +17,8 @@
             "capability-escalation",
             "approval-bypass",
             "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
             "crawler-trap"
           ]
         },
@@ -133,6 +135,8 @@
             "capability-escalation",
             "approval-bypass",
             "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
             "crawler-trap"
           ]
         },
@@ -201,6 +205,8 @@
             "capability-escalation",
             "approval-bypass",
             "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
             "crawler-trap"
           ]
         },
@@ -456,6 +462,8 @@
             "capability-escalation",
             "approval-bypass",
             "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
             "crawler-trap"
           ]
         },
@@ -613,6 +621,8 @@
             "capability-escalation",
             "approval-bypass",
             "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
             "crawler-trap"
           ]
         },
@@ -766,6 +776,8 @@
             "capability-escalation",
             "approval-bypass",
             "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
             "crawler-trap"
           ]
         },
@@ -851,6 +863,125 @@
             "capability-escalation",
             "approval-bypass",
             "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
+            "crawler-trap"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "blocked"
+            },
+            "blockedBy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["outcome", "blockedBy"],
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "string",
+          "const": "repo"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]+\\/[\\w.-]+$"
+            },
+            "files": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "readerFacts": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "architect": {},
+            "improver": {},
+            "workerCalls": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {}
+                },
+                "required": ["name", "args"],
+                "additionalProperties": false
+              }
+            },
+            "injectedText": {
+              "type": "string",
+              "minLength": 8
+            },
+            "falseClaims": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 4
+              }
+            },
+            "forbiddenHosts": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": ["repo", "files"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["id", "category", "description", "expected", "target", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z]{2}-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "indirect-injection",
+            "exfiltration",
+            "ssrf",
+            "capability-escalation",
+            "approval-bypass",
+            "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
             "crawler-trap"
           ]
         },
@@ -909,6 +1040,8 @@
             "capability-escalation",
             "approval-bypass",
             "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
             "crawler-trap"
           ]
         },
@@ -1000,6 +1133,8 @@
             "capability-escalation",
             "approval-bypass",
             "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
             "crawler-trap"
           ]
         },
@@ -1060,6 +1195,276 @@
           },
           "required": ["executorCapabilities", "planCapabilities", "calls"],
           "additionalProperties": false
+        }
+      },
+      "required": ["id", "category", "description", "expected", "target", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z]{2}-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "indirect-injection",
+            "exfiltration",
+            "ssrf",
+            "capability-escalation",
+            "approval-bypass",
+            "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
+            "crawler-trap"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "blocked"
+            },
+            "blockedBy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["outcome", "blockedBy"],
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "string",
+          "const": "engineer"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "repoFiles": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "symlinks": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "audience": {
+              "default": "owner",
+              "type": "string",
+              "enum": ["public-demo", "owner"]
+            },
+            "approval": {
+              "default": "none",
+              "type": "string",
+              "enum": ["none", "approved", "rejected"]
+            },
+            "assistantText": {
+              "type": "string"
+            },
+            "calls": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {}
+                },
+                "required": ["name", "args"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["repoFiles", "calls"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["id", "category", "description", "expected", "target", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z]{2}-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "indirect-injection",
+            "exfiltration",
+            "ssrf",
+            "capability-escalation",
+            "approval-bypass",
+            "quote-forgery",
+            "sandbox-escape",
+            "playbook-poisoning",
+            "crawler-trap"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "blocked"
+            },
+            "blockedBy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["outcome", "blockedBy"],
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "string",
+          "const": "playbook"
+        },
+        "payload": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "via": {
+                  "type": "string",
+                  "const": "reflect"
+                },
+                "injectedText": {
+                  "type": "string",
+                  "minLength": 8
+                },
+                "at": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "plan.rationale",
+                      "step.summary",
+                      "step.id",
+                      "agent.message",
+                      "tool.name",
+                      "tool.args",
+                      "tool.summary",
+                      "tool.error",
+                      "source.url",
+                      "source.kind",
+                      "source.text",
+                      "artifact.title",
+                      "critic.claim",
+                      "critic.reason",
+                      "critic.category",
+                      "fallback.provider",
+                      "failure.code",
+                      "failure.message",
+                      "run.summary"
+                    ]
+                  }
+                },
+                "failed": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "reflectOutput": {},
+                "poison": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 4
+                  }
+                }
+              },
+              "required": ["via", "injectedText", "at", "poison"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "via": {
+                  "type": "string",
+                  "const": "house"
+                },
+                "audience": {
+                  "type": "string",
+                  "enum": ["public-demo", "owner"]
+                },
+                "houseLearning": {
+                  "type": "boolean"
+                },
+                "injectedText": {
+                  "type": "string",
+                  "minLength": 8
+                }
+              },
+              "required": ["via", "audience", "injectedText"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "via": {
+                  "type": "string",
+                  "const": "retrieval"
+                },
+                "entries": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["key", "text"],
+                    "additionalProperties": false
+                  }
+                },
+                "poison": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 4
+                  }
+                }
+              },
+              "required": ["via", "entries", "poison"],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": ["id", "category", "description", "expected", "target", "payload"],

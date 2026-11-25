@@ -82,6 +82,41 @@
   --default-transition-timing-function: var(--easing-standard);
 
   --animate-card-in: card-in var(--duration-base) var(--easing-enter) both;
+  --animate-pipeline-step: pipeline-step var(--pipeline-cycle, 7s) var(--easing-standard)
+    var(--pipeline-delay, 0s) infinite;
+  --animate-pipeline-flow: pipeline-flow var(--pipeline-cycle, 7s) var(--easing-standard)
+    var(--pipeline-delay, 0s) infinite;
+
+  @keyframes pipeline-step {
+    0%,
+    16% {
+      border-color: var(--accent);
+      background-color: var(--accent-soft);
+      color: var(--accent);
+    }
+    26%,
+    100% {
+      border-color: var(--border-strong);
+      background-color: var(--surface);
+      color: var(--text-muted);
+    }
+  }
+
+  @keyframes pipeline-flow {
+    0% {
+      opacity: 1;
+      transform: translateX(-100%);
+    }
+    20% {
+      opacity: 1;
+      transform: translateX(300%);
+    }
+    21%,
+    100% {
+      opacity: 0;
+      transform: translateX(300%);
+    }
+  }
 
   @keyframes card-in {
     from {

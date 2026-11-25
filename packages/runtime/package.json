@@ -39,14 +39,15 @@
     "crawl-bench": "tsx src/crawl/bench-cli.ts"
   },
   "dependencies": {
-    "@delegate/policy": "workspace:*",
     "@anthropic-ai/sdk": "catalog:",
+    "@delegate/policy": "workspace:*",
     "@opentelemetry/api": "catalog:",
     "@opentelemetry/context-async-hooks": "catalog:",
     "@opentelemetry/exporter-trace-otlp-http": "catalog:",
     "@opentelemetry/resources": "catalog:",
     "@opentelemetry/sdk-trace": "catalog:",
     "@opentelemetry/semantic-conventions": "catalog:",
+    "@vercel/sandbox": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

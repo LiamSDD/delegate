@@ -1,7 +1,14 @@
 import { readFileSync } from "node:fs";
 import { lookup } from "node:dns/promises";
 
-import { defaultPolicy, ownerDefaultPolicy } from "@delegate/policy";
+import {
+  defaultPolicy,
+  ownerDefaultPolicy,
+  shipConnectedPolicy,
+  shipDemoPolicy,
+  shipOwnerPolicy,
+  type Policy,
+} from "@delegate/policy";
 
 import {
   createRunContext,
@@ -19,7 +26,11 @@ import { createMemoryKnowledgeStore } from "./knowledge/memory-store";
 import { type KnowledgeStore, type MemoryStore } from "./knowledge/types";
 import { memoryNotes, recordRunMemory } from "./knowledge/workspace-memory";
 import { Budget, type RunBudgetLimits } from "./budget";
-import { type Actor, type RunEvent, type RunEventDraft } from "./events";
+import { type Actor, type PlaybookApplied, type RunEvent, type RunEventDraft } from "./events";
+import { playbookKey, type LoggedEvent } from "./learning/lessons";
+import { PlaybookSchema, selectGuidance, type Playbook } from "./learning/playbook";
+import { reflectRun } from "./learning/reflect";
+import { recordRunLessons, type PlaybookStore } from "./learning/store";
 import {
   parseModelsConfig,
   resolveBaseUrl,
@@ -39,6 +50,18 @@ import {
 import { runBuildAgent } from "./missions/build-agent/run";
 import { createMemoryAssistantStore, type AssistantStore } from "./missions/build-agent/schema";
 import { runCompanyXray } from "./missions/company-xray/run";
+import { runShipAPr, type FindInstallation, type ShipLimits } from "./missions/ship-a-pr/run";
+import { type AwaitShipApproval } from "./missions/ship-a-pr/schema";
+import {
+  createGitHubAppClient,
+  readGitHubAppConfig,
+  type GitHubAppClient,
+  type RepoRef,
+} from "./github/app";
+import { createSandboxProvider } from "./sandbox";
+import { SandboxUnavailableError, type SandboxProvider } from "./sandbox/types";
+import { runCustomGoal } from "./missions/custom-goal/run";
+import { runRepoXray } from "./missions/repo-xray/run";
 import { type AwaitPlanApproval } from "./plan-approval";
 import { parsePromptFile, type PromptFile } from "./prompts";
 import { createAnthropicProvider } from "./providers/anthropic";
@@ -49,6 +72,15 @@ import { createFetcher, type ResolveDns } from "./tools/fetch";
 import { createPinnedFetch } from "./tools/node-fetch";
 
 export * from "./index";
+export {
+  createRepoXrayMission,
+  runRepoXray,
+  snapshotArtifact,
+  REPO_XRAY_LIMITS,
+  type RepoXrayDependencies,
+  type RepoXrayPrompts,
+} from "./missions/repo-xray/run";
+export { REPO_ARCHIVE_HOST, archiveUrl } from "./missions/repo-xray/archive";
 
 export interface RunMissionOptions {
   runId: string;
@@ -75,6 +107,26 @@ export interface RunMissionOptions {
   assistants?: AssistantStore;
   memory?: MemoryStore;
   embeddings?: EmbeddingProvider | null;
+  playbooks?: PlaybookStore;
+  houseLearning?: boolean;
+  shippedHouse?: (key: string) => Playbook | null;
+  graderScore?: (events: readonly LoggedEvent[]) => number | undefined;
+  awaitShipApproval?: AwaitShipApproval;
+  sandboxes?: SandboxProvider;
+  github?: GitHubAppClient | null;
+  findInstallation?: FindInstallation;
+  cloneUrl?: (repo: RepoRef) => string;
+  shipLimits?: Partial<ShipLimits>;
+}
+
+export function githubAppFromEnv(
+  env: Record<string, string | undefined>,
+  fetchImpl?: typeof fetch,
+): GitHubAppClient | null {
+  const config = readGitHubAppConfig(env);
+  return config === null
+    ? null
+    : createGitHubAppClient({ config, ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }) });
 }
 
 export const RUNTIME_PROMPT_FILES = {
@@ -92,7 +144,14 @@ export const RUNTIME_PROMPT_FILES = {
   gaps: "build-agent.gaps.v1.md",
   answer: "assistant.answer.v1.md",
   rerank: "retrieval.rerank.v1.md",
+  reflect: "reflect.v1.md",
+  engineer: "ship-a-pr.engineer.v1.md",
+  goalSynthesis: "custom-goal.synthesis.v1.md",
+  repoArchitect: "repo-xray.architect.v1.md",
+  repoImprover: "repo-xray.improver.v1.md",
 } as const;
+
+export const REFLECT_BUDGET: RunBudgetLimits = { maxTokens: 20_000, maxMicroUsd: 0 };
 
 export const BUILD_AGENT_FETCH_PAGES = 340;
 export const RESEARCH_FETCH_PAGES = 100;
@@ -110,7 +169,15 @@ export function inProcessStores(): { knowledge: KnowledgeStore; assistants: Assi
   return inProcess;
 }
 
-const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set(["build-agent"]);
+const RESTORABLE_MISSIONS: ReadonlySet<string> = new Set(["build-agent", "ship-a-pr"]);
+
+function policiesFor(missionId: MissionId, audience: Audience, connected: boolean): Policy[] {
+  if (missionId === "ship-a-pr")
+    return [
+      audience === "owner" ? shipOwnerPolicy : connected ? shipConnectedPolicy : shipDemoPolicy,
+    ];
+  return [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy];
+}
 
 export type RuntimePrompts = Record<keyof typeof RUNTIME_PROMPT_FILES, PromptFile>;
 
@@ -134,6 +201,33 @@ function readRepoFile(relative: string): string {
 
 export function loadPrompt(fileName: string): PromptFile {
   return parsePromptFile(fileName, readRepoFile(`../prompts/${fileName}`));
+}
+
+export function loadShippedPlaybook(key: string): Playbook | null {
+  try {
+    const raw = readRepoFile(`../playbooks/${key.replace(":", ".")}.house.json`);
+    const parsed = PlaybookSchema.safeParse(JSON.parse(raw) as unknown);
+    return parsed.success && parsed.data.key === key && parsed.data.scope === "house"
+      ? parsed.data
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function retrievePlaybook(
+  options: RunMissionOptions,
+  key: string,
+): Promise<PlaybookApplied | undefined> {
+  if (options.playbooks === undefined) return undefined;
+  const pair = await options.playbooks.read(key).catch(() => ({ workspace: null, house: null }));
+  const house = pair.house ?? (options.shippedHouse ?? loadShippedPlaybook)(key);
+  return (
+    selectGuidance([
+      { scope: "workspace", playbook: pair.workspace },
+      { scope: "house", playbook: house },
+    ]) ?? undefined
+  );
 }
 
 export function loadModelsConfig(override?: unknown): ModelsConfig {
@@ -202,6 +296,8 @@ function invalid(
 interface MissionResume {
   point?: ResumePoint;
   artifacts: readonly ExistingArtifact[];
+  events?: readonly RunEvent[];
+  playbook?: PlaybookApplied;
 }
 
 export function runMission(options: RunMissionOptions): Promise<RunMissionResult> {
@@ -233,7 +329,9 @@ async function executeMission(
   const now = options.now ?? (() => new Date());
   const resolveDns = options.resolveDns ?? systemResolveDns;
   const produced: { kind: string; content: unknown; artifactId: string }[] = [];
+  const logged: LoggedEvent[] = [...(resume?.events ?? [])];
   const emit = async (event: RunEventDraft) => {
+    logged.push({ ...event, at: now().toISOString() });
     if (event.type === "artifact.created")
       produced.push({
         artifactId: event.payload.artifactId,
@@ -263,7 +361,7 @@ async function executeMission(
     env: options.env,
     emitter: createRunEmitter(emit),
     budget: new Budget({ run: RUN_BUDGETS[audience] }),
-    policies: [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy],
+    policies: policiesFor(mission.id, audience, options.findInstallation !== undefined),
     createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
     environment: "server",
     ...(options.latency === undefined ? {} : { latency: options.latency }),
@@ -291,6 +389,8 @@ async function executeMission(
       : restorable
         ? resume.point
         : { ...resume.point, completed: new Map(), failed: new Set<string>() };
+  const key = playbookKey(mission.id, parsed.data);
+  const playbook = resume === undefined ? await retrievePlaybook(options, key) : resume.playbook;
   const run = {
     ...(options.awaitPlanApproval === undefined
       ? {}
@@ -298,11 +398,49 @@ async function executeMission(
     ...(options.planApprover === undefined ? {} : { approver: options.planApprover }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
     ...(point === undefined ? {} : { resume: point }),
+    ...(playbook === undefined ? {} : { playbook }),
   };
   const notes =
     options.memory === undefined ? [] : memoryNotes(await options.memory.read().catch(() => []));
   let status: "completed" | "failed";
-  if (mission.id === "automation-audit") {
+  if (mission.id === "ship-a-pr") {
+    const input = MISSIONS["ship-a-pr"].inputSchema.parse(parsed.data);
+    let sandboxes: SandboxProvider;
+    let github: GitHubAppClient | null;
+    try {
+      sandboxes = options.sandboxes ?? createSandboxProvider(options.env);
+      github =
+        options.github === undefined
+          ? audience === "owner" || options.findInstallation !== undefined
+            ? githubAppFromEnv(options.env, options.fetchImpl)
+            : null
+          : options.github;
+    } catch (error) {
+      return invalid(
+        options.runId,
+        options.emit,
+        error instanceof SandboxUnavailableError ? "sandbox_unavailable" : "misconfigured",
+        error instanceof Error ? error.message.slice(0, 300) : "Ship-a-PR is misconfigured",
+      );
+    }
+    status = await runShipAPr({
+      ctx,
+      input,
+      prompts: { planner: prompts.planner, engineer: prompts.engineer },
+      sandboxes,
+      github,
+      ...(options.findInstallation === undefined
+        ? {}
+        : { findInstallation: options.findInstallation }),
+      ...(options.cloneUrl === undefined ? {} : { cloneUrl: options.cloneUrl }),
+      ...(options.awaitShipApproval === undefined
+        ? {}
+        : { awaitShipApproval: options.awaitShipApproval }),
+      ...(options.shipLimits === undefined ? {} : { limits: options.shipLimits }),
+      ...(restorable && resume !== undefined ? { existingArtifacts: resume.artifacts } : {}),
+      run,
+    });
+  } else if (mission.id === "automation-audit") {
     const input = MISSIONS["automation-audit"].inputSchema.parse(parsed.data);
     status = await runAutomationAudit({ ctx, input, fetcher, prompts, run });
   } else if (mission.id === "build-agent") {
@@ -330,6 +468,12 @@ async function executeMission(
       ...(restorable && resume !== undefined ? { existingArtifacts: resume.artifacts } : {}),
       run,
     });
+  } else if (mission.id === "custom-goal") {
+    const input = MISSIONS["custom-goal"].inputSchema.parse(parsed.data);
+    status = await runCustomGoal({ ctx, input, fetcher, prompts, run });
+  } else if (mission.id === "repo-xray") {
+    const input = MISSIONS["repo-xray"].inputSchema.parse(options.input);
+    status = await runRepoXray({ ctx, input, fetcher, prompts, run });
   } else {
     const input = MISSIONS["company-xray"].inputSchema.parse(parsed.data);
     status = await runCompanyXray({ ctx, input, fetcher, prompts, run });
@@ -342,7 +486,65 @@ async function executeMission(
       at: now().toISOString(),
       artifacts: produced,
     }).catch(() => undefined);
+  if (options.playbooks !== undefined && options.signal?.aborted !== true)
+    await learnFromRun(options, {
+      key,
+      missionId: mission.id,
+      input: parsed.data,
+      events: logged,
+      config,
+      prompt: prompts.reflect,
+      now,
+    }).catch(() => undefined);
   return { status };
+}
+
+async function learnFromRun(
+  options: RunMissionOptions,
+  run: {
+    key: string;
+    missionId: string;
+    input: unknown;
+    events: readonly LoggedEvent[];
+    config: ModelsConfig;
+    prompt: PromptFile;
+    now: () => Date;
+  },
+): Promise<void> {
+  const store = options.playbooks;
+  if (store === undefined) return;
+  const audience = options.context.audience;
+  const ctx = createRunContext({
+    runId: `${options.runId}-reflect`,
+    workspaceId: options.workspaceId ?? "unscoped",
+    audience,
+    classification: options.context.classification,
+    config: run.config,
+    env: options.env,
+    emitter: createRunEmitter(() => Promise.resolve()),
+    budget: new Budget({ run: REFLECT_BUDGET }),
+    policies: [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy],
+    createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
+    environment: "server",
+    ...(options.latency === undefined ? {} : { latency: options.latency }),
+    now: run.now,
+    ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
+  });
+  const graderScore = options.graderScore?.(run.events);
+  const lessons = await reflectRun(
+    {
+      runId: options.runId,
+      frame: { missionId: run.missionId, input: run.input },
+      events: run.events,
+      ...(graderScore === undefined ? {} : { graderScore }),
+    },
+    run.key,
+    { ctx, prompt: run.prompt },
+  );
+  await recordRunLessons(store, lessons, {
+    audience,
+    ...(options.houseLearning === undefined ? {} : { houseLearning: options.houseLearning }),
+  });
 }
 
 export interface ResumeMissionOptions extends Omit<RunMissionOptions, "missionId" | "input"> {
@@ -355,6 +557,11 @@ export interface ResumeMissionResult {
   resumed: boolean;
   skippedSteps: string[];
   rerunSteps: string[];
+}
+
+function appliedPlaybook(events: readonly RunEvent[]): { playbook?: PlaybookApplied } {
+  const applied = events.find((event) => event.type === "playbook.applied");
+  return applied?.type === "playbook.applied" ? { playbook: applied.payload } : {};
 }
 
 export async function resumeMission(options: ResumeMissionOptions): Promise<ResumeMissionResult> {
@@ -379,6 +586,8 @@ export async function resumeMission(options: ResumeMissionOptions): Promise<Resu
       {
         ...(analysis.point === undefined ? {} : { point: analysis.point }),
         artifacts: analysis.artifacts,
+        events: options.events,
+        ...appliedPlaybook(options.events),
       },
     );
   if (options.lease === undefined) {
@@ -490,3 +699,6 @@ export {
 export { reciprocalRankFusion, retrieve, RETRIEVAL_DEFAULTS } from "./knowledge/retrieve";
 export { memoryNotes, recordRunMemory, MEMORY_KEYS } from "./knowledge/workspace-memory";
 export { assistantIdForRun } from "./missions/build-agent/run";
+export { type FindInstallation } from "./missions/ship-a-pr/run";
+export { readGitHubAppConfig, type GitHubAppClient } from "./github/app";
+export { createSandboxProvider, sandboxKindFor } from "./sandbox";

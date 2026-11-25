@@ -1,5 +1,11 @@
 import { MilestoneBadge } from "@/components/milestone-badge";
-import { type Mission, MISSION_GROUPS, missionById, missionsInGroup } from "@/lib/missions";
+import {
+  isMissionLive,
+  type Mission,
+  MISSION_GROUPS,
+  missionById,
+  missionsInGroup,
+} from "@/lib/missions";
 
 const ROW_GRID =
   "md:grid md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_minmax(0,13rem)_5.5rem_4.5rem] md:items-baseline md:gap-6";
@@ -17,7 +23,7 @@ function MissionRow({ mission }: { mission: Mission }) {
     <li className={`flex flex-col gap-1.5 border-t border-border py-4 ${ROW_GRID}`}>
       <div className="flex items-center justify-between gap-3 md:block">
         <h4 className="text-base font-medium text-text">{mission.name}</h4>
-        <MilestoneBadge id={mission.arrives} className="md:hidden" />
+        <MilestoneBadge id={mission.arrives} live={isMissionLive(mission)} className="md:hidden" />
       </div>
       <p className="text-sm text-text-muted">{mission.outcome}</p>
       <p className="text-sm text-text-muted">
@@ -36,7 +42,7 @@ function MissionRow({ mission }: { mission: Mission }) {
         )}
       </p>
       <div className="hidden md:block md:justify-self-end">
-        <MilestoneBadge id={mission.arrives} />
+        <MilestoneBadge id={mission.arrives} live={isMissionLive(mission)} />
       </div>
     </li>
   );

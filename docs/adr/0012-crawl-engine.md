@@ -39,6 +39,7 @@ Production is Vercel serverless: 300 s per function invocation and about 2 GB of
 |---|---|---|---|---|---|
 | Company X-ray | company | 60 | 8 (homepage, best page per topic, then highest score) | 20 s | fetch cap 100 per run |
 | Automation Audit | audit | 60 | 12 | 20 s | fetch cap 100 per run |
+| Custom goal (site-crawl step, through the research kit) | company | 40 | 6 | 15 s | fetch cap 100 per run |
 | Build it | docs | 300 | all (chunked and indexed) | 120 s | 60 MB, depth 6, checkpoint every 60 pages, fetch cap 340 per run |
 
 X-ray and the Audit read only the top pages because every read is a quarantined model call. Crawling 60 pages lets the selection see the whole site instead of guessing from link names, and the unread pages become the gap filler's candidates, which `fetch_page` serves from memory without a second request.

@@ -453,3 +453,41 @@ describe("fetcher behaviour", () => {
     ).toBe("aborted");
   });
 });
+
+describe("download", () => {
+  const gzip = (size: number) =>
+    new Response(new Uint8Array(size).fill(7), {
+      status: 200,
+      headers: { "content-type": "application/x-gzip" },
+    });
+  const request = {
+    url: "https://codeload.example/acme/widget/tar.gz/HEAD",
+    accept: "application/x-gzip",
+    contentTypes: [/^application\/(x-)?gzip$/],
+    maxBytes: 1_000,
+  };
+
+  it("returns the raw bytes of an allowed binary type", async () => {
+    const h = harness({ [request.url]: () => gzip(1_000) });
+    const file = await createFetcher(h.options).download(request);
+    expect(file.bytes.byteLength).toBe(1_000);
+    expect(file.contentType).toBe("application/x-gzip");
+  });
+
+  it("refuses a body over the byte cap instead of truncating it", async () => {
+    const h = harness({ [request.url]: () => gzip(1_001) });
+    expect(await blockedCode(createFetcher(h.options).download(request))).toBe("too_large");
+  });
+
+  it("refuses content types outside the request's list and keeps the SSRF checks", async () => {
+    const blocked = harness(
+      { [request.url]: () => html("<html></html>") },
+      { "codeload.example": ["10.0.0.5"] },
+    );
+    expect(await blockedCode(createFetcher(blocked.options).download(request))).toBe(
+      "blocked_address",
+    );
+    const ok = harness({ [request.url]: () => html("<html></html>") });
+    expect(await blockedCode(createFetcher(ok.options).download(request))).toBe("content_type");
+  });
+});

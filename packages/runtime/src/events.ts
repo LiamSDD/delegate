@@ -21,6 +21,11 @@ export const RUN_EVENT_TYPES = [
   "run.completed",
   "run.failed",
   "model.fallback",
+  "sandbox.command",
+  "ship.approval.requested",
+  "ship.approval.decided",
+  "pr.opened",
+  "playbook.applied",
 ] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
@@ -176,6 +181,86 @@ export const CriticReportSchema = z.object({
 });
 export type CriticReport = z.infer<typeof CriticReportSchema>;
 
+export const SANDBOX_COMMAND_PURPOSES = [
+  "setup",
+  "clone",
+  "install",
+  "baseline",
+  "engineer",
+  "verify",
+  "diff",
+] as const;
+export const SandboxCommandPurposeSchema = z.enum(SANDBOX_COMMAND_PURPOSES);
+export type SandboxCommandPurpose = z.infer<typeof SandboxCommandPurposeSchema>;
+
+export const SANDBOX_OUTPUT_MAX_CHARS = 4_000;
+
+export const SandboxCommandPayloadSchema = z.object({
+  commandId: id,
+  purpose: SandboxCommandPurposeSchema,
+  command: z.string().min(1).max(500),
+  exitCode: z.number().int().nullable(),
+  durationMs: z.number().int().nonnegative(),
+  timedOut: z.boolean(),
+  output: z.string().max(SANDBOX_OUTPUT_MAX_CHARS),
+  truncated: z.boolean(),
+  redactions: redactionCount,
+});
+export type SandboxCommandPayload = z.infer<typeof SandboxCommandPayloadSchema>;
+
+export const TestRunSummarySchema = z.object({
+  command: z.string().max(500).nullable(),
+  exitCode: z.number().int().nullable(),
+  passed: z.boolean().nullable(),
+  durationMs: z.number().int().nonnegative(),
+  timedOut: z.boolean().optional(),
+});
+export type TestRunSummary = z.infer<typeof TestRunSummarySchema>;
+
+export const SHIP_MODES = ["pull_request", "patch"] as const;
+export const ShipModeSchema = z.enum(SHIP_MODES);
+export type ShipMode = z.infer<typeof ShipModeSchema>;
+
+export const DiffStatSchema = z.object({
+  files: tokenCount,
+  additions: tokenCount,
+  deletions: tokenCount,
+});
+export type DiffStat = z.infer<typeof DiffStatSchema>;
+
+export const ShipApprovalRequestedPayloadSchema = z.object({
+  approvalId: id,
+  mode: ShipModeSchema,
+  repo: z.string().min(3).max(200),
+  base: z.string().min(1).max(250),
+  branch: z.string().min(1).max(250),
+  title: z.string().min(1).max(200),
+  diffStat: DiffStatSchema,
+  patchArtifactId: id,
+  baseline: TestRunSummarySchema,
+  after: TestRunSummarySchema,
+  reason: z.string().min(1).max(500),
+});
+export type ShipApprovalRequestedPayload = z.infer<typeof ShipApprovalRequestedPayloadSchema>;
+
+export const ShipApprovalDecidedPayloadSchema = z.object({
+  approvalId: id,
+  decision: z.enum(["approved", "rejected"]),
+  decidedBy: ActorSchema,
+  reason: z.string().max(500).optional(),
+});
+export type ShipApprovalDecidedPayload = z.infer<typeof ShipApprovalDecidedPayloadSchema>;
+
+export const PullRequestOpenedPayloadSchema = z.object({
+  url: z.url(),
+  number: z.number().int().positive(),
+  repo: z.string().min(3).max(200),
+  branch: z.string().min(1).max(250),
+  base: z.string().min(1).max(250),
+  commitSha: z.string().regex(/^[0-9a-f]{40}$/),
+});
+export type PullRequestOpenedPayload = z.infer<typeof PullRequestOpenedPayloadSchema>;
+
 export const ForkOriginSchema = z.object({
   runId: id,
   stepId: id,
@@ -184,6 +269,31 @@ export const ForkOriginSchema = z.object({
   objectiveEdited: z.boolean(),
 });
 export type ForkOrigin = z.infer<typeof ForkOriginSchema>;
+
+export const PlaybookAppliedEntrySchema = z.object({
+  id: z.string().regex(/^pb_[0-9a-f]{8}$/),
+  scope: z.enum(["workspace", "house"]),
+  kind: z.string().min(1).max(40),
+  polarity: z.enum(["keep", "avoid"]),
+  text: z.string().min(1).max(240),
+  stepId: id.optional(),
+  evidence: z.number().int().positive(),
+  score: z.number().min(0).max(1),
+});
+export type PlaybookAppliedEntry = z.infer<typeof PlaybookAppliedEntrySchema>;
+
+export const PlaybookAppliedSchema = z.object({
+  key: z.string().min(1).max(100),
+  runs: tokenCount,
+  sources: z
+    .array(
+      z.object({ scope: z.enum(["workspace", "house"]), version: z.number().int().nonnegative() }),
+    )
+    .max(2),
+  entries: z.array(PlaybookAppliedEntrySchema).min(1).max(8),
+  tokens: tokenCount,
+});
+export type PlaybookApplied = z.infer<typeof PlaybookAppliedSchema>;
 
 export const RunEventSchema = z.discriminatedUnion("type", [
   event(
@@ -328,6 +438,11 @@ export const RunEventSchema = z.discriminatedUnion("type", [
     }),
   ),
   event("model.fallback", ModelFallbackPayloadSchema),
+  stepEvent("sandbox.command", SandboxCommandPayloadSchema),
+  event("ship.approval.requested", ShipApprovalRequestedPayloadSchema),
+  event("ship.approval.decided", ShipApprovalDecidedPayloadSchema),
+  event("pr.opened", PullRequestOpenedPayloadSchema),
+  event("playbook.applied", PlaybookAppliedSchema),
 ]);
 
 export type RunEvent = z.infer<typeof RunEventSchema>;
@@ -411,6 +526,20 @@ export interface FallbackRecord extends ModelFallbackPayload {
   stepId?: string;
 }
 
+export interface ShipApprovalState extends ShipApprovalRequestedPayload {
+  seq: number;
+  status: "pending" | "approved" | "rejected";
+  decidedBy?: Actor;
+  decisionReason?: string;
+}
+
+export interface ShipState {
+  commands: number;
+  failedCommands: number;
+  approval?: ShipApprovalState;
+  pullRequest?: PullRequestOpenedPayload;
+}
+
 export interface RunState {
   runId: string;
   status: RunStatus;
@@ -424,10 +553,14 @@ export interface RunState {
   pendingApprovals: PendingApproval[];
   artifacts: Record<string, ArtifactIndexEntry>;
   fallbacks: FallbackRecord[];
+  ship?: ShipState;
+  playbook?: PlaybookApplied & { seq: number };
   summary?: string;
   error?: { code: string; message: string };
   lastSeq: number;
 }
+
+export const SHIP_APPROVAL_POLICY_ID = "ship-approval";
 
 export class EventOrderError extends Error {
   override readonly name = "EventOrderError";
@@ -623,6 +756,52 @@ export function foldRun(events: readonly RunEvent[]): RunState {
           seq: event.seq,
           ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
         });
+        break;
+      case "sandbox.command": {
+        const ship = (state.ship ??= { commands: 0, failedCommands: 0 });
+        ship.commands += 1;
+        if (event.payload.exitCode !== 0) ship.failedCommands += 1;
+        break;
+      }
+      case "ship.approval.requested": {
+        const ship = (state.ship ??= { commands: 0, failedCommands: 0 });
+        ship.approval = { ...event.payload, seq: event.seq, status: "pending" };
+        state.pendingApprovals = state.pendingApprovals.filter(
+          (pending) => pending.approvalId !== event.payload.approvalId,
+        );
+        state.pendingApprovals.push({
+          approvalId: event.payload.approvalId,
+          policyId: SHIP_APPROVAL_POLICY_ID,
+          reason: event.payload.reason,
+          summary: event.payload.title,
+          seq: event.seq,
+          ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
+        });
+        break;
+      }
+      case "ship.approval.decided": {
+        const approval = state.ship?.approval;
+        if (approval?.approvalId !== event.payload.approvalId)
+          throw new EventOrderError(
+            `ship.approval.decided for ${event.payload.approvalId} has no matching request`,
+          );
+        approval.status = event.payload.decision;
+        approval.decidedBy = event.payload.decidedBy;
+        if (event.payload.reason !== undefined) approval.decisionReason = event.payload.reason;
+        state.pendingApprovals = state.pendingApprovals.filter(
+          (pending) => pending.approvalId !== event.payload.approvalId,
+        );
+        break;
+      }
+      case "pr.opened": {
+        const ship = (state.ship ??= { commands: 0, failedCommands: 0 });
+        if (ship.approval?.status !== "approved")
+          throw new EventOrderError(`pr.opened at seq ${event.seq} without an approved ship`);
+        ship.pullRequest = event.payload;
+        break;
+      }
+      case "playbook.applied":
+        state.playbook = { ...event.payload, seq: event.seq };
         break;
       case "run.completed":
         state.summary = event.payload.summary;

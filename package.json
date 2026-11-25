@@ -17,6 +17,7 @@
     "gate": "pnpm check && pnpm --filter @delegate/evals gate",
     "eval": "pnpm --filter @delegate/evals eval",
     "redteam": "pnpm --filter @delegate/evals redteam",
+    "evolve": "pnpm --filter @delegate/evals evolve",
     "smoke": "pnpm --filter @delegate/runtime smoke",
     "db:generate": "pnpm --filter @delegate/db db:generate",
     "db:migrate": "pnpm --filter @delegate/db db:migrate",

@@ -15,3 +15,12 @@ export interface OwnerModeEnv {
 export function isOwnerModeEnabled(env: OwnerModeEnv): boolean {
   return env.DELEGATE_OWNER_MODE === "1" && env.NODE_ENV !== "production";
 }
+
+export interface ShipEnv {
+  NODE_ENV?: string | undefined;
+  DELEGATE_SHIP_A_PR?: string | undefined;
+}
+
+export function isShipAPrEnabled(env: ShipEnv): boolean {
+  return env.DELEGATE_SHIP_A_PR === "1";
+}
