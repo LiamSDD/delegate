@@ -27,6 +27,14 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: monorepoRoot,
   outputFileTracingIncludes: {
     "/**": ["../../pnpm-workspace.yaml", "../../packages/runtime/prompts/**/*"],
+    "/docs/**": [
+      "../../docs/*.md",
+      "../../docs/adr/*.md",
+      "../../docs/guides/*.md",
+      "../../packages/db/README.md",
+      "../../packages/evals/datasets/README.md",
+      "../../packages/evals/results/redteam.json",
+    ],
   },
   turbopack: {
     root: monorepoRoot,
