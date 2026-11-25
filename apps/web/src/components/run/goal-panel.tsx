@@ -150,7 +150,40 @@ export function GoalBriefPanel({
                 draft · critic pending
               </Chip>
             ) : null}
+            {brief.verification === undefined ? null : (
+              <p className="font-mono text-2xs text-text-subtle">
+                {brief.verification.citationAccuracy === null
+                  ? "citations unchecked"
+                  : `citations ${String(Math.round(brief.verification.citationAccuracy * 100))}% supported`}
+                {brief.verification.specificity.score === null
+                  ? ""
+                  : ` · specificity ${String(Math.round(brief.verification.specificity.score * 100))}%`}
+                {brief.verification.specificity.generic === 0
+                  ? ""
+                  : ` (${String(brief.verification.specificity.generic)} generic claims moved or dropped)`}
+                {brief.verification.research === undefined
+                  ? ""
+                  : ` · ${String(brief.verification.research.rounds.length)} research round${brief.verification.research.rounds.length === 1 ? "" : "s"}`}
+              </p>
+            )}
           </div>
+
+          {brief.context === undefined || brief.context.length === 0 ? null : (
+            <aside
+              aria-label="Context"
+              className="rounded-md border border-border bg-surface-2/60 px-3 py-2 text-sm leading-6 text-text-muted"
+            >
+              <span className="font-mono text-2xs uppercase tracking-wide text-text-subtle">
+                Context
+              </span>
+              {brief.context.map((line, c) => (
+                <p key={String(c)}>
+                  {line.text}
+                  <Cites citations={line.citations} index={index} />
+                </p>
+              ))}
+            </aside>
+          )}
 
           {brief.workstreams.length === 0 ? (
             <p className="rounded-md border border-border bg-surface-2/60 px-3 py-2 text-sm text-text-muted">
@@ -201,6 +234,18 @@ export function GoalBriefPanel({
                         {action.basis.text}
                         <Cites citations={action.basis.citations} index={index} />
                       </p>
+                      {action.firstStep === undefined ? null : (
+                        <p className="text-sm leading-6 text-text">
+                          <span className="text-text-subtle">First step: </span>
+                          {action.firstStep}
+                        </p>
+                      )}
+                      {action.successMetric === undefined ? null : (
+                        <p className="text-sm leading-6 text-text">
+                          <span className="text-text-subtle">Success: </span>
+                          {action.successMetric}
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-1.5">
                         <Chip>{action.owner}</Chip>
                         <Chip>effort {levelLabel(action.effort).toLowerCase()}</Chip>
