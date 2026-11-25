@@ -5,6 +5,7 @@ import { createMemoryKnowledgeStore } from "../../knowledge/memory-store";
 import { scriptedProvider, testRun } from "../../testing/fakes";
 import { FIXTURE_ORIGIN, fixtureDns, fixtureFetch } from "../../testing/fixture-site";
 import { createFetcher } from "../../tools/fetch";
+import { parseCheckpoint, type CrawlStateArtifact } from "../../crawl/checkpoint";
 import { crawlSite } from "./crawler";
 
 function setup(extra?: Parameters<typeof fixtureFetch>[0]) {
@@ -22,6 +23,14 @@ function setup(extra?: Parameters<typeof fixtureFetch>[0]) {
 }
 
 const grant = { id: "crawl", capabilities: [CAPABILITIES.webFetch] };
+
+function uniqueText(seed: number): string {
+  let state = seed + 7;
+  return Array.from({ length: 60 }, () => {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return `word${state % 900}`;
+  }).join(" ");
+}
 
 describe("crawlSite", () => {
   it("crawls sitemap pages in scope, respects robots.txt and skips binaries and other locales", async () => {
@@ -58,7 +67,7 @@ describe("crawlSite", () => {
       const match = /^\/(?:p(\d+))?$/.exec(url.pathname);
       if (match === null) return undefined;
       const next = pages.map((index) => `<a href="/p${index}">Page ${index}</a>`).join(" ");
-      const body = `<html><head><title>Page ${match[1] ?? "home"}</title></head><body><main><h1>Section ${match[1] ?? "home"}</h1><p>${"This page explains warehouse robot leasing in detail. ".repeat(8)}</p>${next}</main></body></html>`;
+      const body = `<html><head><title>Page ${match[1] ?? "home"}</title></head><body><main><h1>Section ${match[1] ?? "home"}</h1><p>${uniqueText(Number(match[1] ?? 99))}</p>${next}</main></body></html>`;
       return new Response(body, { headers: { "content-type": "text/html" } });
     });
     const report = await crawlSite({
@@ -121,5 +130,59 @@ describe("crawlSite", () => {
     expect(second.pages.every((page) => page.cached)).toBe(true);
     for (const stored of first.pages)
       expect(site.requested.filter((url) => url === stored.url)).toHaveLength(1);
+  });
+
+  it("checkpoints a crawl-state artifact and resumes from it without refetching", async () => {
+    const pages = Array.from({ length: 12 }, (_, index) => index);
+    const route = (url: URL) => {
+      if (url.pathname === "/robots.txt")
+        return new Response("User-agent: *\nAllow: /\n", {
+          headers: { "content-type": "text/plain" },
+        });
+      if (url.pathname === "/sitemap.xml") return new Response("nope", { status: 404 });
+      const match = /^\/(?:docs\/p(\d+))?$/.exec(url.pathname);
+      if (match === null) return undefined;
+      const links = pages.map((index) => `<a href="/docs/p${index}">Doc ${index}</a>`).join(" ");
+      return new Response(
+        `<html><head><title>Doc ${match[1] ?? "home"}</title></head><body><main><h1>Doc ${match[1] ?? "home"}</h1><p>${uniqueText(Number(match[1] ?? 50))}</p>${links}</main></body></html>`,
+        { headers: { "content-type": "text/html" } },
+      );
+    };
+    const first = setup(route);
+    const states: CrawlStateArtifact[] = [];
+    const cut = await crawlSite({
+      ctx: first.run.ctx,
+      grant,
+      fetcher: first.fetcher,
+      knowledge: first.knowledge,
+      collection: "c1",
+      startUrl: `${FIXTURE_ORIGIN}/`,
+      limits: { maxPages: 5, checkpointEveryPages: 2 },
+      onCheckpoint: (state) => {
+        states.push(state);
+        return Promise.resolve();
+      },
+    });
+    expect(cut.pages).toHaveLength(5);
+    const state = states.at(-1);
+    expect(state?.finished).toBe(true);
+    const checkpoint = parseCheckpoint(JSON.parse(JSON.stringify(state)) as unknown);
+    expect(checkpoint?.pages).toHaveLength(5);
+    const second = setup(route);
+    const resumed = await crawlSite({
+      ctx: second.run.ctx,
+      grant,
+      fetcher: second.fetcher,
+      knowledge: first.knowledge,
+      collection: "c1",
+      startUrl: `${FIXTURE_ORIGIN}/`,
+      ...(checkpoint === undefined ? {} : { checkpoint }),
+    });
+    expect(resumed.pages).toHaveLength(13);
+    expect(resumed.pages.filter((page) => page.cached)).toHaveLength(5);
+    const refetched = second.site.requested.filter(
+      (url) => first.site.requested.includes(url) && !url.endsWith("/robots.txt"),
+    );
+    expect(refetched).toEqual([]);
   });
 });
