@@ -113,6 +113,8 @@ export function RunTopBar({
   stopping,
   stopError,
   runId,
+  actions,
+  replaying = false,
 }: {
   runId: string;
   view: ReadyView;
@@ -120,13 +122,15 @@ export function RunTopBar({
   onStop: () => void;
   stopping: boolean;
   stopError: string | null;
+  actions?: ReactNode;
+  replaying?: boolean;
 }) {
   const status =
     (view.outcome === null ? undefined : OUTCOME_LABEL[view.outcome.kind]) ??
     STATUS[view.state.status];
   const cost = costLabel(view.usage.costMicroUsd, view.providers);
   const elapsed = elapsedMs(view.createdAt, view.finishedAt, now);
-  const active = view.outcome === null;
+  const active = view.outcome === null && !replaying;
 
   return (
     <div
@@ -154,7 +158,9 @@ export function RunTopBar({
           {view.execution === "simulated" ? (
             <Chip tone="warning">Simulated · no research, no model calls</Chip>
           ) : null}
-          <div className="ml-auto flex items-center gap-2">
+          {replaying ? <Chip tone="accent">Replay</Chip> : null}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {actions}
             <Link href={`/runs/${runId}/trace`} className={actionButton}>
               <Activity className="size-3.5" aria-hidden="true" />
               Trace

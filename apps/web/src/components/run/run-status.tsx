@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils";
 
 import { actionButton, primaryButton } from "./primitives";
 
-function Banner({
+export function Banner({
   tone,
   icon,
   title,

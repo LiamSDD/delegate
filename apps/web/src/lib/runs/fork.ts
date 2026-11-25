@@ -1,6 +1,41 @@
 import type { RunEvent } from "@delegate/runtime";
+import { z } from "zod";
 
 export const FORK_TARGET_MS = 10_000;
+
+const forkedSchema = z.object({ runId: z.uuid() });
+const forkErrorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
+
+export type ForkRunResult = { ok: true; runId: string } | { ok: false; message: string };
+
+type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
+
+export async function forkRun(
+  runId: string,
+  request: { stepId: string; objective?: string },
+  fetcher: Fetcher = (path, init) => fetch(path, init),
+): Promise<ForkRunResult> {
+  let response: Response;
+  try {
+    response = await fetcher(`/api/runs/${encodeURIComponent(runId)}/fork`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+  } catch {
+    return { ok: false, message: "Could not reach Delegate. Check your connection and try again." };
+  }
+  const body: unknown = await response.json().catch(() => null);
+  if (response.status === 201) {
+    const created = forkedSchema.safeParse(body);
+    if (created.success) return { ok: true, runId: created.data.runId };
+  }
+  const failure = forkErrorSchema.safeParse(body);
+  return {
+    ok: false,
+    message: failure.success ? failure.data.error.message : "The run could not be forked.",
+  };
+}
 
 export interface ForkInfo {
   parentRunId: string;
