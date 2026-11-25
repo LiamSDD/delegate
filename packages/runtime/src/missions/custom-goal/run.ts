@@ -64,6 +64,7 @@ import {
   GOAL_STEP_IDS,
   GOAL_STEP_LIMITS,
   defaultGoalPlan,
+  goalPhases,
 } from "./plan";
 import {
   CONTEXT_LINES,
@@ -1104,9 +1105,14 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     },
   };
 
+  const defaultPlan = defaultGoalPlan(
+    target.domain !== null || target.brands.length > 0,
+    hasConnectors,
+  );
   return {
     planner: {
       missionId: MISSION_ID,
+      defaultPhases: goalPhases(defaultPlan),
       title: "Custom goal",
       objective:
         "A cited goal brief: the objective restated, findings by workstream, a ranked action plan (owner role, effort, impact, follow-up Delegate mission), risks and open questions. Every factual claim cites a fetched source.",
@@ -1147,7 +1153,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       ],
       stepLimits: GOAL_STEP_LIMITS,
     },
-    defaultPlan: defaultGoalPlan(target.domain !== null || target.brands.length > 0, hasConnectors),
+    defaultPlan,
     clock,
     finish: async (outcome) => {
       clearTimeout(deadlineTimer);

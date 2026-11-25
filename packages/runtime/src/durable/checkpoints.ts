@@ -78,6 +78,7 @@ export function analyseForResume(events: readonly RunEvent[]): ResumeAnalysis {
     ...base,
     point: {
       steps: state.plan.steps,
+      ...(state.plan.phases === undefined ? {} : { phases: state.plan.phases }),
       version: state.plan.version,
       approved: state.plan.approved,
       completed,

@@ -1,6 +1,6 @@
 import { CAPABILITIES } from "@delegate/policy";
 
-import { type PlanStep } from "../../events";
+import { type PlanPhase, type PlanStep } from "../../events";
 import { RESEARCH_STEP_IDS } from "../shared/research";
 
 export const GOAL_STEP_IDS = {
@@ -139,7 +139,64 @@ const connectors: PlanStep = {
 export const GOAL_CONNECTOR_HINTS =
   " The workspace has MCP connectors: include use_connectors when the goal concerns the workspace's own systems, data or tickets; synthesise then takes it as an input.";
 
+export const GOAL_PHASES: readonly { id: string; objective: string; steps: readonly string[] }[] = [
+  {
+    id: "research",
+    objective:
+      "Resolve the target and gather quarantined evidence about it and the goal's topics from its site, reference sources and connectors.",
+    steps: [
+      GOAL_STEP_IDS.resolve,
+      GOAL_STEP_IDS.site,
+      GOAL_STEP_IDS.topic,
+      GOAL_STEP_IDS.external,
+      GOAL_STEP_IDS.read,
+      GOAL_STEP_IDS.connectors,
+    ],
+  },
+  {
+    id: "draft",
+    objective:
+      "Draft the goal brief from the evidence, then deepen thin workstreams with targeted follow-up research and redraft.",
+    steps: [GOAL_STEP_IDS.synthesise, GOAL_STEP_IDS.deepen],
+  },
+  {
+    id: "verify",
+    objective: "Verify every claim against its quotes and its relevance to the target.",
+    steps: [GOAL_STEP_IDS.critic],
+  },
+];
+
+export function phaseOf(stepId: string): string {
+  const base = /^(.+)_\d+$/.exec(stepId)?.[1];
+  return (
+    GOAL_PHASES.find((phase) => phase.steps.includes(stepId) || phase.steps.includes(base ?? ""))
+      ?.id ?? "research"
+  );
+}
+
+export function goalPhases(plan: readonly PlanStep[]): PlanPhase[] {
+  const used = GOAL_PHASES.filter((phase) => plan.some((step) => step.phase === phase.id));
+  return used.map((phase, index) => ({
+    id: phase.id,
+    objective: phase.objective,
+    budgetShare:
+      Math.ceil(
+        plan
+          .filter((step) => step.phase === phase.id)
+          .reduce((sum, step) => sum + step.budgetShare, 0) * 1e6,
+      ) / 1e6,
+    dependsOn: index === 0 ? [] : [used[index - 1]?.id ?? phase.id],
+  }));
+}
+
 export function defaultGoalPlan(hasCompany: boolean, hasConnectors = false): PlanStep[] {
+  return flatGoalPlan(hasCompany, hasConnectors).map((step) => ({
+    ...step,
+    phase: phaseOf(step.id),
+  }));
+}
+
+function flatGoalPlan(hasCompany: boolean, hasConnectors: boolean): PlanStep[] {
   const plan = basePlan(hasCompany);
   if (!hasConnectors) return plan;
   return plan.flatMap((step) => {

@@ -57,6 +57,8 @@ export const ActorSchema = z.object({
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
+export const PhaseIdSchema = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
+
 export const PlanStepSchema = z.object({
   id,
   role: AgentRoleSchema,
@@ -65,8 +67,18 @@ export const PlanStepSchema = z.object({
   capabilities: z.array(id),
   acceptance: z.array(z.string().min(1)),
   budgetShare: z.number().min(0).max(1),
+  phase: PhaseIdSchema.optional(),
 });
 export type PlanStep = z.infer<typeof PlanStepSchema>;
+
+export const PlanPhaseSchema = z.object({
+  id: PhaseIdSchema,
+  objective: z.string().trim().min(1).max(400),
+  budgetShare: z.number().min(0).max(1),
+  dependsOn: z.array(PhaseIdSchema).max(6).default([]),
+});
+export type PlanPhase = z.infer<typeof PlanPhaseSchema>;
+export const PlanPhasesSchema = z.array(PlanPhaseSchema).max(6);
 
 const BUDGET_SHARE_TOLERANCE = 1e-9;
 
@@ -363,6 +375,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
     z.object({
       version: z.number().int().positive(),
       steps: planSteps,
+      phases: PlanPhasesSchema.optional(),
       source: PlanSourceSchema.optional(),
       rationale: z.string().max(2000).optional(),
     }),
@@ -380,9 +393,11 @@ export const RunEventSchema = z.discriminatedUnion("type", [
     z.object({
       version: z.number().int().positive(),
       steps: planSteps,
+      phases: PlanPhasesSchema.optional(),
       reason: z.string().min(1),
       diff: PlanDiffSchema.optional(),
       source: PlanSourceSchema.optional(),
+      requiresApproval: z.boolean().optional(),
     }),
   ),
   stepEvent("step.started", z.object({})),
@@ -613,7 +628,7 @@ export interface RunState {
   workspaceId?: string;
   missionId?: string;
   forkedFrom?: ForkOrigin;
-  plan: { version: number; steps: PlanStep[]; approved: boolean } | null;
+  plan: { version: number; steps: PlanStep[]; approved: boolean; phases?: PlanPhase[] } | null;
   planRevisions: PlanRevision[];
   steps: StepState[];
   totals: RunTotals;
@@ -720,6 +735,7 @@ export function foldRun(events: readonly RunEvent[]): RunState {
           version: event.payload.version,
           steps: event.payload.steps,
           approved: false,
+          ...(event.payload.phases === undefined ? {} : { phases: event.payload.phases }),
         };
         state.steps = stepsForPlan(event.payload.steps, []);
         lifecycle = "awaiting_plan_approval";
@@ -743,7 +759,9 @@ export function foldRun(events: readonly RunEvent[]): RunState {
         state.plan = {
           version: event.payload.version,
           steps: event.payload.steps,
-          approved: state.plan?.approved ?? false,
+          approved:
+            event.payload.requiresApproval === true ? false : (state.plan?.approved ?? false),
+          ...(event.payload.phases === undefined ? {} : { phases: event.payload.phases }),
         };
         state.steps = stepsForPlan(event.payload.steps, state.steps);
         break;

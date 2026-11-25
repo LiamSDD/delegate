@@ -375,7 +375,7 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
       "quarantine-reader@1",
       "company-xray.researcher@1",
       "company-xray.synthesis@2",
-      "planner@2",
+      "planner@3",
       "critic@2",
       "editor@2",
       "deep-research.gaps@1",

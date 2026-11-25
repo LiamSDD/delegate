@@ -144,7 +144,7 @@ export const RUNTIME_PROMPT_FILES = {
   reader: "quarantine-reader.v1.md",
   researcher: "company-xray.researcher.v1.md",
   synthesis: "company-xray.synthesis.v2.md",
-  planner: "planner.v2.md",
+  planner: "planner.v3.md",
   critic: "critic.v2.md",
   editor: "editor.v2.md",
   analyst: "automation-audit.analyst.v2.md",
