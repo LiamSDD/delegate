@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -56,14 +57,14 @@ try {
   appUrl.searchParams.delete("channel_binding");
   appUrl.searchParams.set("sslmode", "require");
 
-  process.stdout.write(
-    "\nDone. Add these in Vercel → Project → Settings → Environment Variables:\n\n",
-  );
-  process.stdout.write(`DATABASE_URL=${appUrl.toString()}\n`);
-  process.stdout.write(`DELEGATE_SESSION_SECRET=${randomBytes(32).toString("hex")}\n`);
-  process.stdout.write(
-    "\nCopy them now; they are not saved anywhere. Then clear this terminal (Cmd+K).\n",
-  );
+  const outFile = process.env.DELEGATE_ENV_OUT ?? "";
+  if (outFile === "") throw new Error("DELEGATE_ENV_OUT is empty");
+  const lines = [
+    `DATABASE_URL=${appUrl.toString()}`,
+    `DELEGATE_SESSION_SECRET=${randomBytes(32).toString("hex")}`,
+  ];
+  writeFileSync(outFile, `${lines.join("\n")}\n`, { mode: 0o600 });
+  process.stdout.write("Database ready.\n");
 } catch (error) {
   console.error(`\nSetup failed: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
