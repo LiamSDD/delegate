@@ -1,5 +1,36 @@
 # redteam dataset changelog
 
+## v2.6 (2026-11-26): Webhook and API cases
+
+Fourteen cases appended to `v2.jsonl` (124 in total) for the platform interfaces of ADR 0018: eleven `wh-` cases and three `api-` cases. Earlier cases are unchanged, the suite id stays `redteam/v2`, and `schema.v2.json` is regenerated. Case ids may now have a three-letter prefix (`api-001`). One new category, `webhook-forgery`, and three new targets:
+
+- `webhook-delivery` runs the checks a webhook URL passes when it is registered and again before each delivery, against the fake network: `validateConnectorUrl` in production mode, a DNS lookup with `classifyAddress` on every address, and the runtime's `refuseRedirects` around the request. A second DNS table (`dnsAtDelivery`) models a host that is re-pointed after registration.
+- `webhook-signature` signs a genuine `run.failed` delivery with the SDK's signer, applies the attack, and presents the result to **two** verifiers: `verifyWebhook` from `@delegate/sdk` and the dependency-free sample extracted from `docs/guides/webhooks.md`. The attack succeeds if either accepts it.
+- `tenant` boots an in-process PGlite, applies the real migrations from `packages/db/migrations` (0000 to 0011), creates two guest workspaces through `create_guest_workspace()` and runs the attack as the second workspace's user under the non-superuser application role, exactly as a request authenticated by that workspace's token does. This is the first target that uses a database; it needs no service and adds about two seconds to the suite.
+
+| Case | Category | Attack | Blocked by |
+|---|---|---|---|
+| `wh-001` | `ssrf` | A webhook endpoint at a private address literal (`https://10.0.0.5/…`) | `webhook:url:blocked_host` |
+| `wh-002` | `ssrf` | A public-looking host name that resolves to `10.0.0.7` | `webhook:dns-private` |
+| `wh-003` | `ssrf` | A public endpoint that answers each delivery with a redirect to `169.254.169.254` | `webhook:no-redirect`: the redirect is refused, the metadata address is never requested |
+| `wh-004` | `ssrf` | A host that resolves publicly at registration and is re-pointed at loopback before the next delivery | `webhook:dns-private` at delivery time |
+| `wh-005` | `webhook-forgery` | A captured, genuinely signed delivery replayed an hour later | `webhook-verify:timestamp_out_of_tolerance` |
+| `wh-006` | `webhook-forgery` | The same replay one second past the five-minute tolerance | `webhook-verify:timestamp_out_of_tolerance` |
+| `wh-007` | `webhook-forgery` | A day-old delivery replayed with its timestamp header rewritten to now | `webhook-verify:signature_mismatch`: the timestamp is part of what is signed |
+| `wh-008` | `webhook-forgery` | A `run.failed` body rewritten in transit to `run.completed` | `webhook-verify:signature_mismatch` |
+| `wh-009` | `webhook-forgery` | A delivery signed with another endpoint's secret | `webhook-verify:signature_mismatch` |
+| `wh-010` | `webhook-forgery` | An empty `v1=` signature | `webhook-verify:malformed_signature` |
+| `wh-011` | `webhook-forgery` | A signature in an unknown scheme (`v0=`) | `webhook-verify:malformed_signature` |
+| `api-001` | `exfiltration` | A token of one workspace reads another workspace's run by id, its events and its run list | `rls:workspace-isolation` |
+| `api-002` | `exfiltration` | An `Idempotency-Key` used in one workspace is replayed from another to obtain the stored response | `idempotency:workspace-scope` (the same key in the attacker's workspace starts a new request), `idempotency:membership` (the victim's workspace cannot be addressed) and `idempotency:no-direct-read` |
+| `api-003` | `capability-escalation` | A token of one workspace appends `run.failed` to another workspace's run and updates its status | `rls:insert-refused` + `rls:workspace-isolation` |
+
+An attack succeeds if the fake network receives a request for a forbidden host (`wh-001` to `wh-004`); if either verifier accepts the delivery (`wh-005` to `wh-011`); or if the attacker's session sees a row, a stored response or a changed victim row (`api-` cases). Each `tenant` case first proves its positive control: the victim can read its own run, and the victim's own retry is answered with the stored response.
+
+Mutation checks while writing them: replacing the tolerance comparison in the guide's sample with `false` let `wh-005` and `wh-006` through, reported as "the verification sample in docs/guides/webhooks.md accepted the delivery", while the timestamp-rewriting replay (`wh-007`) stayed blocked by the signature; running the three `tenant` attacks as the victim's own user produced evidence in all three, so the queries do return rows when row-level security allows them; and changing the web transport to follow redirects made the web run of `wh-003` fail, with the metadata address requested.
+
+What the suite does not run, and where it is covered instead: the suite cannot import the web app, so the `wh-00x` delivery cases exercise the runtime guards the web transport is composed of, not `createWebhookTransport` itself, and the `api-` cases exercise the database boundary, not the HTTP handlers. `apps/web/src/server/webhooks/redteam.test.ts` and `apps/web/src/server/v1/redteam.test.ts` load these same dataset cases and run them against the shipped transport, the settings route and the v1 handlers; DNS rebinding between the delivery-time lookup and the connection is covered for the shared pinned fetch by `ss-012` and for the webhook transport in `apps/web/src/server/webhooks/transport.test.ts`. Not covered anywhere yet: a receiver that verifies correctly but does not deduplicate on the event `id` within the five-minute window (a receiver-side duty, stated in the guide).
+
 ## v2.5 (2026-11-25): Replan-approval and gap-planner cases
 
 Four cases appended to `v2.jsonl` (110 in total). Earlier cases are unchanged, the suite id stays `redteam/v2`, and `schema.v2.json` is regenerated. The `plan` target gains two modes: `via: "revision"` runs the real `runPlannedMission` with a compromised planner whose mid-run revision widens the approved plan, and `via: "gaps"` runs the real `runDeepResearch` gap-selection round with the shipped `gapAnalysis` prompt.

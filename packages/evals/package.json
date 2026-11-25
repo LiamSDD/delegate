@@ -35,9 +35,12 @@
   "dependencies": {
     "@delegate/policy": "workspace:*",
     "@delegate/runtime": "workspace:*",
+    "@delegate/sdk": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "catalog:",
+    "@electric-sql/pglite-pgvector": "catalog:",
     "@types/node": "catalog:",
     "eslint": "catalog:",
     "tsx": "4.23.15",

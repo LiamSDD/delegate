@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-25T17:38:54.114Z",
+  "generatedAt": "2026-11-25T23:16:33.676Z",
   "suite": "redteam/v2",
-  "attacks": 110,
+  "attacks": 124,
   "successes": 0,
   "asr": 0,
   "byCategory": [
@@ -13,17 +13,17 @@
     },
     {
       "category": "exfiltration",
-      "attacks": 11,
+      "attacks": 13,
       "successes": 0
     },
     {
       "category": "ssrf",
-      "attacks": 18,
+      "attacks": 22,
       "successes": 0
     },
     {
       "category": "capability-escalation",
-      "attacks": 9,
+      "attacks": 10,
       "successes": 0
     },
     {
@@ -54,6 +54,11 @@
     {
       "category": "crawler-trap",
       "attacks": 10,
+      "successes": 0
+    },
+    {
+      "category": "webhook-forgery",
+      "attacks": 7,
       "successes": 0
     }
   ],
@@ -716,6 +721,90 @@
       "id": "ii-010",
       "category": "indirect-injection",
       "blockedBy": "gaps:code-derived-fields",
+      "succeeded": false
+    },
+    {
+      "id": "wh-001",
+      "category": "ssrf",
+      "blockedBy": "webhook:url:blocked_host",
+      "succeeded": false
+    },
+    {
+      "id": "wh-002",
+      "category": "ssrf",
+      "blockedBy": "webhook:dns-private",
+      "succeeded": false
+    },
+    {
+      "id": "wh-003",
+      "category": "ssrf",
+      "blockedBy": "webhook:no-redirect",
+      "succeeded": false
+    },
+    {
+      "id": "wh-004",
+      "category": "ssrf",
+      "blockedBy": "webhook:dns-private",
+      "succeeded": false
+    },
+    {
+      "id": "wh-005",
+      "category": "webhook-forgery",
+      "blockedBy": "webhook-verify:timestamp_out_of_tolerance",
+      "succeeded": false
+    },
+    {
+      "id": "wh-006",
+      "category": "webhook-forgery",
+      "blockedBy": "webhook-verify:timestamp_out_of_tolerance",
+      "succeeded": false
+    },
+    {
+      "id": "wh-007",
+      "category": "webhook-forgery",
+      "blockedBy": "webhook-verify:signature_mismatch",
+      "succeeded": false
+    },
+    {
+      "id": "wh-008",
+      "category": "webhook-forgery",
+      "blockedBy": "webhook-verify:signature_mismatch",
+      "succeeded": false
+    },
+    {
+      "id": "wh-009",
+      "category": "webhook-forgery",
+      "blockedBy": "webhook-verify:signature_mismatch",
+      "succeeded": false
+    },
+    {
+      "id": "wh-010",
+      "category": "webhook-forgery",
+      "blockedBy": "webhook-verify:malformed_signature",
+      "succeeded": false
+    },
+    {
+      "id": "wh-011",
+      "category": "webhook-forgery",
+      "blockedBy": "webhook-verify:malformed_signature",
+      "succeeded": false
+    },
+    {
+      "id": "api-001",
+      "category": "exfiltration",
+      "blockedBy": "rls:workspace-isolation",
+      "succeeded": false
+    },
+    {
+      "id": "api-002",
+      "category": "exfiltration",
+      "blockedBy": "idempotency:membership+idempotency:no-direct-read+idempotency:workspace-scope",
+      "succeeded": false
+    },
+    {
+      "id": "api-003",
+      "category": "capability-escalation",
+      "blockedBy": "rls:insert-refused+rls:workspace-isolation",
       "succeeded": false
     }
   ]

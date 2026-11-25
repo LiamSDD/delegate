@@ -54,10 +54,12 @@ import {
   recordingFetcher,
   type FakeNetwork,
 } from "./network";
+import { runWebhookDelivery, runWebhookSignature } from "./platform";
 import { runPlaybook } from "./playbook-target";
 import { runGaps } from "./gaps";
 import { runRepo } from "./repo";
 import { runRevision } from "./revision";
+import { runTenant } from "./tenant";
 import {
   type AgentPayloadSchema,
   type ConnectorPayloadSchema,
@@ -704,6 +706,12 @@ function verdictFor(attack: RedteamCase): Promise<Verdict> | Verdict {
       return runEngineer(attack.payload);
     case "playbook":
       return runPlaybook(attack.payload);
+    case "webhook-delivery":
+      return runWebhookDelivery(attack.payload);
+    case "webhook-signature":
+      return runWebhookSignature(attack.payload);
+    case "tenant":
+      return runTenant(attack.payload);
   }
 }
 
