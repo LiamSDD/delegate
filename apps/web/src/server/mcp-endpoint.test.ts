@@ -211,3 +211,32 @@ describe("REST with a bearer token", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 });
+
+describe("/api/mcp autopilot", () => {
+  it("starts an Autopilot run and get_run includes its children", async () => {
+    const { token } = await workspaceToken();
+    const started = await callTool(token, "start_autopilot", {
+      goal: "Cut support load at acme.example",
+      url: "acme.example",
+    });
+    expect(started.isError).toBe(false);
+    const runId = z.object({ runId: z.uuid() }).parse(started.json()).runId;
+    for (let round = 0; round < 5; round += 1) await Promise.allSettled(background);
+    const run = (await callTool(token, "get_run", { runId })).json();
+    expect(run).toMatchObject({
+      mission: "autopilot",
+      status: "failed",
+      terminal: true,
+      error: { code: "autopilot_child_failed" },
+      deliverable: { kind: "autopilot-report" },
+      children: [
+        {
+          nodeId: "brief",
+          missionId: "custom-goal",
+          status: "failed",
+          webUrl: expect.stringMatching(/^https:\/\/delegate\.example\/runs\//) as unknown,
+        },
+      ],
+    });
+  });
+});

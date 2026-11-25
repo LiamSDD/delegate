@@ -1,11 +1,20 @@
-import { foldRun, MISSIONS, type RunState } from "@delegate/runtime";
-import { type Artifact, type RunView } from "@delegate/sdk";
+import {
+  AUTOPILOT_MISSION_ID,
+  AUTOPILOT_REPORT_KIND,
+  foldRun,
+  MISSIONS,
+  type RunEvent,
+  type RunState,
+} from "@delegate/runtime";
+import { type Artifact, type RunChildView, type RunView } from "@delegate/sdk";
 
+import { autopilotGraph } from "./autopilot";
 import type { AppDatabase } from "./db";
 import { pendingPlanApproval, readPlanDecision } from "./plan-approval";
 import { artifactContent, isTerminalEventType, readAllEvents, type RunRecord } from "./runs";
 
 function deliverableKind(mission: string): string | undefined {
+  if (mission === AUTOPILOT_MISSION_ID) return AUTOPILOT_REPORT_KIND;
   const entry = (MISSIONS as Partial<Record<string, { deliverableKind: string }>>)[mission];
   return entry?.deliverableKind;
 }
@@ -18,12 +27,32 @@ function foldSafely(events: Parameters<typeof foldRun>[0]): RunState | null {
   }
 }
 
+async function childViews(
+  app: AppDatabase,
+  userId: string,
+  events: readonly RunEvent[],
+): Promise<RunChildView[]> {
+  const nodes = await autopilotGraph(app, userId, events);
+  return nodes.map((node) => ({
+    nodeId: node.nodeId,
+    missionId: node.missionId,
+    label: node.label,
+    runId: node.childRunId,
+    status: node.status,
+    summary: node.summary,
+    deliverable: node.outcome?.deliverable ?? null,
+    links: node.outcome?.links ?? [],
+    needsHuman: node.outcome?.needsHuman ?? [],
+  }));
+}
+
 export async function buildRunView(
   app: AppDatabase,
   userId: string,
   record: RunRecord,
 ): Promise<RunView> {
-  const state = foldSafely(await readAllEvents(app, userId, record.id));
+  const events = await readAllEvents(app, userId, record.id);
+  const state = foldSafely(events);
   const terminal = record.lastEventType !== null && isTerminalEventType(record.lastEventType);
   const objectives = new Map((state?.plan?.steps ?? []).map((step) => [step.id, step.objective]));
   const steps = (state?.steps ?? []).map((step) => ({
@@ -42,7 +71,10 @@ export async function buildRunView(
   const finalRef =
     kind === undefined ? undefined : artifacts.findLast((entry) => entry.kind === kind);
   let deliverable: Artifact | null = null;
-  if (finalRef !== undefined && record.status === "completed") {
+  if (
+    finalRef !== undefined &&
+    (record.status === "completed" || record.mission === AUTOPILOT_MISSION_ID)
+  ) {
     const content = await artifactContent(app, userId, record.id, finalRef.artifactId);
     if (content !== null)
       deliverable = {
@@ -94,5 +126,12 @@ export async function buildRunView(
     deliverable,
     summary: state?.summary ?? null,
     error: state?.error ?? null,
+    ...(record.mission === AUTOPILOT_MISSION_ID && state !== null
+      ? { children: await childViews(app, userId, events) }
+      : {}),
+    autopilotParent:
+      state?.autopilot === undefined
+        ? null
+        : { runId: state.autopilot.parentRunId, nodeId: state.autopilot.nodeId },
   };
 }

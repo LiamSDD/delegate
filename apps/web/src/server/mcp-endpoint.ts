@@ -64,27 +64,29 @@ export function inProcessBackend(
     if (found?.workspaceId !== session.workspaceId) return null;
     return reviveOrSweep(app, session.userId, found, deps);
   };
+  const start = async (request: unknown) => {
+    const parsed = CreateRunRequestSchema.safeParse(request);
+    if (!parsed.success)
+      throw new BackendError(
+        `The mission request is not valid: ${parsed.error.issues
+          .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+          .join("; ")}`,
+      );
+    const ipQuota = deps.ipLimiter.take(ip);
+    if (!ipQuota.ok) throw new BackendError("Too many runs from this network. Try again later.");
+    const started = await startRunForSession(app, session, parsed.data, deps, {
+      autoApprovePlan: false,
+    });
+    if (!started.ok) {
+      const body = (await started.response.json()) as { error?: { message?: string } };
+      throw new BackendError(body.error?.message ?? "The run could not be started.");
+    }
+    return { runId: started.runId, webUrl: runUrl(started.runId) };
+  };
   return {
     runUrl,
-    async startMission(request) {
-      const parsed = CreateRunRequestSchema.safeParse(request);
-      if (!parsed.success)
-        throw new BackendError(
-          `The mission request is not valid: ${parsed.error.issues
-            .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-            .join("; ")}`,
-        );
-      const ipQuota = deps.ipLimiter.take(ip);
-      if (!ipQuota.ok) throw new BackendError("Too many runs from this network. Try again later.");
-      const started = await startRunForSession(app, session, parsed.data, deps, {
-        autoApprovePlan: false,
-      });
-      if (!started.ok) {
-        const body = (await started.response.json()) as { error?: { message?: string } };
-        throw new BackendError(body.error?.message ?? "The run could not be started.");
-      }
-      return { runId: started.runId, webUrl: runUrl(started.runId) };
-    },
+    startMission: (request) => start(request),
+    startAutopilot: (request) => start({ missionId: "autopilot", input: request }),
     async getRun(runId) {
       const found = await record(runId);
       return found === null ? null : buildRunView(app, session.userId, found);

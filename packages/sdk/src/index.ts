@@ -32,6 +32,12 @@ export type StartRunRequest = z.infer<typeof StartRunRequestSchema>;
 
 export const StartRunResponseSchema = z.object({ runId: z.uuid() });
 
+export const StartAutopilotRequestSchema = z.strictObject({
+  goal: z.string().trim().min(3).max(900),
+  url: z.string().min(1).max(2048).optional(),
+});
+export type StartAutopilotRequest = z.infer<typeof StartAutopilotRequestSchema>;
+
 export const RunStepViewSchema = z.object({
   id: z.string(),
   objective: z.string(),
@@ -49,6 +55,19 @@ export type ArtifactRef = z.infer<typeof ArtifactRefSchema>;
 
 export const ArtifactSchema = ArtifactRefSchema.extend({ content: z.unknown() });
 export type Artifact = z.infer<typeof ArtifactSchema>;
+
+export const RunChildViewSchema = z.object({
+  nodeId: z.string(),
+  missionId: z.string(),
+  label: z.string(),
+  runId: z.uuid().nullable(),
+  status: z.string(),
+  summary: z.string().nullable(),
+  deliverable: z.object({ artifactId: z.string(), kind: z.string(), title: z.string() }).nullable(),
+  links: z.array(z.object({ label: z.string(), href: z.string() })),
+  needsHuman: z.array(z.string()),
+});
+export type RunChildView = z.infer<typeof RunChildViewSchema>;
 
 export const RunViewSchema = z.object({
   id: z.uuid(),
@@ -70,6 +89,8 @@ export const RunViewSchema = z.object({
   deliverable: ArtifactSchema.nullable(),
   summary: z.string().nullable(),
   error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  children: z.array(RunChildViewSchema).optional(),
+  autopilotParent: z.object({ runId: z.uuid(), nodeId: z.string() }).nullable().optional(),
 });
 export type RunView = z.infer<typeof RunViewSchema>;
 
@@ -117,6 +138,7 @@ export interface DelegateClientOptions {
 export interface DelegateClient {
   readonly baseUrl: string;
   startRun(request: StartRunRequest): Promise<{ runId: string; webUrl: string }>;
+  startAutopilot(request: StartAutopilotRequest): Promise<{ runId: string; webUrl: string }>;
   getRun(runId: string): Promise<RunView>;
   listRuns(limit?: number): Promise<RunListEntry[]>;
   decidePlan(runId: string, decision: PlanDecision): Promise<{ decision: string }>;
@@ -180,6 +202,14 @@ export function createDelegateClient(options: DelegateClientOptions): DelegateCl
       const { runId } = await call(StartRunResponseSchema, "/api/runs", {
         method: "POST",
         body,
+      });
+      return { runId, webUrl: runUrl(runId) };
+    },
+    async startAutopilot(request) {
+      const input = StartAutopilotRequestSchema.parse(request);
+      const { runId } = await call(StartRunResponseSchema, "/api/runs", {
+        method: "POST",
+        body: { missionId: "autopilot", input },
       });
       return { runId, webUrl: runUrl(runId) };
     },

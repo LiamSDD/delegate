@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { type RunView } from "@delegate/sdk";
+import { type RunView, type StartAutopilotRequest } from "@delegate/sdk";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -13,6 +13,7 @@ const MISSIONS = [{ id: "company-xray", title: "Company X-ray", description: "Br
 function fakeBackend() {
   let status: RunView["status"] = "planning";
   const decisions: string[] = [];
+  const autopilots: StartAutopilotRequest[] = [];
   const view = (): RunView => ({
     id: RUN_ID,
     mission: "company-xray",
@@ -46,6 +47,10 @@ function fakeBackend() {
       status = "awaiting_plan_approval";
       return Promise.resolve({ runId: RUN_ID, webUrl: `https://delegate.example/runs/${RUN_ID}` });
     },
+    startAutopilot: (request) => {
+      autopilots.push(request);
+      return Promise.resolve({ runId: RUN_ID, webUrl: `https://delegate.example/runs/${RUN_ID}` });
+    },
     getRun: (runId) => Promise.resolve(runId === RUN_ID ? view() : null),
     listRuns: () =>
       Promise.resolve([
@@ -69,6 +74,7 @@ function fakeBackend() {
   return {
     backend,
     decisions,
+    autopilots,
     finish: () => {
       status = "completed";
     },
@@ -111,6 +117,7 @@ describe("@delegate/mcp-server", () => {
       "get_run",
       "list_runs",
       "reject_plan",
+      "start_autopilot",
       "start_mission",
       "wait_for_run",
     ]);
@@ -155,6 +162,77 @@ describe("@delegate/mcp-server", () => {
     });
     const resource = await client.readResource({ uri: `delegate://runs/${RUN_ID}/deliverable` });
     expect(resource.contents[0]?.uri).toBe(`delegate://runs/${RUN_ID}/deliverable`);
+  });
+
+  it("starts an Autopilot run and reports its children, returning early when one needs a decision", async () => {
+    const fake = fakeBackend();
+    const child = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+    const parentView: RunView = {
+      id: RUN_ID,
+      mission: "autopilot",
+      status: "running",
+      terminal: false,
+      createdAt: "2026-11-25T10:00:00.000Z",
+      finishedAt: null,
+      totals: { inputTokens: 0, outputTokens: 0, costMicroUsd: 0, toolCalls: 0 },
+      pendingPlan: null,
+      pendingApprovals: [],
+      steps: [],
+      artifacts: [],
+      deliverable: null,
+      summary: null,
+      error: null,
+      children: [
+        {
+          nodeId: "brief",
+          missionId: "custom-goal",
+          label: "Goal brief",
+          runId: child,
+          status: "awaiting_plan_approval",
+          summary: null,
+          deliverable: null,
+          links: [],
+          needsHuman: [],
+        },
+      ],
+      autopilotParent: null,
+    };
+    let sleeps = 0;
+    const client = await connected(
+      { ...fake.backend, getRun: () => Promise.resolve(parentView) },
+      () => {
+        sleeps += 1;
+      },
+    );
+    const started = text(
+      await client.callTool({
+        name: "start_autopilot",
+        arguments: { goal: "Cut support load at acme.example", url: "acme.example" },
+      }),
+    );
+    expect(started).toMatchObject({ runId: RUN_ID });
+    expect(fake.autopilots).toEqual([
+      { goal: "Cut support load at acme.example", url: "acme.example" },
+    ]);
+    const waited = text(
+      await client.callTool({
+        name: "wait_for_run",
+        arguments: { runId: RUN_ID, timeoutSeconds: 60 },
+      }),
+    );
+    expect(sleeps).toBe(0);
+    expect(waited).toMatchObject({
+      mission: "autopilot",
+      children: [
+        {
+          nodeId: "brief",
+          runId: child,
+          status: "awaiting_plan_approval",
+          webUrl: `https://delegate.example/runs/${child}`,
+        },
+      ],
+      nextAction: expect.stringContaining(child) as unknown,
+    });
   });
 
   it("bounds wait_for_run by its timeout", async () => {

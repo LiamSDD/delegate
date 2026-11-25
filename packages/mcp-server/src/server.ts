@@ -6,6 +6,8 @@ import {
   type PlanDecision,
   type RunListEntry,
   type RunView,
+  StartAutopilotRequestSchema,
+  type StartAutopilotRequest,
   type StartRunRequest,
 } from "@delegate/sdk";
 import { z } from "zod";
@@ -19,6 +21,7 @@ const DELIVERABLE_MAX_CHARS = 60_000;
 
 export interface DelegateBackend {
   startMission(request: StartRunRequest): Promise<{ runId: string; webUrl: string }>;
+  startAutopilot(request: StartAutopilotRequest): Promise<{ runId: string; webUrl: string }>;
   getRun(runId: string): Promise<RunView | null>;
   listRuns(limit: number): Promise<RunListEntry[]>;
   decidePlan(runId: string, decision: PlanDecision): Promise<{ decision: string }>;
@@ -52,7 +55,28 @@ function cap(text: string): string {
     : `${text.slice(0, DELIVERABLE_MAX_CHARS)}\n… truncated; read the full deliverable with get_artifact or the resource.`;
 }
 
-function presentRun(view: RunView, webUrl: string) {
+const WAITING_STATUSES: ReadonlySet<string> = new Set([
+  "awaiting_plan_approval",
+  "awaiting_approval",
+]);
+
+function waitingChild(view: RunView) {
+  return (view.children ?? []).find((child) => WAITING_STATUSES.has(child.status));
+}
+
+function nextActionFor(view: RunView): string | null {
+  if (view.status === "awaiting_plan_approval")
+    return "The plan is waiting for a decision: call approve_plan or reject_plan.";
+  if (view.terminal) return null;
+  const child = waitingChild(view);
+  if (child !== undefined && child.runId !== null)
+    return child.status === "awaiting_plan_approval"
+      ? `Child run ${child.runId} (${child.label}) is waiting for its plan: call approve_plan or reject_plan with that runId.`
+      : `Child run ${child.runId} (${child.label}) is waiting for an approval in the web UI; Autopilot continues after it.`;
+  return "Still working: call wait_for_run.";
+}
+
+function presentRun(view: RunView, webUrl: string, runUrl: (runId: string) => string) {
   const serialised = view.deliverable === null ? "" : JSON.stringify(view.deliverable.content);
   const deliverable =
     view.deliverable === null
@@ -71,12 +95,7 @@ function presentRun(view: RunView, webUrl: string) {
     status: view.status,
     terminal: view.terminal,
     webUrl,
-    nextAction:
-      view.status === "awaiting_plan_approval"
-        ? "The plan is waiting for a decision: call approve_plan or reject_plan."
-        : view.terminal
-          ? null
-          : "Still working: call wait_for_run.",
+    nextAction: nextActionFor(view),
     pendingPlan: view.pendingPlan,
     pendingApprovals: view.pendingApprovals,
     steps: view.steps,
@@ -85,12 +104,31 @@ function presentRun(view: RunView, webUrl: string) {
     summary: view.summary,
     error: view.error,
     deliverable,
+    ...(view.children === undefined
+      ? {}
+      : {
+          children: view.children.map((child) => ({
+            ...child,
+            webUrl: child.runId === null ? null : runUrl(child.runId),
+          })),
+        }),
+    ...(view.autopilotParent === undefined || view.autopilotParent === null
+      ? {}
+      : {
+          autopilotParent: {
+            ...view.autopilotParent,
+            webUrl: runUrl(view.autopilotParent.runId),
+          },
+        }),
   };
 }
 
 function needsAttention(view: RunView): boolean {
   return (
-    view.terminal || view.status === "awaiting_plan_approval" || view.status === "awaiting_approval"
+    view.terminal ||
+    view.status === "awaiting_plan_approval" ||
+    view.status === "awaiting_approval" ||
+    waitingChild(view) !== undefined
   );
 }
 
@@ -111,7 +149,7 @@ export function createDelegateMcpServer(backend: DelegateBackend, options: Serve
   const missionIds = options.missions.map((mission) => mission.id);
   const server = new McpServer(SERVER_INFO, {
     instructions:
-      "Delegate runs missions (cited company research, automation audits, assistants) as governed, audited runs. Start one with start_mission, then call wait_for_run until it is terminal or a plan needs approval. Every run is visible live at its webUrl.",
+      "Delegate runs missions (cited company research, automation audits, assistants) as governed, audited runs. Start one with start_mission, or hand a whole goal to start_autopilot, then call wait_for_run until it is terminal or a plan needs approval. Every run is visible live at its webUrl.",
   });
 
   server.registerTool(
@@ -137,6 +175,24 @@ export function createDelegateMcpServer(backend: DelegateBackend, options: Serve
   );
 
   server.registerTool(
+    "start_autopilot",
+    {
+      title: "Start an Autopilot run",
+      description:
+        "Hand Delegate a goal and let it carry the work through: a goal brief first, then the top actions as child runs (Company X-ray, AI Automation Audit and Build it; or Repo X-ray and Ship-a-PR). Each child keeps its own approvals: plans follow the workspace auto-approve setting and side effects (pull requests, connector writes) always ask unless pre-approved. At most 4 children, no nested autopilots. get_run lists the children with their status.",
+      inputSchema: StartAutopilotRequestSchema.shape,
+    },
+    ({ goal, url }) =>
+      guarded(async () => {
+        const started = await backend.startAutopilot(url === undefined ? { goal } : { goal, url });
+        return json({
+          ...started,
+          next: "Call wait_for_run with this runId; it returns early when a child needs a decision.",
+        });
+      }),
+  );
+
+  server.registerTool(
     "get_run",
     {
       title: "Get a run",
@@ -148,7 +204,7 @@ export function createDelegateMcpServer(backend: DelegateBackend, options: Serve
       guarded(async () => {
         const view = await backend.getRun(runId);
         if (view === null) return failure("No run with that id is visible to this token.");
-        return json(presentRun(view, backend.runUrl(runId)));
+        return json(presentRun(view, backend.runUrl(runId), (id) => backend.runUrl(id)));
       }),
   );
 
@@ -170,7 +226,10 @@ export function createDelegateMcpServer(backend: DelegateBackend, options: Serve
           const view = await backend.getRun(runId);
           if (view === null) return failure("No run with that id is visible to this token.");
           if (needsAttention(view) || now() + WAIT_POLL_MS > deadline)
-            return json({ ...presentRun(view, backend.runUrl(runId)), waited: true });
+            return json({
+              ...presentRun(view, backend.runUrl(runId), (id) => backend.runUrl(id)),
+              waited: true,
+            });
           await sleep(WAIT_POLL_MS);
         }
       }),
