@@ -40,9 +40,21 @@ export interface ExecuteRunOptions {
   lease?: RunLease;
   resumeFrom?: readonly RunEvent[];
   connections?: MissionConnections;
+  onSettled?: () => Promise<void>;
 }
 
 export async function executeRun(options: ExecuteRunOptions): Promise<void> {
+  try {
+    await executeLeased(options);
+  } finally {
+    if (options.onSettled !== undefined)
+      await options.onSettled().catch((error: unknown) => {
+        console.error("run settle hook failed", options.ctx.runId, publicError(error).message);
+      });
+  }
+}
+
+async function executeLeased(options: ExecuteRunOptions): Promise<void> {
   if (options.lease === undefined) {
     await executeHeld(options, undefined, () => true);
     return;

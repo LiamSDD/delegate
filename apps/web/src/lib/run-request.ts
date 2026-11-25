@@ -7,12 +7,16 @@ export type CompanyMission = "automation-audit" | "company-xray";
 
 export interface RunChoice {
   companyMission: CompanyMission;
+  autopilot?: boolean;
   department?: string;
   rawInput?: string;
 }
 
-function goalRequest(goal: string): StartRunRequest {
-  return { missionId: "custom-goal", input: { goal: goal.slice(0, GOAL_MAX_CHARS) } };
+function goalRequest(goal: string, autopilot: boolean): StartRunRequest {
+  return {
+    missionId: autopilot ? "autopilot" : "custom-goal",
+    input: { goal: goal.slice(0, GOAL_MAX_CHARS) },
+  };
 }
 
 export function runRequestFor(detected: DetectedMission, choice: RunChoice): StartRunRequest {
@@ -33,12 +37,12 @@ export function runRequestFor(detected: DetectedMission, choice: RunChoice): Sta
         input: { url: choice.rawInput?.trim() ?? detected.url },
       };
     case "goal":
-      return goalRequest(detected.target);
+      return goalRequest(detected.target, choice.autopilot === true);
   }
 }
 
 export function runLabelFor(detected: DetectedMission | null, choice: RunChoice): string {
   if (detected?.kind === "repo") return "Run Repo X-ray";
-  if (detected?.kind !== "company") return "Run goal";
+  if (detected?.kind !== "company") return choice.autopilot === true ? "Run Autopilot" : "Run goal";
   return choice.companyMission === "automation-audit" ? "Run audit" : "Run X-ray";
 }

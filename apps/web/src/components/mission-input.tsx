@@ -37,8 +37,12 @@ export function MissionInput({
   const [mission, setMission] = useState<CompanyMission>("automation-audit");
   const [department, setDepartment] = useState("");
   const [autoApprove, setAutoApprove] = useState(initialAutoApprove);
+  const [autopilot, setAutopilot] = useState(false);
   const departmentId = useId();
   const autoId = useId();
+  const autopilotId = useId();
+  const autopilotHintId = useId();
+  const goal = detected?.kind === "goal";
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -62,7 +66,12 @@ export function MissionInput({
           setStarting(true);
           setStartError(null);
           void startRun(
-            runRequestFor(detected, { companyMission: mission, department, rawInput: value }),
+            runRequestFor(detected, {
+              companyMission: mission,
+              department,
+              rawInput: value,
+              autopilot: goal && autopilot,
+            }),
           ).then((result) => {
             if (result.ok) {
               router.push(`/runs/${result.runId}`);
@@ -161,7 +170,9 @@ export function MissionInput({
                 : "bg-accent text-accent-fg hover:bg-accent/90",
             )}
           >
-            {starting ? "Starting…" : runLabelFor(detected, { companyMission: mission })}
+            {starting
+              ? "Starting…"
+              : runLabelFor(detected, { companyMission: mission, autopilot: goal && autopilot })}
             <CornerDownLeft className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
@@ -214,6 +225,31 @@ export function MissionInput({
               className="h-7 w-36 rounded-md border border-border bg-surface px-2 text-xs text-text placeholder:text-text-subtle focus:border-accent focus:outline-none"
             />
           </div>
+        ) : null}
+        {goal ? (
+          <label
+            htmlFor={autopilotId}
+            className="flex cursor-pointer items-center gap-2 text-xs text-text-muted"
+          >
+            <input
+              id={autopilotId}
+              type="checkbox"
+              checked={autopilot}
+              aria-describedby={autopilotHintId}
+              onChange={(event) => {
+                setAutopilot(event.target.checked);
+              }}
+              className="peer sr-only"
+            />
+            <span
+              aria-hidden="true"
+              className="relative h-4 w-7 rounded-full bg-border-strong transition-colors peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-focus after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:shadow-sm after:transition-transform peer-checked:after:translate-x-3"
+            />
+            Autopilot
+            <span id={autopilotHintId} className="hidden text-text-subtle sm:inline">
+              brief, then up to 3 follow-up missions; each keeps its approvals
+            </span>
+          </label>
         ) : null}
         <label
           htmlFor={autoId}

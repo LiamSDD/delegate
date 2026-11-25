@@ -30,6 +30,7 @@ function nullOn404<T>(promise: Promise<T>): Promise<T | null> {
 export function restBackend(client: DelegateClient): DelegateBackend {
   return {
     startMission: (request) => client.startRun(request),
+    startAutopilot: (request) => client.startAutopilot(request),
     getRun: (runId) => nullOn404(client.getRun(runId)),
     listRuns: (limit) => client.listRuns(limit),
     decidePlan: (runId, decision) => client.decidePlan(runId, decision),
