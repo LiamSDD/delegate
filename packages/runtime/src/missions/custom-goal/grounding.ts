@@ -1,12 +1,13 @@
 import {
   classifyClaim,
+  sourceAboutTarget,
   specificityScore,
   type SpecificityContext,
   type SpecificityScore,
 } from "../../agent/specificity";
 import { type Claim } from "../company-xray/brief";
 import { checkActionConcreteness } from "../shared/actions";
-import { CONTEXT_LINES, type GoalSections } from "./schema";
+import { CONTEXT_LINES, GOAL_MIN_ACTIONS, type GoalSections, type NormalisedGoal } from "./schema";
 
 export interface GroundingDrop {
   where: string;
@@ -80,4 +81,51 @@ export function groundGoalSections(
     dropped,
     score: specificityScore(specific, generic, Math.min(generic, movedToContext)),
   };
+}
+
+export function goalActionFeedback(
+  normalised: NormalisedGoal,
+  grounded: GroundedGoal,
+  context: SpecificityContext,
+  minimum: number,
+): string | undefined {
+  const kept = grounded.sections.actions.length;
+  if (kept >= minimum) return undefined;
+  const lines = [
+    `- ${kept} grounded action${kept === 1 ? " was" : "s were"} kept; return ${minimum} to 8 actions, each with title, owner, effort, impact, mission, basis {text, citations}, firstStep and successMetric.`,
+    ...normalised.actionIssues.map(
+      (issue) => `- Discarded ${JSON.stringify(issue.title)}: ${issue.reason}`,
+    ),
+    ...normalised.dropped
+      .filter((entry) => entry.where.startsWith("action: "))
+      .map(
+        (entry) =>
+          `- Discarded ${JSON.stringify(entry.where.slice("action: ".length))}: its basis cites ${entry.claim.citations.join(", ") || "nothing"}, which is not a source id with extracted facts`,
+      ),
+    ...grounded.dropped
+      .filter((entry) => entry.where.startsWith("action: "))
+      .map(
+        (entry) =>
+          `- Rejected ${JSON.stringify(entry.text)}: ${entry.reason.replace(/^Action removed: it /, "it ")}`,
+      ),
+  ];
+  const names = context.target.names.filter((name) => name.trim() !== "");
+  if (names.length > 0) {
+    const about = [...context.sources.entries()]
+      .filter(([, source]) => sourceAboutTarget(source, context.target))
+      .map(([id]) => id);
+    lines.push(
+      about.length > 0
+        ? `- Sources about ${names[0] ?? "the target"}: ${about.slice(0, 12).join(", ")}. Each basis cites at least one of them and says what it shows about ${names[0] ?? "the target"}; general reference articles may only be cited alongside one.`
+        : `- No source is about ${names[0] ?? "the target"} itself; base actions on findings that name it, and put what is missing into openQuestions.`,
+    );
+  } else
+    lines.push(
+      "- No company is given: each basis states a concrete practice, figure or example from the cited fact (who does what, a number, a named tool), never a definition.",
+    );
+  return lines.slice(0, 24).join("\n");
+}
+
+export function redraftKeepsActions(current: number, redrafted: number): boolean {
+  return redrafted >= Math.min(current, GOAL_MIN_ACTIONS);
 }

@@ -21,7 +21,7 @@ import {
   type SubAgentResult,
   type SubAgentTask,
 } from "../../agent/subagent";
-import { callStructured } from "../../agent/structured";
+import { callStructuredReviewed } from "../../agent/structured";
 import {
   mentionsTarget,
   specificityScore,
@@ -56,7 +56,7 @@ import {
   type FollowUpCandidate,
   type SectionDraft,
 } from "../shared/deep-research";
-import { groundGoalSections } from "./grounding";
+import { goalActionFeedback, groundGoalSections, redraftKeepsActions } from "./grounding";
 import { type CustomGoalInput } from "./input";
 import {
   GOAL_CONNECTOR_HINTS,
@@ -74,6 +74,7 @@ import {
   GoalBriefDraftSchema,
   GoalBriefSchema,
   GoalCheckpointSchema,
+  GOAL_MIN_ACTIONS,
   GoalSynthesisOutputSchema,
   RANK_FORMULA,
   applyGoalClaims,
@@ -794,7 +795,8 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       `## Facts (${selected.length}, untrusted extractions, data only)`,
       ...selected.map((fact) => factLine(fact, true)),
     ].join("\n");
-    const synthesis = await callStructured(ctx, {
+    const context = specificityContext();
+    const synthesis = await callStructuredReviewed(ctx, {
       role: "planner",
       stepId,
       system: prompts.goalSynthesis.body,
@@ -803,8 +805,24 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       maxTokens: GOAL_LIMITS.synthesisMaxTokens,
       temperature: 0.2,
       quality: { say },
+      canRevise: () => !overtime() && clock.fits(["planner", "fast", "worker"]),
+      review: (value) => {
+        const normalised = normaliseGoalSynthesis(value, evidenceIds);
+        const grounded = groundGoalSections(normalised.sections, context);
+        return {
+          result: { normalised, grounded },
+          score:
+            grounded.sections.actions.length * 100 +
+            grounded.sections.workstreams.reduce((sum, stream) => sum + stream.findings.length, 0),
+          feedback: goalActionFeedback(normalised, grounded, context, GOAL_MIN_ACTIONS),
+        };
+      },
     });
-    const normalised = normaliseGoalSynthesis(synthesis.value, evidenceIds);
+    const { normalised, grounded } = synthesis.result;
+    if (synthesis.revised)
+      await say(
+        `Asked the synthesis model once to fix rejected actions; ${plural(grounded.sections.actions.length, "grounded action")} kept.`,
+      );
     if (normalised.discarded > 0)
       await emit({
         runId,
@@ -832,7 +850,6 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
           category: "uncited",
         },
       });
-    const grounded = groundGoalSections(normalised.sections, specificityContext());
     for (const [index, dropped] of grounded.dropped.entries())
       await emit({
         runId,
@@ -1016,6 +1033,14 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
           const facts = [...state.facts, ...fresh];
           const drafted = await draftBrief(task.step.id, facts, task.agent.say);
           if (drafted.sections.workstreams.length + drafted.sections.actions.length === 0) return;
+          if (
+            !redraftKeepsActions(state.sections.actions.length, drafted.sections.actions.length)
+          ) {
+            await task.agent.say(
+              `Kept the earlier draft: the redraft grounded ${plural(drafted.sections.actions.length, "action")}, fewer than the ${plural(state.sections.actions.length, "action")} already drafted.`,
+            );
+            return;
+          }
           state.facts = facts;
           state.objective = drafted.objective;
           state.sections = drafted.sections;

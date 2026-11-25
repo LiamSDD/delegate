@@ -69,6 +69,7 @@ describe("prompt change notes", () => {
     "automation-audit.analyst.v2.md",
     "deep-research.gaps.v2.md",
     "repo-xray.improver.v2.md",
+    "custom-goal.synthesis.v3.md",
   ])("%s states what changed", (file) => {
     const prompt = parsePromptFile(file, readFileSync(new URL(file, directory), "utf8"));
     expect(prompt.changes?.length ?? 0).toBeGreaterThan(20);

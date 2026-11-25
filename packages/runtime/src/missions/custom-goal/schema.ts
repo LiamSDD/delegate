@@ -180,11 +180,14 @@ export function rankActions(actions: readonly z.infer<typeof ActionDraftSchema>[
     .map(({ action, score }, index) => ({ ...action, rank: index + 1, score }));
 }
 
+export const GOAL_MIN_ACTIONS = 3;
+
 export interface NormalisedGoal {
   objective: string;
   sections: GoalSections;
   discarded: number;
   dropped: { where: string; claim: Claim }[];
+  actionIssues: { title: string; reason: string }[];
 }
 
 function cited(claim: Claim, evidence: ReadonlySet<string>): Claim | null {
@@ -219,8 +222,26 @@ export function normaliseGoalSynthesis(
       .slice(0, 8);
     return findings.length === 0 ? [] : [{ name: stream.name, findings }];
   });
+  const actionIssues: NormalisedGoal["actionIssues"] = [];
+  const parsedActions = raw.actions.flatMap((item) => {
+    const parsed = ActionDraftSchema.safeParse(item);
+    if (parsed.success) return [parsed.data];
+    discarded += 1;
+    const title =
+      typeof item === "object" && item !== null && "title" in item && typeof item.title === "string"
+        ? item.title.slice(0, 120)
+        : "an untitled action";
+    actionIssues.push({
+      title,
+      reason: parsed.error.issues
+        .slice(0, 4)
+        .map((issue) => `${issue.path.map(String).join(".") || "(action)"}: ${issue.message}`)
+        .join("; "),
+    });
+    return [];
+  });
   const actions = rankActions(
-    parseAll(raw.actions, ActionDraftSchema).flatMap((action) => {
+    parsedActions.flatMap((action) => {
       const basis = keep(action.basis, `action: ${action.title}`);
       return basis === null ? [] : [{ ...action, basis }];
     }),
@@ -237,6 +258,7 @@ export function normaliseGoalSynthesis(
     sections: { workstreams: workstreams.slice(0, 8), actions, risks, openQuestions, context },
     discarded,
     dropped,
+    actionIssues,
   };
 }
 
