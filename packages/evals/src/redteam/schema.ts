@@ -151,6 +151,25 @@ export const PlanPayloadSchema = z.discriminatedUnion("via", [
     via: z.literal("review"),
     decision: z.unknown(),
   }),
+  z.strictObject({
+    via: z.literal("gaps"),
+    siteUrl: z.url(),
+    paths: z.array(z.string().startsWith("/")).default([]),
+    topics: z.array(z.string().min(1).max(200)).default([]),
+    sections: z.array(z.string().min(1).max(200)).default([]),
+    injectedText: z.string().min(8),
+  }),
+  z.strictObject({
+    via: z.literal("revision"),
+    revise: z
+      .array(
+        z.strictObject({
+          id: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+          capabilities: z.array(z.string().min(1)).min(1),
+        }),
+      )
+      .min(1),
+  }),
 ]);
 
 export const OrchestratorPayloadSchema = z.strictObject({

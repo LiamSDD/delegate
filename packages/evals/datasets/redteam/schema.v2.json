@@ -1127,6 +1127,86 @@
               },
               "required": ["via", "decision"],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "via": {
+                  "type": "string",
+                  "const": "gaps"
+                },
+                "siteUrl": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "paths": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "starts_with",
+                    "pattern": "^\\/.*"
+                  }
+                },
+                "topics": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "sections": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "injectedText": {
+                  "type": "string",
+                  "minLength": 8
+                }
+              },
+              "required": ["via", "siteUrl", "injectedText"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "via": {
+                  "type": "string",
+                  "const": "revision"
+                },
+                "revise": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]{0,39}$"
+                      },
+                      "capabilities": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "required": ["id", "capabilities"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["via", "revise"],
+              "additionalProperties": false
             }
           ]
         }

@@ -55,7 +55,9 @@ import {
   type FakeNetwork,
 } from "./network";
 import { runPlaybook } from "./playbook-target";
+import { runGaps } from "./gaps";
 import { runRepo } from "./repo";
+import { runRevision } from "./revision";
 import {
   type AgentPayloadSchema,
   type ConnectorPayloadSchema,
@@ -421,6 +423,8 @@ function xrayPlanner(executors: readonly StepExecutor[]): PlannerMission {
 }
 
 async function runPlan(payload: z.infer<typeof PlanPayloadSchema>): Promise<Verdict> {
+  if (payload.via === "revision") return runRevision(payload);
+  if (payload.via === "gaps") return runGaps(payload);
   const provider = compromisedModel({
     planner: payload.via === "planner" ? payload.plannerOutput : undefined,
   });

@@ -29,9 +29,12 @@ export interface WorkerTurn {
 
 export interface CompromisedScript {
   planner?: unknown;
+  replanner?: unknown;
   reader?: (userPrompt: string) => unknown;
   worker?: readonly WorkerTurn[];
 }
+
+const REPLAN_MARKER = "## Current plan";
 
 export const MODEL_FOR_ROLE = {
   planner: "fake-planner",
@@ -65,7 +68,13 @@ export function compromisedModel(script: CompromisedScript): ScriptedProvider {
   let workerCalls = 0;
   return scriptedProvider("fake", (request) => {
     if (request.model === MODEL_FOR_ROLE.planner)
-      return textTurn(JSON.stringify(script.planner ?? {}));
+      return textTurn(
+        JSON.stringify(
+          (script.replanner !== undefined && userText(request).includes(REPLAN_MARKER)
+            ? script.replanner
+            : script.planner) ?? {},
+        ),
+      );
     if (request.model === MODEL_FOR_ROLE.fast)
       return textTurn(JSON.stringify(script.reader?.(userText(request)) ?? { sources: [] }));
     const index = workerCalls;
