@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { fixtureBrief, xrayFixtureEvents, type FixtureOptions } from "./testing/xray-fixture";
 import { EvalResultFileSchema, scoreboard } from "./results";
+import { runDir } from "./judge/agreement-store";
 import { resultFilePath, runEval, type RunEvalDeps, type RunEvalOptions } from "./runner";
 
 const verdict = JSON.stringify({
@@ -87,10 +88,10 @@ describe("runEval", () => {
       calls: 4,
     });
     expect(summary.promptVersions).toMatchObject({ "company-xray-synthesis": 1, "xray-judge": 1 });
-    const runDir = join(dir, summary.id);
-    expect(existsSync(join(runDir, "atlassian", "0.events.jsonl"))).toBe(true);
-    expect(existsSync(join(runDir, "zed", "1.judge.json"))).toBe(true);
-    expect(readFileSync(join(runDir, "summary.md"), "utf8")).toContain("No human labels yet");
+    const dirOfRun = runDir(dir, "xray", summary.id);
+    expect(existsSync(join(dirOfRun, "atlassian", "0.events.jsonl"))).toBe(true);
+    expect(existsSync(join(dirOfRun, "zed", "1.judge.json"))).toBe(true);
+    expect(readFileSync(join(dirOfRun, "summary.md"), "utf8")).toContain("No human labels yet");
     expect(existsSync(join(dir, "baseline.json"))).toBe(false);
     const file = EvalResultFileSchema.parse(
       JSON.parse(readFileSync(resultFilePath(dir, summary), "utf8")) as unknown,
@@ -117,13 +118,15 @@ describe("runEval", () => {
     const never = (): Promise<RunMissionResult> =>
       Promise.reject(new Error("offline replay must not run missions"));
     const replay = await runEval(
-      options(dir, { offline: true, replayDir: join(dir, live.id) }),
+      options(dir, { offline: true, replayDir: runDir(dir, "xray", live.id) }),
       deps(never),
     );
     expect(replay.mode).toBe("replay");
     expect(replay.cases.map((c) => c.score.mean)).toEqual(live.cases.map((c) => c.score.mean));
     expect(replay.cases[0]?.judge.accuracy?.mean).toBe(0.75);
-    expect(readFileSync(join(dir, replay.id, "summary.md"), "utf8")).toContain("Replay");
+    expect(readFileSync(join(runDir(dir, "xray", replay.id), "summary.md"), "utf8")).toContain(
+      "Replay",
+    );
   });
 
   it("writes a baseline only on request and flags a meaningful regression against it", async () => {
@@ -163,6 +166,8 @@ describe("runEval", () => {
     expect(sleeps).toEqual([60_000]);
     expect(summary.overall.retries).toBe(1);
     expect(summary.cases[0]?.score.n).toBe(1);
-    expect(readdirSync(join(dir, summary.id, "zed"))).toContain("0.attempt-0.events.jsonl");
+    expect(readdirSync(join(runDir(dir, "xray", summary.id), "zed"))).toContain(
+      "0.attempt-0.events.jsonl",
+    );
   });
 });

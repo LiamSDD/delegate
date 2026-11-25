@@ -3,7 +3,13 @@ import path from "node:path";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
-import { wilsonInterval, type ProportionInterval } from "@delegate/evals/results";
+import {
+  wilsonInterval,
+  type MeanInterval,
+  type ProportionInterval,
+  type ResultAgreement,
+  type ResultMetric,
+} from "@delegate/evals/results";
 
 import { ParetoChart } from "@/components/evals/pareto-chart";
 import {
@@ -12,25 +18,21 @@ import {
   loadEvalResults,
   loadRedteam,
   type Calibration,
+  type EvolutionRow,
   type FrontierPoint,
-  type MissionScore,
+  type MissionFrontier,
+  type MissionRow,
   type RedteamState,
 } from "@/server/eval-results";
 
 export const metadata: Metadata = { title: "Evals" };
 export const dynamic = "force-static";
 
-const MISSION_NAMES: Record<string, string> = { xray: "Company X-ray" };
-
 const dateFormat = new Intl.DateTimeFormat("en-GB", {
   dateStyle: "medium",
   timeStyle: "short",
   timeZone: "UTC",
 });
-
-function missionName(mission: string): string {
-  return MISSION_NAMES[mission] ?? mission;
-}
 
 function pct(value: number): string {
   return `${(value * 100).toFixed(0)}%`;
@@ -112,21 +114,59 @@ function ModeBadge({ mode }: { mode: "live" | "replay" }) {
   );
 }
 
-function Scoreboard({ missions }: { missions: readonly MissionScore[] }) {
-  if (missions.length === 0) {
-    return (
-      <Empty title="No eval results committed yet">
-        <p>
-          Run <Code>pnpm eval --mission xray</Code>, then commit the file it writes to{" "}
-          <Code>packages/evals/results/xray/</Code>. Nothing here is estimated: the scoreboard only
-          shows recorded trials.
-        </p>
-      </Empty>
-    );
-  }
+const METRIC_LABELS: Record<string, { label: string; unit: "share" | "count" | "eur" }> = {
+  claims: { label: "claims", unit: "count" },
+  citations: { label: "citations", unit: "count" },
+  sectionsCovered: { label: "sections covered", unit: "count" },
+  opportunities: { label: "opportunities", unit: "count" },
+  eurPerMonth: { label: "estimated €/month", unit: "eur" },
+  departmentRecall: { label: "department hints found", unit: "share" },
+  workflowRecall: { label: "workflow hints found", unit: "share" },
+  verifiedShare: { label: "critic-verified", unit: "share" },
+  answerAccuracy: { label: "answers correct", unit: "share" },
+  falseRefusalRate: { label: "false refusals", unit: "share" },
+  outOfScopeRefusalRate: { label: "out-of-scope refused", unit: "share" },
+  citedAnswerRate: { label: "answers cited", unit: "share" },
+  factRecall: { label: "expected facts found", unit: "share" },
+  improvements: { label: "improvements", unit: "count" },
+  actions: { label: "actions", unit: "count" },
+  targetResolved: { label: "target resolved", unit: "share" },
+};
+
+const euro = new Intl.NumberFormat("en-GB", {
+  style: "currency",
+  currency: "EUR",
+  maximumFractionDigits: 0,
+});
+
+function MetricList({ metrics }: { metrics: readonly [string, ResultMetric][] }) {
+  const shown = metrics.flatMap(([name, value]) => {
+    const meta = METRIC_LABELS[name];
+    return meta === undefined ? [] : [{ name, value, meta }];
+  });
+  if (shown.length === 0) return null;
+  return (
+    <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-2xs font-normal text-text-muted">
+      {shown.map(({ name, value, meta }) => (
+        <li key={name} className="tabular">
+          {meta.unit === "share"
+            ? pct(value.mean)
+            : meta.unit === "eur"
+              ? euro.format(value.mean)
+              : value.mean.toFixed(1)}{" "}
+          <span className="text-text-subtle">
+            {meta.label} (n={value.n})
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Scoreboard({ missions }: { missions: readonly MissionRow[] }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-surface shadow-sm">
-      <table className="w-full min-w-[46rem] text-left text-sm">
+      <table className="w-full min-w-[52rem] text-left text-sm">
         <caption className="sr-only">Latest eval result per mission</caption>
         <thead className="border-b border-border">
           <tr className="font-mono text-2xs tracking-label text-text-subtle uppercase">
@@ -140,6 +180,9 @@ function Scoreboard({ missions }: { missions: readonly MissionScore[] }) {
               Score (mean ± 95% CI)
             </th>
             <th scope="col" className="px-4 py-3 font-normal">
+              Judge (0-1)
+            </th>
+            <th scope="col" className="px-4 py-3 font-normal">
               Citations verified
             </th>
             <th scope="col" className="px-4 py-3 font-normal">
@@ -151,51 +194,242 @@ function Scoreboard({ missions }: { missions: readonly MissionScore[] }) {
           </tr>
         </thead>
         <tbody>
-          {missions.map(({ mission, latest, board, runs }) => (
-            <tr key={mission} className="border-b border-border align-top last:border-b-0">
+          {missions.map((row) => (
+            <tr key={row.mission} className="border-b border-border align-top last:border-b-0">
               <th scope="row" className="px-4 py-3 font-medium">
-                {missionName(mission)}
+                {row.title}
                 <p className="mt-1 font-mono text-2xs font-normal text-text-subtle">
-                  {latest.dataset.name} v{latest.dataset.version} · {latest.trialsPerCase} trials
-                  per case
+                  {row.status === "ok"
+                    ? `${row.latest.dataset.name} v${row.latest.dataset.version} · ${row.latest.trialsPerCase} trials per case`
+                    : `dataset ${row.dataset}`}
                 </p>
+                {row.status === "ok" ? <MetricList metrics={row.metrics} /> : null}
               </th>
-              <td className="px-4 py-3 font-mono text-xs">
-                <Proportion value={board.passRate} />
+              {row.status === "no_results" ? (
+                <td colSpan={6} className="px-4 py-3 text-sm text-text-muted">
+                  No results committed yet, so nothing is shown. Run{" "}
+                  <Code>pnpm eval --mission {row.mission}</Code> and commit the file it writes to{" "}
+                  <Code>packages/evals/results/{row.mission}/</Code>.
+                </td>
+              ) : (
+                <>
+                  <td className="px-4 py-3 font-mono text-xs">
+                    <Proportion value={row.board.passRate} />
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs tabular">
+                    <MeanValue value={row.board.score} />
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs tabular">
+                    <MeanValue value={row.board.judge} />
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs">
+                    <Proportion value={row.board.citationAccuracy} />
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-text-muted tabular">
+                    {seconds(row.board.p50LatencyMs)}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-text-muted">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <ModeBadge mode={row.latest.mode} />
+                      <time dateTime={row.latest.finishedAt}>
+                        {dateFormat.format(new Date(row.latest.finishedAt))}
+                      </time>
+                    </span>
+                    <span className="mt-1 block text-2xs text-text-subtle">
+                      {row.runs} result {row.runs === 1 ? "file" : "files"}
+                      {row.liveRuns === 0 ? " · no live run yet" : ` · ${row.liveRuns} live`}
+                    </span>
+                  </td>
+                </>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MeanValue({ value }: { value: MeanInterval | null }) {
+  if (value === null) return <span className="text-text-subtle">no data</span>;
+  return (
+    <>
+      <span className="text-text">{value.mean.toFixed(2)}</span>{" "}
+      <span className="text-text-subtle">
+        {value.lower === null || value.upper === null
+          ? `n=${value.n}, no CI`
+          : `± ${((value.upper - value.lower) / 2).toFixed(2)} n=${value.n}`}
+      </span>
+    </>
+  );
+}
+
+function FrontierTable({ points }: { points: readonly FrontierPoint[] }) {
+  return (
+    <details className="text-sm">
+      <summary className="cursor-pointer font-mono text-2xs tracking-label text-text-subtle uppercase">
+        Table view
+      </summary>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[36rem] text-left font-mono text-xs">
+          <thead>
+            <tr className="text-text-subtle">
+              <th scope="col" className="py-1.5 pr-4 font-normal">
+                Result
+              </th>
+              <th scope="col" className="py-1.5 pr-4 font-normal">
+                Configuration
+              </th>
+              <th scope="col" className="py-1.5 pr-4 font-normal">
+                Tokens / trial
+              </th>
+              <th scope="col" className="py-1.5 pr-4 font-normal">
+                Spend / trial
+              </th>
+              <th scope="col" className="py-1.5 pr-4 font-normal">
+                Pass rate
+              </th>
+              <th scope="col" className="py-1.5 font-normal">
+                Frontier
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {points.map((point) => (
+              <tr key={point.id} className="border-t border-border">
+                <td className="py-1.5 pr-4">
+                  {point.id} {point.mode === "replay" ? "(Replay)" : ""}
+                </td>
+                <td className="py-1.5 pr-4 text-text-muted">{point.label}</td>
+                <td className="py-1.5 pr-4 tabular">{Math.round(point.tokensPerTrial)}</td>
+                <td className="py-1.5 pr-4 tabular">
+                  ${(point.costMicroUsdPerTrial / 1_000_000).toFixed(4)}
+                </td>
+                <td className="py-1.5 pr-4 tabular">
+                  {pct(point.passRate)} (n={point.n})
+                </td>
+                <td className="py-1.5">{point.onFrontier ? "yes" : "no"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
+function Frontiers({ frontiers }: { frontiers: readonly MissionFrontier[] }) {
+  const plotted = frontiers.filter((entry) => entry.points.length > 0);
+  const empty = frontiers.filter((entry) => entry.points.length === 0);
+  return (
+    <div className="flex flex-col gap-4">
+      {plotted.length === 0 ? (
+        <Empty title="No points to plot yet">
+          <p>
+            Each committed result file becomes one point: tokens per trial against pass rate. Run{" "}
+            <Code>pnpm eval --mission all</Code> with different models or prompt versions to fill
+            the charts.
+          </p>
+        </Empty>
+      ) : (
+        <ul className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-2xs text-text-muted">
+          <li className="flex items-center gap-2">
+            <span aria-hidden="true" className="size-2.5 rounded-full bg-accent" />
+            On the mission&apos;s Pareto frontier
+          </li>
+          <li className="flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              className="size-2.5 rounded-full border-2 border-text-subtle bg-surface"
+            />
+            Dominated (another configuration is cheaper and at least as good)
+          </li>
+        </ul>
+      )}
+      {plotted.map((entry) => (
+        <div
+          key={entry.mission}
+          className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 shadow-sm"
+        >
+          <h3 className="text-base font-medium">
+            {entry.title}{" "}
+            <span className="font-mono text-2xs font-normal text-text-subtle">
+              {entry.points.length} {entry.points.length === 1 ? "result" : "results"}
+            </span>
+          </h3>
+          <ParetoChart points={entry.points} />
+          <FrontierTable points={entry.points} />
+        </div>
+      ))}
+      {plotted.length > 0 && empty.length > 0 ? (
+        <p className="text-sm text-text-muted">
+          No results yet for {empty.map((entry) => entry.title).join(", ")}.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function AgreementTable({ agreement }: { agreement: ResultAgreement }) {
+  if (agreement.status === "no_human_labels")
+    return (
+      <p className="mt-2 text-sm text-text-muted">
+        No human labels yet, so judge-human agreement is not measured.
+      </p>
+    );
+  if (agreement.status === "no_matching_judgements")
+    return (
+      <p className="mt-2 text-sm text-text-muted">
+        {agreement.labels} human labels exist, but none match a judged trial still on disk.
+      </p>
+    );
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <p className="mb-2 text-sm text-text-muted">
+        {agreement.matched} of {agreement.labels} human labels matched a judged trial.
+      </p>
+      <table className="w-full min-w-[32rem] text-left font-mono text-xs">
+        <thead>
+          <tr className="text-text-subtle">
+            <th scope="col" className="py-1.5 pr-4 font-normal">
+              Criterion
+            </th>
+            <th scope="col" className="py-1.5 pr-4 font-normal">
+              n
+            </th>
+            <th scope="col" className="py-1.5 pr-4 font-normal">
+              Exact match (95% CI)
+            </th>
+            <th scope="col" className="py-1.5 pr-4 font-normal">
+              Within 1
+            </th>
+            <th scope="col" className="py-1.5 font-normal">
+              Cohen&apos;s kappa (95% CI)
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {agreement.criteria.map((row) => (
+            <tr key={row.criterion} className="border-t border-border">
+              <td className="py-1.5 pr-4">{row.criterion}</td>
+              <td className="py-1.5 pr-4 tabular">{row.n}</td>
+              <td className="py-1.5 pr-4">
+                <Proportion value={wilsonInterval(Math.round(row.exactMatchRate * row.n), row.n)} />
               </td>
-              <td className="px-4 py-3 font-mono text-xs tabular">
-                {board.score === null ? (
-                  <span className="text-text-subtle">no data</span>
+              <td className="py-1.5 pr-4 tabular">{pct(row.withinOneRate)}</td>
+              <td className="py-1.5 tabular">
+                {row.kappa === null ? (
+                  <span className="text-text-subtle">n/a</span>
                 ) : (
                   <>
-                    <span className="text-text">{board.score.mean.toFixed(2)}</span>{" "}
+                    {row.kappa.toFixed(2)}{" "}
                     <span className="text-text-subtle">
-                      {board.score.lower === null || board.score.upper === null
-                        ? `n=${board.score.n}, no CI`
-                        : `± ${((board.score.upper - board.score.lower) / 2).toFixed(2)} n=${board.score.n}`}
+                      {row.kappaLower === null || row.kappaUpper === null
+                        ? ""
+                        : `[${row.kappaLower.toFixed(2)}, ${row.kappaUpper.toFixed(2)}]`}
                     </span>
                   </>
                 )}
-              </td>
-              <td className="px-4 py-3 font-mono text-xs">
-                <Proportion value={board.citationAccuracy} />
-              </td>
-              <td className="px-4 py-3 font-mono text-xs text-text-muted tabular">
-                {seconds(board.p50LatencyMs)}
-              </td>
-              <td className="px-4 py-3 font-mono text-xs text-text-muted">
-                <span className="flex flex-wrap items-center gap-2">
-                  <ModeBadge mode={latest.mode} />
-                  <time dateTime={latest.finishedAt}>
-                    {dateFormat.format(new Date(latest.finishedAt))}
-                  </time>
-                </span>
-                <span className="mt-1 block text-2xs text-text-subtle">
-                  {runs} result {runs === 1 ? "file" : "files"} ·{" "}
-                  {Object.entries(latest.promptVersions)
-                    .map(([name, version]) => `${name}@${version}`)
-                    .join(", ")}
-                </span>
               </td>
             </tr>
           ))}
@@ -205,175 +439,89 @@ function Scoreboard({ missions }: { missions: readonly MissionScore[] }) {
   );
 }
 
-function Frontier({ points }: { points: readonly FrontierPoint[] }) {
-  if (points.length === 0) {
-    return (
-      <Empty title="No points to plot yet">
-        <p>
-          Each committed result file becomes one point: tokens per trial against pass rate. Run{" "}
-          <Code>pnpm eval --mission xray</Code> with different models or prompt versions to fill the
-          chart.
-        </p>
-      </Empty>
-    );
-  }
+function CalibrationBlock({ calibration }: { calibration: readonly Calibration[] }) {
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 shadow-sm">
-      <ul className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-2xs text-text-muted">
-        <li className="flex items-center gap-2">
-          <span aria-hidden="true" className="size-2.5 rounded-full bg-accent" />
-          On the Pareto frontier
-        </li>
-        <li className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="size-2.5 rounded-full border-2 border-text-subtle bg-surface"
-          />
-          Dominated (another run is cheaper and at least as good)
-        </li>
-      </ul>
-      <ParetoChart points={points} />
-      <details className="text-sm">
-        <summary className="cursor-pointer font-mono text-2xs tracking-label text-text-subtle uppercase">
-          Table view
-        </summary>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[36rem] text-left font-mono text-xs">
-            <thead>
-              <tr className="text-text-subtle">
-                <th scope="col" className="py-1.5 pr-4 font-normal">
-                  Result
-                </th>
-                <th scope="col" className="py-1.5 pr-4 font-normal">
-                  Configuration
-                </th>
-                <th scope="col" className="py-1.5 pr-4 font-normal">
-                  Tokens / trial
-                </th>
-                <th scope="col" className="py-1.5 pr-4 font-normal">
-                  Spend / trial
-                </th>
-                <th scope="col" className="py-1.5 pr-4 font-normal">
-                  Pass rate
-                </th>
-                <th scope="col" className="py-1.5 font-normal">
-                  Frontier
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {points.map((point) => (
-                <tr key={point.id} className="border-t border-border">
-                  <td className="py-1.5 pr-4">
-                    {point.id} {point.mode === "replay" ? "(Replay)" : ""}
-                  </td>
-                  <td className="py-1.5 pr-4 text-text-muted">{point.label}</td>
-                  <td className="py-1.5 pr-4 tabular">{Math.round(point.tokensPerTrial)}</td>
-                  <td className="py-1.5 pr-4 tabular">
-                    ${(point.costMicroUsdPerTrial / 1_000_000).toFixed(4)}
-                  </td>
-                  <td className="py-1.5 pr-4 tabular">
-                    {pct(point.passRate)} (n={point.n})
-                  </td>
-                  <td className="py-1.5">{point.onFrontier ? "yes" : "no"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="flex flex-col gap-4">
+      {calibration.map((entry) => (
+        <div
+          key={entry.mission}
+          className="rounded-xl border border-border bg-surface p-4 shadow-sm"
+        >
+          <p className="font-mono text-2xs text-text-subtle">
+            {entry.title}
+            {entry.source === "none" ? "" : ` · ${entry.reference}`}
+          </p>
+          {entry.source === "none" ? (
+            <p className="mt-2 text-sm text-text-muted">
+              No judged trials yet. Run <Code>pnpm eval --mission {entry.mission}</Code>, then label
+              trials with <Code>pnpm label --mission {entry.mission}</Code>.
+            </p>
+          ) : (
+            <AgreementTable agreement={entry.agreement} />
+          )}
+          {entry.source !== "none" && entry.agreement.status !== "ok" ? (
+            <p className="mt-2 text-sm text-text-muted">
+              Label stored trials with <Code>pnpm label --mission {entry.mission}</Code>; labels go
+              to <Code>packages/evals/datasets/{entry.dataset}/human-labels.v1.jsonl</Code>.
+            </p>
+          ) : null}
         </div>
-      </details>
+      ))}
     </div>
   );
 }
 
-function CalibrationBlock({ calibration }: { calibration: readonly Calibration[] }) {
-  if (calibration.length === 0) {
+function score(value: number | null): string {
+  return value === null ? "–" : value.toFixed(2);
+}
+
+function Evolution({ rows }: { rows: readonly EvolutionRow[] }) {
+  if (rows.length === 0)
     return (
-      <Empty title="Nothing to calibrate yet">
+      <Empty title="No evolution runs recorded">
         <p>
-          Calibration needs judged trials and human labels. Run{" "}
-          <Code>pnpm eval --mission xray</Code>, then add labels to{" "}
-          <Code>packages/evals/datasets/company-xray/human-labels.v1.jsonl</Code>.
+          <Code>pnpm evolve</Code> proposes a prompt or playbook revision, evaluates parent and
+          child on the same cases, runs the red-team suite and promotes the child only on a
+          significant improvement with no regression. Each run writes a log to{" "}
+          <Code>packages/evals/results/evolution/</Code>; none is committed yet.
         </p>
       </Empty>
     );
-  }
   return (
-    <div className="flex flex-col gap-4">
-      {calibration.map(({ mission, resultId, agreement }) => (
-        <div key={mission} className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-          <p className="font-mono text-2xs text-text-subtle">
-            {missionName(mission)} · {resultId}
+    <ol className="flex flex-col gap-3">
+      {rows.map((row) => (
+        <li key={row.id} className="rounded-xl border border-border bg-surface p-4 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2 font-mono text-2xs text-text-subtle">
+            <span
+              className={`rounded-sm px-1.5 ${row.status === "promoted" ? "bg-success-soft text-success" : "bg-surface-2 text-text-muted"}`}
+            >
+              {row.status === "promoted" ? "Promoted" : "Rejected"}
+            </span>
+            <span>
+              {row.mission} · {row.kind}
+            </span>
+            <time dateTime={row.finishedAt}>{dateFormat.format(new Date(row.finishedAt))}</time>
+          </div>
+          <p className="mt-2 font-mono text-xs text-text">
+            {row.parent} <span aria-hidden="true">→</span>
+            <span className="sr-only">to</span> {row.child}
           </p>
-          {agreement.status === "no_human_labels" ? (
-            <p className="mt-2 text-sm text-text-muted">
-              No human labels yet, so judge-human agreement is not measured. Add labels to{" "}
-              <Code>packages/evals/datasets/company-xray/human-labels.v1.jsonl</Code> and re-run the
-              eval.
-            </p>
-          ) : agreement.status === "no_matching_judgements" ? (
-            <p className="mt-2 text-sm text-text-muted">
-              {agreement.labels} human labels exist, but none match a judged trial in this result.
-            </p>
-          ) : (
-            <div className="mt-3 overflow-x-auto">
-              <p className="mb-2 text-sm text-text-muted">
-                {agreement.matched} of {agreement.labels} human labels matched a judged trial.
-              </p>
-              <table className="w-full min-w-[32rem] text-left font-mono text-xs">
-                <thead>
-                  <tr className="text-text-subtle">
-                    <th scope="col" className="py-1.5 pr-4 font-normal">
-                      Criterion
-                    </th>
-                    <th scope="col" className="py-1.5 pr-4 font-normal">
-                      n
-                    </th>
-                    <th scope="col" className="py-1.5 pr-4 font-normal">
-                      Exact match (95% CI)
-                    </th>
-                    <th scope="col" className="py-1.5 pr-4 font-normal">
-                      Within 1
-                    </th>
-                    <th scope="col" className="py-1.5 font-normal">
-                      Cohen&apos;s kappa (95% CI)
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agreement.criteria.map((row) => (
-                    <tr key={row.criterion} className="border-t border-border">
-                      <td className="py-1.5 pr-4">{row.criterion}</td>
-                      <td className="py-1.5 pr-4 tabular">{row.n}</td>
-                      <td className="py-1.5 pr-4">
-                        <Proportion
-                          value={wilsonInterval(Math.round(row.exactMatchRate * row.n), row.n)}
-                        />
-                      </td>
-                      <td className="py-1.5 pr-4 tabular">{pct(row.withinOneRate)}</td>
-                      <td className="py-1.5 tabular">
-                        {row.kappa === null ? (
-                          <span className="text-text-subtle">n/a</span>
-                        ) : (
-                          <>
-                            {row.kappa.toFixed(2)}{" "}
-                            <span className="text-text-subtle">
-                              {row.kappaLower === null || row.kappaUpper === null
-                                ? ""
-                                : `[${row.kappaLower.toFixed(2)}, ${row.kappaUpper.toFixed(2)}]`}
-                            </span>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <p className="mt-1 font-mono text-xs text-text-muted tabular">
+            score {score(row.baselineMean)} (n={row.n.baseline}) → {score(row.candidateMean)} (n=
+            {row.n.candidate}){row.pValue === null ? "" : ` · p=${row.pValue.toFixed(3)}`} ·
+            red-team ASR {pct(row.asr)}
+          </p>
+          <ul className="mt-2 list-disc pl-5 text-sm text-text-muted">
+            {row.reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+          {row.promotedFile === null ? null : (
+            <p className="mt-2 font-mono text-2xs text-text-subtle">wrote {row.promotedFile}</p>
           )}
-        </div>
+        </li>
       ))}
-    </div>
+    </ol>
   );
 }
 
@@ -472,7 +620,8 @@ export default function EvalsPage() {
         <p className="max-w-2xl text-md text-text-muted text-pretty">
           Built at deploy time from the result files committed under{" "}
           <Code>packages/evals/results/</Code>. Pass rates carry Wilson 95% intervals and the number
-          of trials behind them; nothing is sampled or filled in.
+          of trials behind them; nothing is sampled or filled in, and a mission without a recorded
+          run says so.
         </p>
       </header>
 
@@ -489,7 +638,7 @@ export default function EvalsPage() {
         index="01"
         label="Scoreboard"
         title="Per mission, latest run"
-        note="A trial passes when the run completes and every hard check holds. Citations verified means every cited URL resolved and every quote was found verbatim in the fetched page; errored trials are not counted."
+        note="A trial passes when the run completes and every deterministic check it was graded on holds; hard checks (schema, citations, refusals) also fail the gate. Citations verified counts trials whose citations all resolved; errored trials are not counted. Mission metrics are means over trials."
       >
         <Scoreboard missions={dashboard.missions} />
       </Section>
@@ -498,10 +647,10 @@ export default function EvalsPage() {
         id="pareto"
         index="02"
         label="Cost against quality"
-        title="Pareto frontier across result files"
-        note="Each point is one committed result. The default model chain is keyless, so spend is $0 and tokens per trial stand in for cost; the table view shows both."
+        title="Pareto frontier per mission, across versions"
+        note="Each point is one committed result: a model chain and set of prompt versions. Missions are plotted separately because their token scales differ. The default chain is keyless, so spend is $0 and tokens per trial stand in for cost; the table view shows both."
       >
-        <Frontier points={dashboard.frontier} />
+        <Frontiers frontiers={dashboard.frontiers} />
       </Section>
 
       <Section
@@ -509,14 +658,24 @@ export default function EvalsPage() {
         index="03"
         label="Judge calibration"
         title="Does the LLM judge agree with people?"
-        note="Agreement between judge scores and human labels on the same trials, per criterion. Kappa intervals use the asymptotic standard error, so treat them as rough below about 30 labels."
+        note="Agreement between judge scores and blind human labels on the same trials, per criterion and mission. Kappa intervals use the asymptotic standard error, so treat them as rough below about 30 labels."
       >
         <CalibrationBlock calibration={dashboard.calibration} />
       </Section>
 
       <Section
-        id="redteam"
+        id="evolution"
         index="04"
+        label="Evolution"
+        title="Prompt and playbook lineage"
+        note="Every proposed revision, the parent it came from, the eval comparison and why it was promoted or rejected."
+      >
+        <Evolution rows={dashboard.evolution} />
+      </Section>
+
+      <Section
+        id="redteam"
+        index="05"
         label="Red team"
         title="Attack success rate, target 0%"
         note="Attacks by category from the red-team suite. Any success fails the local gate."

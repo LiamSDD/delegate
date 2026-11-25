@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "mission": "goal",
+  "generatedAt": "2026-11-25T12:00:00.000Z",
+  "labelsFile": "datasets/custom-goal/human-labels.v1.jsonl",
+  "criteria": ["relevance"],
+  "agreement": {
+    "status": "ok",
+    "labels": 4,
+    "matched": 4,
+    "criteria": [
+      {
+        "criterion": "relevance",
+        "n": 4,
+        "exactMatchRate": 0.75,
+        "withinOneRate": 1,
+        "kappa": 0.5,
+        "kappaLower": -0.1,
+        "kappaUpper": 1
+      }
+    ]
+  }
+}

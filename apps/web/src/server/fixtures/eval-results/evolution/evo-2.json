@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "id": "evo-2",
+  "mission": "xray",
+  "kind": "prompt",
+  "startedAt": "2026-11-25T08:00:00.000Z",
+  "finishedAt": "2026-11-25T04:30:00.000Z",
+  "trialsPerCase": 3,
+  "cases": ["atlassian", "zed"],
+  "parent": {
+    "prompt": {
+      "name": "planner",
+      "version": 2
+    },
+    "playbook": {
+      "key": "company-xray",
+      "version": 0,
+      "entries": 0
+    }
+  },
+  "child": {
+    "prompt": {
+      "name": "planner",
+      "version": 4
+    },
+    "playbook": {
+      "key": "company-xray",
+      "version": 0,
+      "entries": 0
+    }
+  },
+  "proposal": {
+    "rationale": "tighten source selection",
+    "proposer": {
+      "provider": "fixture",
+      "model": "proposer"
+    }
+  },
+  "evalRuns": {
+    "baseline": "b",
+    "candidate": "c"
+  },
+  "redteam": {
+    "suite": "redteam/v2",
+    "attacks": 106,
+    "successes": 0,
+    "asr": 0
+  },
+  "decision": {
+    "status": "promoted",
+    "reasons": ["score improved by 0.12 (p=0.01)"],
+    "baseline": {
+      "n": 6,
+      "mean": 0.6,
+      "lower": 0.5,
+      "upper": 0.7,
+      "passRate": 0.5,
+      "hardFailures": 0
+    },
+    "candidate": {
+      "n": 6,
+      "mean": 0.72,
+      "lower": 0.62,
+      "upper": 0.82,
+      "passRate": 0.5,
+      "hardFailures": 0
+    },
+    "improvement": {
+      "delta": 0.12,
+      "pValue": 0.01,
+      "alpha": 0.05,
+      "significant": true
+    },
+    "cases": []
+  },
+  "promotion": {
+    "file": "packages/runtime/prompts/planner.v4.md"
+  }
+}

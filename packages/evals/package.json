@@ -24,6 +24,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "eval": "tsx src/run-eval.ts",
+    "eval:smoke": "tsx src/eval-smoke.ts",
+    "label": "tsx src/label.ts",
     "gate": "tsx src/gate.ts",
     "agreement": "tsx src/agreement.ts",
     "redteam": "tsx src/redteam/cli.ts",

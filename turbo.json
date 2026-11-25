@@ -20,6 +20,9 @@
     "test": {
       "outputs": []
     },
+    "eval:smoke": {
+      "outputs": []
+    },
     "dev": {
       "cache": false,
       "persistent": true

@@ -1,9 +1,21 @@
-import { readFileSync } from "node:fs";
-
-import { parsePromptFile, type PromptFile } from "@delegate/runtime";
+import { type PromptFile } from "@delegate/runtime";
 import { z } from "zod";
 
 import { type XrayCase } from "../datasets/xray";
+import {
+  CriterionScoreSchema,
+  loadEvalPrompt,
+  runJudge,
+  type JudgeCompleter,
+  type JudgeOutcome,
+} from "./rubric-judge";
+
+export {
+  JUDGE_MAX_TOKENS,
+  JudgeOutputError,
+  type JudgeCompleter,
+  type JudgeMessage,
+} from "./rubric-judge";
 
 export const JUDGE_PROMPT_FILE = "xray-judge.v1.md";
 export const JUDGE_CRITERIA = [
@@ -14,10 +26,7 @@ export const JUDGE_CRITERIA = [
 ] as const;
 export type JudgeCriterion = (typeof JUDGE_CRITERIA)[number];
 
-const CriterionSchema = z.object({
-  score: z.coerce.number().int().min(1).max(5),
-  rationale: z.string().trim().min(1).max(400),
-});
+const CriterionSchema = CriterionScoreSchema;
 
 export const JudgeVerdictSchema = z.object({
   accuracy: CriterionSchema,
@@ -35,41 +44,13 @@ export const JudgeVerdictSchema = z.object({
 });
 export type JudgeVerdict = z.infer<typeof JudgeVerdictSchema>;
 
-export interface JudgeMessage {
-  role: "user" | "assistant";
-  content: string;
-}
+export type JudgeResult = JudgeOutcome<JudgeVerdict>;
 
-export interface JudgeCompleter {
-  complete(request: {
-    system: string;
-    messages: JudgeMessage[];
-    maxTokens: number;
-  }): Promise<{ text: string; provider: string; model: string }>;
-}
-
-export interface JudgeResult {
-  verdict: JudgeVerdict;
-  provider: string;
-  model: string;
-  promptName: string;
-  promptVersion: number;
-  repaired: boolean;
-}
-
-export class JudgeOutputError extends Error {
-  override readonly name = "JudgeOutputError";
-}
-
-export const JUDGE_MAX_TOKENS = 1_400;
 const MAX_QUOTES_PER_SOURCE = 4;
 const MAX_QUOTE_CHARS = 200;
 
 export function loadJudgePrompt(): PromptFile {
-  return parsePromptFile(
-    JUDGE_PROMPT_FILE,
-    readFileSync(new URL(`../../prompts/${JUDGE_PROMPT_FILE}`, import.meta.url), "utf8"),
-  );
+  return loadEvalPrompt(JUDGE_PROMPT_FILE);
 }
 
 const LooseClaimSchema = z.object({ text: z.string(), citations: z.array(z.string()).default([]) });
@@ -131,86 +112,18 @@ export function renderJudgeInput(evalCase: XrayCase, brief: unknown): string {
   return lines.join("\n");
 }
 
-function parseJson(text: string): unknown {
-  const attempts = [
-    text.trim(),
-    /```(?:json)?\s*([\s\S]*?)```/i.exec(text)?.[1]?.trim(),
-    text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1),
-  ];
-  for (const candidate of attempts) {
-    if (candidate === undefined || candidate === "") continue;
-    try {
-      return JSON.parse(candidate) as unknown;
-    } catch {
-      continue;
-    }
-  }
-  return undefined;
-}
-
-function validate(text: string): { ok: true; value: JudgeVerdict } | { ok: false; issues: string } {
-  const json = parseJson(text);
-  if (json === undefined) return { ok: false, issues: "- (root): no parseable JSON object" };
-  const parsed = JudgeVerdictSchema.safeParse(json);
-  if (parsed.success) return { ok: true, value: parsed.data };
-  return {
-    ok: false,
-    issues: parsed.error.issues
-      .slice(0, 10)
-      .map((issue) => `- ${issue.path.join(".") || "(root)"}: ${issue.message}`)
-      .join("\n"),
-  };
-}
-
 export async function judgeXray(options: {
   completer: JudgeCompleter;
   prompt: PromptFile;
   evalCase: XrayCase;
   brief: unknown;
 }): Promise<JudgeResult> {
-  const { completer, prompt } = options;
-  const messages: JudgeMessage[] = [
-    { role: "user", content: renderJudgeInput(options.evalCase, options.brief) },
-  ];
-  const base = { promptName: prompt.name, promptVersion: prompt.version };
-  const first = await completer.complete({
-    system: prompt.body,
-    messages,
-    maxTokens: JUDGE_MAX_TOKENS,
+  return runJudge({
+    completer: options.completer,
+    prompt: options.prompt,
+    schema: JudgeVerdictSchema,
+    input: renderJudgeInput(options.evalCase, options.brief),
   });
-  const firstCheck = validate(first.text);
-  if (firstCheck.ok)
-    return {
-      ...base,
-      verdict: firstCheck.value,
-      provider: first.provider,
-      model: first.model,
-      repaired: false,
-    };
-  const second = await completer.complete({
-    system: prompt.body,
-    messages: [
-      ...messages,
-      { role: "assistant", content: first.text.slice(0, 4_000) },
-      {
-        role: "user",
-        content: `Your answer failed validation:\n${firstCheck.issues}\n\nReply with only the corrected JSON object.`,
-      },
-    ],
-    maxTokens: JUDGE_MAX_TOKENS,
-  });
-  const secondCheck = validate(second.text);
-  if (secondCheck.ok)
-    return {
-      ...base,
-      verdict: secondCheck.value,
-      provider: second.provider,
-      model: second.model,
-      repaired: true,
-    };
-  throw new JudgeOutputError(
-    `Judge output failed validation after one repair:\n${secondCheck.issues}`,
-  );
 }
 
 export function normalisedJudgeScores(verdict: JudgeVerdict): Record<JudgeCriterion, number> {

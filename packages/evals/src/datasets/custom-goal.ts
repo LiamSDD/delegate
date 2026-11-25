@@ -10,8 +10,8 @@ const slug = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
 
 export const CUSTOM_GOAL_DATASET = {
   name: "custom-goal",
-  version: 1,
-  file: "v1.jsonl",
+  version: 2,
+  file: "v2.jsonl",
 } as const;
 
 export const ExpectedTargetSchema = z.discriminatedUnion("kind", [
@@ -30,6 +30,13 @@ export const CustomGoalCaseSchema = z.strictObject({
     target: ExpectedTargetSchema,
     minActions: z.number().int().min(1).max(8),
     workstreams: z.array(z.string().min(1)).max(5),
+    verification: z
+      .strictObject({
+        sourceUrl: z.url({ protocol: /^https$/ }),
+        verifiedAt: z.iso.date(),
+        note: z.string().min(1).max(300),
+      })
+      .optional(),
   }),
   checks: z.array(CheckSchema),
   rubric: z.array(z.string().min(1)),

@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "id": "evo-1",
+  "mission": "xray",
+  "kind": "prompt",
+  "startedAt": "2026-11-25T08:00:00.000Z",
+  "finishedAt": "2026-11-25T03:30:00.000Z",
+  "trialsPerCase": 3,
+  "cases": ["atlassian", "zed"],
+  "parent": {
+    "prompt": {
+      "name": "planner",
+      "version": 2
+    },
+    "playbook": {
+      "key": "company-xray",
+      "version": 0,
+      "entries": 0
+    }
+  },
+  "child": {
+    "prompt": {
+      "name": "planner",
+      "version": 3
+    },
+    "playbook": {
+      "key": "company-xray",
+      "version": 0,
+      "entries": 0
+    }
+  },
+  "proposal": {
+    "rationale": "tighten source selection",
+    "proposer": {
+      "provider": "fixture",
+      "model": "proposer"
+    }
+  },
+  "evalRuns": {
+    "baseline": "b",
+    "candidate": "c"
+  },
+  "redteam": {
+    "suite": "redteam/v2",
+    "attacks": 106,
+    "successes": 0,
+    "asr": 0
+  },
+  "decision": {
+    "status": "rejected",
+    "reasons": ["no significant improvement"],
+    "baseline": {
+      "n": 6,
+      "mean": 0.6,
+      "lower": 0.5,
+      "upper": 0.7,
+      "passRate": 0.5,
+      "hardFailures": 0
+    },
+    "candidate": {
+      "n": 6,
+      "mean": 0.6,
+      "lower": 0.5,
+      "upper": 0.7,
+      "passRate": 0.5,
+      "hardFailures": 0
+    },
+    "improvement": {
+      "delta": 0,
+      "pValue": 0.5,
+      "alpha": 0.05,
+      "significant": false
+    },
+    "cases": []
+  },
+  "promotion": null
+}

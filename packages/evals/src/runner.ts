@@ -1,64 +1,69 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { type RunEvent } from "@delegate/runtime";
 import {
   RUN_BUDGETS,
-  loadCompanyXrayPrompts,
+  loadRuntimePrompts,
   type RunMissionOptions,
   type RunMissionResult,
 } from "@delegate/runtime/server";
 import { z } from "zod";
 
-import {
-  XRAY_DATASET,
-  datasetPath,
-  loadXrayDataset,
-  selectCases,
-  type XrayCase,
-} from "./datasets/xray";
+import { selectById } from "./datasets/jsonl";
 import { createMemorySink, parseEventLog, serialiseEventLog } from "./event-log";
+import { type LinkStatus } from "./graders/xray";
 import {
-  DEFAULT_XRAY_TARGETS,
-  citedUrls,
-  deterministicScore,
-  gradeXray,
+  checkScore,
+  type BudgetTargets,
   type GradedCheck,
-  type LinkStatus,
+  type RunMetrics,
   type ServingRecord,
-  type XrayGrade,
-  type XrayMetrics,
-  type XrayTargets,
-} from "./graders/xray";
+} from "./graders/run-metrics";
 import {
-  agreementReport,
-  loadHumanLabels,
-  renderAgreement,
-  type AgreementReport,
-} from "./judge/calibration";
+  JudgeRecordSchema,
+  latestRunDir,
+  missionAgreement,
+  readJudgeRecord,
+  runDir,
+  toResultAgreement,
+  trialFile,
+  type JudgeRecord,
+} from "./judge/agreement-store";
+import { renderAgreement, type AgreementReport } from "./judge/calibration";
 import {
-  JUDGE_CRITERIA,
-  JudgeVerdictSchema,
-  judgeXray,
-  loadJudgePrompt,
-  normalisedJudgeScores,
+  loadEvalPrompt,
+  normaliseScores,
+  runJudge,
+  verdictScores,
   type JudgeCompleter,
-  type JudgeCriterion,
-} from "./judge/xray-judge";
+} from "./judge/rubric-judge";
+import {
+  targetsFor,
+  type AnswerRequest,
+  type BaseCase,
+  type EvalMission,
+  type MissionAdapter,
+  type MissionGrade,
+  type QuestionAnswer,
+} from "./missions/adapter";
+import { missionAdapter } from "./missions";
 import {
   EVAL_RESULT_FILE_VERSION,
   EvalResultFileSchema,
   type EvalResultFile,
-  type ResultAgreement,
+  type ResultMetric,
 } from "./results";
 import { compareScores, mean, meanConfidenceInterval, wilsonInterval } from "./stats";
 import { summariseTrials, type Trial } from "./types";
 
-export const RUNTIME_MISSION_ID = "company-xray";
 export const RETRYABLE_FAILURES: readonly string[] = ["no_model_available"];
 export const RETRY_BACKOFF_MS = 60_000;
+export const MAX_RETRY_WAIT_MS = 600_000;
 export const MAX_RETRIES = 2;
 
 export interface RunEvalOptions {
+  mission?: EvalMission;
   trials: number;
   caseIds?: string[];
   tag?: string;
@@ -80,35 +85,28 @@ export interface RunEvalDeps {
   sleep: (ms: number) => Promise<void>;
   judgeCompleter?: JudgeCompleter;
   checkLinks?: (urls: readonly string[]) => Promise<Map<string, LinkStatus>>;
+  answerQuestion?: (request: AnswerRequest) => Promise<QuestionAnswer>;
   log: (line: string) => void;
   onTrial?: (record: TrialRecord) => void;
 }
-
-const JudgeRecordSchema = z.object({
-  provider: z.string(),
-  model: z.string(),
-  promptName: z.string(),
-  promptVersion: z.number().int().positive(),
-  repaired: z.boolean(),
-  verdict: JudgeVerdictSchema,
-});
-type JudgeRecord = z.infer<typeof JudgeRecordSchema>;
 
 export interface TrialRecord {
   caseId: string;
   trial: number;
   runId: string;
   startedAt: string;
-  outcome: XrayGrade["outcome"];
+  outcome: MissionGrade["outcome"];
   failureCode?: string;
   retries: number;
   passed: boolean;
   score: number;
   hardFailures: string[];
   checks: GradedCheck[];
-  metrics: XrayMetrics;
+  metrics: RunMetrics;
+  missionMetrics: Record<string, number>;
+  citationsVerified: boolean | null;
   serving: ServingRecord[];
-  judge?: JudgeRecord & { scores: Record<JudgeCriterion, number> };
+  judge?: JudgeRecord & { scores: Record<string, number> };
   judgeError?: string;
 }
 
@@ -125,7 +123,8 @@ export interface CaseSummary {
   trials: number;
   passRate: { rate: number; lower: number; upper: number; n: number };
   score: Interval;
-  judge: Partial<Record<JudgeCriterion | "overall", Interval>>;
+  judge: Partial<Record<string, Interval>>;
+  missionMetrics: Record<string, Interval>;
   p50LatencyMs: number;
   meanCostMicroUsd: number;
   hardFailures: number;
@@ -152,7 +151,8 @@ export interface EvalSummary {
   id: string;
   mode: "live" | "replay";
   replayOf?: string;
-  mission: "xray";
+  mission: EvalMission;
+  title: string;
   dataset: { name: string; version: number };
   audience: RunEvalOptions["audience"];
   startedAt: string;
@@ -161,13 +161,15 @@ export interface EvalSummary {
   promptVersions: Record<string, number>;
   serving: ServingRecord[];
   judgeServing: { provider: string; model: string; calls: number }[];
-  targets: XrayTargets;
+  judgeCriteria: string[];
+  targets: BudgetTargets;
   cases: CaseSummary[];
   overall: {
     trials: number;
     passRate: { rate: number; lower: number; upper: number; n: number };
     score: Interval;
-    judge: Partial<Record<JudgeCriterion | "overall", Interval>>;
+    judge: Partial<Record<string, Interval>>;
+    missionMetrics: Record<string, Interval>;
     p50LatencyMs: number;
     p95LatencyMs: number;
     totalCostMicroUsd: number;
@@ -208,15 +210,13 @@ function promptSlug(name: string): string {
   return name.replace(/[^a-z0-9-]+/g, "-");
 }
 
-function promptVersions(): Record<string, number> {
-  const prompts = loadCompanyXrayPrompts();
-  const judge = loadJudgePrompt();
-  return Object.fromEntries(
-    [prompts.reader, prompts.researcher, prompts.synthesis, judge].map((prompt) => [
-      promptSlug(prompt.name),
-      prompt.version,
-    ]),
-  );
+export function missionPromptVersions(adapter: MissionAdapter): Record<string, number> {
+  const runtime = loadRuntimePrompts();
+  const prompts = [
+    ...adapter.runtimePrompts.map((key) => runtime[key]),
+    loadEvalPrompt(adapter.judge.promptFile),
+  ];
+  return Object.fromEntries(prompts.map((prompt) => [promptSlug(prompt.name), prompt.version]));
 }
 
 function stamp(date: Date): string {
@@ -230,42 +230,62 @@ function percentile(values: readonly number[], p: number): number {
   return sorted[rank] ?? 0;
 }
 
-function interval(values: readonly number[]): Interval | undefined {
+function interval(values: readonly number[], clamp = true): Interval | undefined {
   if (values.length === 0) return undefined;
   if (values.length === 1) return { mean: values[0] ?? 0, lower: null, upper: null, n: 1 };
   const ci = meanConfidenceInterval(values);
   return {
     mean: ci.mean,
-    lower: Math.max(0, ci.lower),
-    upper: Math.min(1, ci.upper),
+    lower: clamp ? Math.max(0, ci.lower) : ci.lower,
+    upper: clamp ? Math.min(1, ci.upper) : ci.upper,
     n: ci.n,
   };
 }
 
-function judgeIntervals(records: readonly TrialRecord[]) {
+function judgeIntervals(records: readonly TrialRecord[], criteria: readonly string[]) {
   const judged = records.flatMap((record) =>
     record.judge === undefined ? [] : [record.judge.scores],
   );
-  const result: Partial<Record<JudgeCriterion | "overall", Interval>> = {};
-  for (const criterion of JUDGE_CRITERIA) {
-    const value = interval(judged.map((scores) => scores[criterion]));
+  const result: Partial<Record<string, Interval>> = {};
+  for (const criterion of criteria) {
+    const value = interval(
+      judged.flatMap((scores) => (scores[criterion] === undefined ? [] : [scores[criterion]])),
+    );
     if (value !== undefined) result[criterion] = value;
   }
-  const overall = interval(judged.map((scores) => mean(JUDGE_CRITERIA.map((c) => scores[c]))));
+  const overall = interval(judged.map((scores) => mean(criteria.map((c) => scores[c] ?? 0))));
   if (overall !== undefined) result.overall = overall;
   return result;
 }
 
-function judgeMean(record: TrialRecord): number | undefined {
-  return record.judge === undefined
-    ? undefined
-    : mean(JUDGE_CRITERIA.map((criterion) => record.judge?.scores[criterion] ?? 0));
+function metricIntervals(records: readonly TrialRecord[]): Record<string, Interval> {
+  const names = [
+    ...new Set(records.flatMap((record) => Object.keys(record.missionMetrics))),
+  ].sort();
+  const result: Record<string, Interval> = {};
+  for (const name of names) {
+    const value = interval(
+      records.flatMap((record) => {
+        const metric = record.missionMetrics[name];
+        return metric === undefined || record.outcome === "errored" ? [] : [metric];
+      }),
+      false,
+    );
+    if (value !== undefined) result[name] = value;
+  }
+  return result;
 }
 
-function toTrial(record: TrialRecord, versions: Record<string, number>): Trial {
+function judgeMean(record: TrialRecord, criteria: readonly string[]): number | undefined {
+  return record.judge === undefined
+    ? undefined
+    : mean(criteria.map((criterion) => record.judge?.scores[criterion] ?? 0));
+}
+
+function toTrial(record: TrialRecord, mission: string, versions: Record<string, number>): Trial {
   return {
     caseId: record.caseId,
-    mission: "xray",
+    mission,
     trialIndex: record.trial,
     runId: record.runId,
     promptVersions: versions,
@@ -294,9 +314,12 @@ function toTrial(record: TrialRecord, versions: Record<string, number>): Trial {
 }
 
 function summariseCase(
-  evalCase: XrayCase,
+  caseId: string,
+  subject: string,
+  mission: string,
   records: readonly TrialRecord[],
   versions: Record<string, number>,
+  criteria: readonly string[],
 ): CaseSummary {
   const failureCodes: Record<string, number> = {};
   for (const record of records) {
@@ -304,17 +327,18 @@ function summariseCase(
       failureCodes[record.failureCode] = (failureCodes[record.failureCode] ?? 0) + 1;
   }
   const base = {
-    caseId: evalCase.id,
-    company: evalCase.company.name,
+    caseId,
+    company: subject,
     trials: records.length,
-    judge: judgeIntervals(records),
+    judge: judgeIntervals(records, criteria),
+    missionMetrics: metricIntervals(records),
     hardFailures: records.filter((record) => record.hardFailures.length > 0).length,
     errored: records.filter((record) => record.outcome === "errored").length,
     failureCodes,
   };
   const summarisable = records.length >= 2 && records.every((record) => record.serving.length > 0);
   if (summarisable) {
-    const result = summariseTrials(records.map((record) => toTrial(record, versions)));
+    const result = summariseTrials(records.map((record) => toTrial(record, mission, versions)));
     return {
       ...base,
       passRate: result.passRate,
@@ -329,11 +353,15 @@ function summariseCase(
       usedSummariseTrials: true,
     };
   }
-  const scores = records.map((record) => record.score);
   return {
     ...base,
     passRate: wilsonInterval(records.filter((record) => record.passed).length, records.length),
-    score: interval(scores) ?? { mean: 0, lower: null, upper: null, n: 0 },
+    score: interval(records.map((record) => record.score)) ?? {
+      mean: 0,
+      lower: null,
+      upper: null,
+      n: 0,
+    },
     p50LatencyMs: percentile(
       records.map((record) => record.metrics.latencyMs),
       0.5,
@@ -391,10 +419,12 @@ function compare(
 
 function compareToBaseline(
   baseline: Baseline | undefined,
+  datasetVersion: number,
   byCase: ReadonlyMap<string, TrialRecord[]>,
   threshold: number,
+  criteria: readonly string[],
 ): Comparison[] {
-  if (baseline?.dataset.version !== XRAY_DATASET.version) return [];
+  if (baseline?.dataset.version !== datasetVersion) return [];
   const comparisons: Comparison[] = [];
   const overall = {
     score: [[], []] as number[][],
@@ -406,7 +436,7 @@ function compareToBaseline(
     if (base === undefined) continue;
     const scores = records.map((record) => record.score);
     const judge = records.flatMap((record) => {
-      const value = judgeMean(record);
+      const value = judgeMean(record, criteria);
       return value === undefined ? [] : [value];
     });
     const cost = records.map((record) => record.metrics.costMicroUsd);
@@ -441,63 +471,77 @@ function loadBaseline(path: string): Baseline | undefined {
   return BaselineSchema.parse(JSON.parse(readFileSync(path, "utf8")) as unknown);
 }
 
-export function latestResultsDir(resultsDir: string): string | undefined {
-  if (!existsSync(resultsDir)) return undefined;
-  const dirs = readdirSync(resultsDir)
-    .filter((name) => existsSync(join(resultsDir, name, "summary.json")))
-    .filter((name) => statSync(join(resultsDir, name)).isDirectory())
-    .sort();
-  const last = dirs.at(-1);
-  return last === undefined ? undefined : join(resultsDir, last);
+export function baselinePath(resultsDir: string, mission: EvalMission): string {
+  return join(resultsDir, mission === "xray" ? "baseline.json" : `baseline.${mission}.json`);
 }
 
-function trialPath(dir: string, caseId: string, trial: number, suffix: string) {
-  return join(dir, caseId, `${trial}.${suffix}`);
+export function latestResultsDir(
+  resultsDir: string,
+  mission: EvalMission = "xray",
+): string | undefined {
+  return latestRunDir(resultsDir, mission);
+}
+
+function retryWait(events: readonly RunEvent[], attempt: number): number {
+  const hinted = events.flatMap((event) =>
+    event.type === "model.fallback" && event.payload.retryAfterMs !== undefined
+      ? [event.payload.retryAfterMs]
+      : [],
+  );
+  return Math.min(MAX_RETRY_WAIT_MS, Math.max(RETRY_BACKOFF_MS * 2 ** attempt, ...hinted));
 }
 
 export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promise<EvalSummary> {
+  return runMissionEval(missionAdapter(options.mission ?? "xray"), options, deps);
+}
+
+export async function runMissionEval<C extends BaseCase, X>(
+  adapter: MissionAdapter<C, X>,
+  options: RunEvalOptions,
+  deps: RunEvalDeps,
+): Promise<EvalSummary> {
   const startedAt = deps.now();
-  const all = loadXrayDataset(datasetPath(options.datasetFile));
-  const selected = selectCases(all, options.caseIds).filter(
+  const all = adapter.loadCases(options.datasetFile);
+  const selected = selectById(all, options.caseIds).filter(
     (evalCase) => options.tag === undefined || evalCase.tags.includes(options.tag),
   );
   if (selected.length === 0) throw new Error("No cases selected");
   const replaySource = options.offline
-    ? (options.replayDir ?? latestResultsDir(options.resultsDir))
+    ? (options.replayDir ?? latestRunDir(options.resultsDir, adapter.mission))
     : undefined;
   if (options.offline && replaySource === undefined)
-    throw new Error(`Offline mode needs stored results; none found in ${options.resultsDir}`);
+    throw new Error(
+      `Offline mode needs stored ${adapter.mission} runs; none found under ${options.resultsDir}`,
+    );
   const id = `${stamp(startedAt)}${options.offline ? "-replay" : ""}`;
-  const outDir = join(options.resultsDir, id);
+  const outDir = runDir(options.resultsDir, adapter.mission, id);
   mkdirSync(outDir, { recursive: true });
-  const versions = promptVersions();
-  const judgePrompt = loadJudgePrompt();
-  const targets: XrayTargets = {
-    ...DEFAULT_XRAY_TARGETS,
+  const versions = missionPromptVersions(adapter);
+  const judgePrompt = loadEvalPrompt(adapter.judge.promptFile);
+  const criteria = adapter.judge.criteria;
+  const targets: BudgetTargets = {
+    ...adapter.defaultTargets,
     maxTokens: RUN_BUDGETS[options.audience].maxTokens,
   };
   const judgeServing = new Map<string, { provider: string; model: string; calls: number }>();
+  let cooldown: Promise<void> = Promise.resolve();
 
-  const targetsFor = (evalCase: XrayCase): XrayTargets => {
-    const fromCase = { ...targets };
-    for (const check of evalCase.checks) {
-      if (check.kind === "min_citations") fromCase.minCitations = check.min;
-      if (check.kind === "max_latency_ms") fromCase.maxLatencyMs = check.max;
-      if (check.kind === "max_cost_micro_usd") fromCase.maxCostMicroUsd = check.max;
-    }
-    return fromCase;
-  };
-
-  const runOnce = async (evalCase: XrayCase, trial: number, attempt: number) => {
+  const runOnce = async (
+    evalCase: C,
+    trial: number,
+    attempt: number,
+    stores: Partial<RunMissionOptions>,
+  ) => {
     const runId = `eval_${stamp(startedAt)}_${evalCase.id}_${trial}_${attempt}`;
     const sink = createMemorySink(deps.now);
+    const input = adapter.input(evalCase);
     await sink.emit({
       runId,
       type: "run.created",
       payload: {
         workspaceId: "eval",
-        missionId: RUNTIME_MISSION_ID,
-        input: evalCase.input,
+        missionId: adapter.runtimeMissionId,
+        input,
         actor: { type: "system", id: "eval-harness" },
         budget: RUN_BUDGETS[options.audience],
       },
@@ -505,12 +549,14 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
     try {
       await deps.runMission({
         runId,
-        missionId: RUNTIME_MISSION_ID,
-        input: evalCase.input,
+        missionId: adapter.runtimeMissionId,
+        input,
         context: { audience: options.audience, classification: "public" },
         env: deps.env,
         emit: sink.emit,
         now: deps.now,
+        ...(adapter.hardDeadlineMs === undefined ? {} : { hardDeadlineMs: adapter.hardDeadlineMs }),
+        ...stores,
       });
     } catch (error) {
       if (
@@ -530,76 +576,107 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
     return { runId, events: sink.events };
   };
 
-  const runTrial = async (evalCase: XrayCase, trial: number): Promise<TrialRecord> => {
+  const runTrial = async (evalCase: C, trial: number): Promise<TrialRecord> => {
     mkdirSync(join(outDir, evalCase.id), { recursive: true });
-    let events;
+    let events: RunEvent[];
     let runId: string;
     let retries = 0;
     let judgeRecord: JudgeRecord | undefined;
+    let extras: X | undefined;
     const trialStarted = deps.now().toISOString();
     if (replaySource !== undefined) {
-      const source = trialPath(replaySource, evalCase.id, trial, "events.jsonl");
+      const source = trialFile(replaySource, evalCase.id, trial, "events.jsonl");
       if (!existsSync(source)) throw new Error(`Replay is missing ${source}`);
       events = parseEventLog(readFileSync(source, "utf8"));
       runId = events[0]?.runId ?? "unknown";
-      const judgePath = trialPath(replaySource, evalCase.id, trial, "judge.json");
-      if (existsSync(judgePath))
-        judgeRecord = JudgeRecordSchema.parse(
-          JSON.parse(readFileSync(judgePath, "utf8")) as unknown,
-        );
+      judgeRecord = readJudgeRecord(trialFile(replaySource, evalCase.id, trial, "judge.json"));
+      if (adapter.extras !== undefined) {
+        const path = trialFile(replaySource, evalCase.id, trial, adapter.extras.file);
+        if (existsSync(path))
+          extras = adapter.extras.schema.parse(JSON.parse(readFileSync(path, "utf8")) as unknown);
+      }
     } else {
+      const stores = adapter.extras?.stores() ?? {};
       for (let attempt = 0; ; attempt += 1) {
-        const run = await runOnce(evalCase, trial, attempt);
+        await cooldown;
+        const run = await runOnce(evalCase, trial, attempt, stores);
         const failed = run.events.find((event) => event.type === "run.failed");
         const code = failed?.type === "run.failed" ? failed.payload.error.code : undefined;
         if (code !== undefined && RETRYABLE_FAILURES.includes(code) && attempt < MAX_RETRIES) {
           writeFileSync(
-            trialPath(outDir, evalCase.id, trial, `attempt-${attempt}.events.jsonl`),
+            trialFile(outDir, evalCase.id, trial, `attempt-${attempt}.events.jsonl`),
             serialiseEventLog(run.events),
           );
-          const wait = RETRY_BACKOFF_MS * 2 ** attempt;
+          const wait = retryWait(run.events, attempt);
           deps.log(`  ${evalCase.id}#${trial}: ${code}, retrying in ${wait / 1000} s`);
           retries += 1;
-          await deps.sleep(wait);
+          cooldown = deps.sleep(wait);
+          await cooldown;
           continue;
         }
         events = run.events;
         runId = run.runId;
         break;
       }
+      if (adapter.extras !== undefined)
+        extras = await adapter.extras.collect(
+          {
+            evalCase,
+            events,
+            env: deps.env,
+            audience: options.audience,
+            sleep: deps.sleep,
+            now: deps.now,
+            ...(deps.answerQuestion === undefined ? {} : { answer: deps.answerQuestion }),
+            log: deps.log,
+          },
+          stores,
+        );
     }
-    writeFileSync(trialPath(outDir, evalCase.id, trial, "events.jsonl"), serialiseEventLog(events));
+    writeFileSync(trialFile(outDir, evalCase.id, trial, "events.jsonl"), serialiseEventLog(events));
+    if (adapter.extras !== undefined && extras !== undefined)
+      writeFileSync(
+        trialFile(outDir, evalCase.id, trial, adapter.extras.file),
+        JSON.stringify(extras, null, 2),
+      );
     const links =
       options.offline || deps.checkLinks === undefined
         ? undefined
-        : await deps.checkLinks(citedUrls(events));
-    const grade = gradeXray({
+        : await deps.checkLinks(adapter.citedUrls(events));
+    const grade = adapter.grade({
+      evalCase,
       events,
-      targets: targetsFor(evalCase),
+      targets: targetsFor(evalCase, targets),
       ...(links === undefined ? {} : { links }),
+      ...(extras === undefined ? {} : { extras }),
     });
     let judgeError: string | undefined;
-    const schemaValid =
-      grade.checks.find((entry) => entry.kind === "schema_valid")?.passed === true;
-    if (judgeRecord === undefined && !options.offline && options.judge && schemaValid) {
+    if (
+      judgeRecord === undefined &&
+      !options.offline &&
+      options.judge &&
+      adapter.judge.ready(grade)
+    ) {
       if (deps.judgeCompleter === undefined) judgeError = "no judge configured";
       else {
         try {
-          judgeRecord = await judgeXray({
+          judgeRecord = await runJudge({
             completer: deps.judgeCompleter,
             prompt: judgePrompt,
-            evalCase,
-            brief: grade.brief,
+            schema: adapter.judge.schema,
+            input: adapter.judge.render(evalCase, grade.deliverable, extras),
           });
         } catch (error) {
           judgeError = (error instanceof Error ? error.message : "judge failed").slice(0, 300);
         }
       }
     }
+    const rawScores =
+      judgeRecord === undefined ? undefined : verdictScores(judgeRecord.verdict, criteria);
     if (judgeRecord !== undefined) {
       writeFileSync(
-        trialPath(outDir, evalCase.id, trial, "judge.json"),
-        JSON.stringify(judgeRecord, null, 2),
+        trialFile(outDir, evalCase.id, trial, "judge.json"),
+        JSON.stringify(JudgeRecordSchema.parse(judgeRecord), null, 2),
       );
       const key = `${judgeRecord.provider}\u0000${judgeRecord.model}`;
       const existing = judgeServing.get(key);
@@ -619,18 +696,20 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
       ...(grade.failureCode === undefined ? {} : { failureCode: grade.failureCode }),
       retries,
       passed: grade.outcome === "completed" && counted.every((entry) => entry.passed),
-      score: deterministicScore(grade),
+      score: checkScore(grade.checks),
       hardFailures: grade.hardFailures,
       checks: grade.checks,
       metrics: grade.metrics,
+      missionMetrics: grade.missionMetrics,
+      citationsVerified: grade.citationsVerified,
       serving: grade.serving,
-      ...(judgeRecord === undefined
+      ...(judgeRecord === undefined || rawScores === undefined
         ? {}
-        : { judge: { ...judgeRecord, scores: normalisedJudgeScores(judgeRecord.verdict) } }),
+        : { judge: { ...judgeRecord, scores: normaliseScores(rawScores) } }),
       ...(judgeError === undefined ? {} : { judgeError }),
     };
     writeFileSync(
-      trialPath(outDir, evalCase.id, trial, "trial.json"),
+      trialFile(outDir, evalCase.id, trial, "trial.json"),
       JSON.stringify(record, null, 2),
     );
     deps.onTrial?.(record);
@@ -640,11 +719,10 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
     return record;
   };
 
-  const jobs = selected.flatMap((evalCase) =>
+  const queue = selected.flatMap((evalCase) =>
     Array.from({ length: options.trials }, (_, trial) => ({ evalCase, trial })),
   );
   const records = new Map<string, TrialRecord[]>();
-  const queue = [...jobs];
   const worker = async () => {
     for (let job = queue.shift(); job !== undefined; job = queue.shift()) {
       const record = await runTrial(job.evalCase, job.trial);
@@ -669,31 +747,35 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
       counted: current.counted + 1,
     };
   }
-  const baselinePath = join(options.resultsDir, "baseline.json");
-  const comparisons = compareToBaseline(loadBaseline(baselinePath), byCase, options.threshold);
-  const humanLabels = loadHumanLabels(datasetPath("human-labels.v1.jsonl"));
-  const agreement = agreementReport(
-    humanLabels,
-    flat.flatMap((record) =>
-      record.judge === undefined
+  const baselineFile = baselinePath(options.resultsDir, adapter.mission);
+  const comparisons = compareToBaseline(
+    loadBaseline(baselineFile),
+    adapter.dataset.version,
+    byCase,
+    options.threshold,
+    criteria,
+  );
+  const judgedRun = replaySource === undefined ? id : (replaySource.split("/").at(-1) ?? id);
+  const agreement = missionAgreement(
+    options.resultsDir,
+    adapter,
+    flat.flatMap((record) => {
+      const raw =
+        record.judge === undefined ? undefined : verdictScores(record.judge.verdict, criteria);
+      return raw === undefined
         ? []
-        : [
-            {
-              caseId: record.caseId,
-              run: replaySource === undefined ? id : (replaySource.split("/").at(-1) ?? id),
-              trial: record.trial,
-              verdict: record.judge.verdict,
-            },
-          ],
-    ),
+        : [{ caseId: record.caseId, run: judgedRun, trial: record.trial, scores: raw }];
+    }),
   );
   const latencies = flat.map((record) => record.metrics.latencyMs);
+  const subjects = new Map(selected.map((evalCase) => [evalCase.id, adapter.subject(evalCase)]));
   const summary: EvalSummary = {
     id,
     mode: options.offline ? "replay" : "live",
     ...(replaySource === undefined ? {} : { replayOf: replaySource }),
-    mission: "xray",
-    dataset: { name: XRAY_DATASET.name, version: XRAY_DATASET.version },
+    mission: adapter.mission,
+    title: adapter.title,
+    dataset: { name: adapter.dataset.name, version: adapter.dataset.version },
     audience: options.audience,
     startedAt: startedAt.toISOString(),
     finishedAt: deps.now().toISOString(),
@@ -701,9 +783,17 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
     promptVersions: versions,
     serving: mergeServing(flat),
     judgeServing: [...judgeServing.values()],
+    judgeCriteria: [...criteria],
     targets,
     cases: selected.map((evalCase) =>
-      summariseCase(evalCase, byCase.get(evalCase.id) ?? [], versions),
+      summariseCase(
+        evalCase.id,
+        subjects.get(evalCase.id) ?? evalCase.id,
+        adapter.mission,
+        byCase.get(evalCase.id) ?? [],
+        versions,
+        criteria,
+      ),
     ),
     overall: {
       trials: flat.length,
@@ -714,7 +804,8 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
         upper: null,
         n: 0,
       },
-      judge: judgeIntervals(flat),
+      judge: judgeIntervals(flat, criteria),
+      missionMetrics: metricIntervals(flat),
       p50LatencyMs: percentile(latencies, 0.5),
       p95LatencyMs: percentile(latencies, 0.95),
       totalCostMicroUsd: flat.reduce((sum, record) => sum + record.metrics.costMicroUsd, 0),
@@ -735,7 +826,7 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
     agreement,
   };
   writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
-  const resultFile = buildResultFile(summary, selected, byCase);
+  const resultFile = buildResultFile(summary, byCase);
   mkdirSync(join(options.resultsDir, summary.mission), { recursive: true });
   writeFileSync(
     resultFilePath(options.resultsDir, summary),
@@ -754,7 +845,7 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
           {
             scores: list.map((record) => record.score),
             judge: list.flatMap((record) => {
-              const value = judgeMean(record);
+              const value = judgeMean(record, criteria);
               return value === undefined ? [] : [value];
             }),
             cost: list.map((record) => record.metrics.costMicroUsd),
@@ -762,44 +853,25 @@ export async function runEval(options: RunEvalOptions, deps: RunEvalDeps): Promi
         ]),
       ),
     };
-    writeFileSync(baselinePath, JSON.stringify(baseline, null, 2) + "\n");
+    writeFileSync(baselineFile, JSON.stringify(baseline, null, 2) + "\n");
   }
   return summary;
-}
-
-const CITATION_CHECKS: readonly string[] = ["citations_resolve", "quotes_in_sources"];
-
-function citationsVerified(record: TrialRecord): boolean | null {
-  if (record.outcome === "errored") return null;
-  const counted = record.checks.filter(
-    (entry) => CITATION_CHECKS.includes(entry.kind) && entry.skipped !== true,
-  );
-  return counted.length === 0 ? null : counted.every((entry) => entry.passed);
-}
-
-function resultAgreement(report: AgreementReport): ResultAgreement {
-  if (report.status !== "ok") return report;
-  return {
-    ...report,
-    criteria: report.criteria.map((row) => ({
-      criterion: row.criterion,
-      n: row.n,
-      exactMatchRate: row.exactMatchRate,
-      withinOneRate: row.withinOneRate,
-      kappa: row.kappa ?? null,
-      kappaLower: row.kappaInterval?.lower ?? null,
-      kappaUpper: row.kappaInterval?.upper ?? null,
-    })),
-  };
 }
 
 export function resultFilePath(resultsDir: string, summary: EvalSummary): string {
   return join(resultsDir, summary.mission, `${summary.id}.json`);
 }
 
+function resultMetrics(intervals: Partial<Record<string, Interval>>): Record<string, ResultMetric> {
+  return Object.fromEntries(
+    Object.entries(intervals).flatMap(([name, value]) =>
+      value === undefined || value.n === 0 ? [] : [[name, value]],
+    ),
+  );
+}
+
 export function buildResultFile(
   summary: EvalSummary,
-  cases: readonly XrayCase[],
   byCase: ReadonlyMap<string, readonly TrialRecord[]>,
 ): EvalResultFile {
   const flat = [...byCase.values()].flat();
@@ -825,24 +897,29 @@ export function buildResultFile(
       costMicroUsd: flat.reduce((sum, record) => sum + record.metrics.costMicroUsd, 0),
       tokens: flat.reduce((sum, record) => sum + record.metrics.totalTokens, 0),
     },
-    cases: cases.map((evalCase) => ({
-      caseId: evalCase.id,
-      company: evalCase.company.name,
-      trials: (byCase.get(evalCase.id) ?? []).map((record) => ({
+    cases: summary.cases.map((row) => ({
+      caseId: row.caseId,
+      company: row.company,
+      trials: (byCase.get(row.caseId) ?? []).map((record) => ({
         trial: record.trial,
         runId: record.runId,
         outcome: record.outcome,
         ...(record.failureCode === undefined ? {} : { failureCode: record.failureCode }),
         passed: record.passed,
         score: record.score,
-        citationsVerified: citationsVerified(record),
-        judgeOverall: judgeMean(record) ?? null,
+        citationsVerified: record.citationsVerified,
+        judgeOverall: judgeMean(record, summary.judgeCriteria) ?? null,
         latencyMs: record.metrics.latencyMs,
         costMicroUsd: record.metrics.costMicroUsd,
         tokens: record.metrics.totalTokens,
+        ...(Object.keys(record.missionMetrics).length === 0
+          ? {}
+          : { metrics: record.missionMetrics }),
       })),
     })),
-    agreement: resultAgreement(summary.agreement),
+    agreement: toResultAgreement(summary.agreement),
+    judgeCriteria: resultMetrics(summary.overall.judge),
+    missionMetrics: resultMetrics(summary.overall.missionMetrics),
   });
 }
 
@@ -850,21 +927,21 @@ function pct(value: number): string {
   return `${(value * 100).toFixed(0)}%`;
 }
 
-function formatInterval(value: Interval | undefined): string {
+function formatInterval(value: Interval | undefined, digits = 2): string {
   if (value === undefined) return "n/a";
   if (value.lower === null || value.upper === null)
-    return `${value.mean.toFixed(2)} (n=${value.n}, no CI)`;
-  return `${value.mean.toFixed(2)} ± ${((value.upper - value.lower) / 2).toFixed(2)} [${value.lower.toFixed(2)}, ${value.upper.toFixed(2)}]`;
+    return `${value.mean.toFixed(digits)} (n=${value.n}, no CI)`;
+  return `${value.mean.toFixed(digits)} ± ${((value.upper - value.lower) / 2).toFixed(digits)} [${value.lower.toFixed(digits)}, ${value.upper.toFixed(digits)}]`;
 }
 
 export function renderSummary(summary: EvalSummary): string {
   const overall = summary.overall;
   const lines = [
-    `# Company X-ray eval ${summary.mode === "replay" ? "(Replay)" : "(Live)"}: ${summary.id}`,
+    `# ${summary.title} eval ${summary.mode === "replay" ? "(Replay)" : "(Live)"}: ${summary.id}`,
     "",
     summary.mode === "replay"
       ? `Replay: re-graded stored event logs from \`${summary.replayOf ?? ""}\` without network; dead-link checks skipped, judge verdicts reused where recorded.`
-      : "Live: missions ran in-process against the real sites and the configured model chain.",
+      : "Live: missions ran in-process against the real targets and the configured model chain.",
     "",
     `- Dataset: ${summary.dataset.name} v${summary.dataset.version}; ${summary.cases.length} cases × ${summary.trialsPerCase} trials; audience ${summary.audience}`,
     `- Prompt versions: ${Object.entries(summary.promptVersions)
@@ -881,8 +958,11 @@ export function renderSummary(summary: EvalSummary): string {
     `| Pass rate (Wilson 95%) | ${pct(overall.passRate.rate)} [${pct(overall.passRate.lower)}, ${pct(overall.passRate.upper)}] (n=${overall.passRate.n}) |`,
     `| Deterministic score (mean ± 95% CI) | ${formatInterval(overall.score)} |`,
     `| Judge overall (0-1) | ${formatInterval(overall.judge.overall)} |`,
-    ...JUDGE_CRITERIA.map(
+    ...summary.judgeCriteria.map(
       (criterion) => `| Judge ${criterion} | ${formatInterval(overall.judge[criterion])} |`,
+    ),
+    ...Object.entries(overall.missionMetrics).map(
+      ([name, value]) => `| ${name} | ${formatInterval(value)} |`,
     ),
     `| Latency p50 / p95 | ${(overall.p50LatencyMs / 1000).toFixed(1)} s / ${(overall.p95LatencyMs / 1000).toFixed(1)} s |`,
     `| Total cost | ${overall.totalCostMicroUsd} micro-USD |`,
@@ -892,11 +972,11 @@ export function renderSummary(summary: EvalSummary): string {
     "",
     "## Cases",
     "",
-    "| Case | Company | Pass rate | Score | Judge | p50 latency | Cost | Hard fail | Errored | Failure codes |",
+    "| Case | Subject | Pass rate | Score | Judge | p50 latency | Cost | Hard fail | Errored | Failure codes |",
     "|---|---|---|---|---|---|---|---|---|---|",
     ...summary.cases.map(
       (row) =>
-        `| ${row.caseId} | ${row.company} | ${pct(row.passRate.rate)} (n=${row.passRate.n}) | ${formatInterval(row.score)} | ${formatInterval(row.judge.overall)} | ${(row.p50LatencyMs / 1000).toFixed(1)} s | ${row.meanCostMicroUsd} | ${row.hardFailures} | ${row.errored} | ${
+        `| ${row.caseId} | ${row.company.replace(/\|/g, "/")} | ${pct(row.passRate.rate)} (n=${row.passRate.n}) | ${formatInterval(row.score)} | ${formatInterval(row.judge.overall)} | ${(row.p50LatencyMs / 1000).toFixed(1)} s | ${row.meanCostMicroUsd} | ${row.hardFailures} | ${row.errored} | ${
           Object.entries(row.failureCodes)
             .map(([code, n]) => `${code}×${n}`)
             .join(", ") || "-"
@@ -933,7 +1013,7 @@ export function renderSummary(summary: EvalSummary): string {
     "",
     "## Judge-human agreement",
     "",
-    renderAgreement(summary.agreement),
+    renderAgreement(summary.agreement, `datasets/${summary.dataset.name}/human-labels.v1.jsonl`),
     "",
   ];
   return lines.join("\n");

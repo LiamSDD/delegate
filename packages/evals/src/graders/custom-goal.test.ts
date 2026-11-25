@@ -7,7 +7,11 @@ import {
 } from "@delegate/runtime";
 import { describe, expect, it } from "vitest";
 
-import { loadCustomGoalDataset, parseCustomGoalDataset } from "../datasets/custom-goal";
+import {
+  customGoalDatasetPath,
+  loadCustomGoalDataset,
+  parseCustomGoalDataset,
+} from "../datasets/custom-goal";
 import { gradeCustomGoal, gradePlan, targetParseMatches } from "./custom-goal";
 
 const AT = "2026-11-25T10:00:00.000Z";
@@ -88,8 +92,8 @@ function runLog(content: unknown, steps = defaultGoalPlan(true)): RunEvent[] {
   ]);
 }
 
-describe("custom-goal dataset v1", () => {
-  it("has six varied cases whose company expectations match the deterministic parser", () => {
+describe("custom-goal dataset v2", () => {
+  it("has eight varied cases whose company expectations match the deterministic parser", () => {
     expect(cases.map((entry) => entry.id)).toEqual([
       "marketing-brand-possessive",
       "ops-invoice-domain",
@@ -97,9 +101,20 @@ describe("custom-goal dataset v1", () => {
       "sales-playbook-domain",
       "brand-only-lowercase",
       "vague-ai",
+      "support-response-domain",
+      "hr-brand-only",
     ]);
-    for (const entry of cases)
+    for (const entry of cases) {
       expect([entry.id, targetParseMatches(entry)]).toEqual([entry.id, true]);
+      expect([entry.id, entry.expected.verification !== undefined]).toEqual([
+        entry.id,
+        entry.expected.target.kind !== "none",
+      ]);
+    }
+  });
+
+  it("keeps v1 loadable for results that reference it", () => {
+    expect(loadCustomGoalDataset(customGoalDatasetPath("v1.jsonl"))).toHaveLength(6);
   });
 
   it("rejects malformed and duplicate lines", () => {

@@ -7,29 +7,35 @@ import { z } from "zod";
 
 import { checkLinks } from "./graders/links";
 import { createRouterCompleter } from "./judge/router-completer";
+import { EVAL_MISSIONS, type EvalMission } from "./missions";
+import { answerWithRuntime } from "./missions/build";
 import { type RunEvalDeps, type RunEvalOptions } from "./runner";
 
 export const RESULTS_DIR = fileURLToPath(new URL("../results", import.meta.url));
 const REPO_ENV_FILE = fileURLToPath(new URL("../../../.env.local", import.meta.url));
 
 const ArgsSchema = z.object({
-  mission: z.literal("xray", { error: "Only --mission xray is available" }),
+  mission: z.enum([...EVAL_MISSIONS, "all"], {
+    error: `--mission must be one of ${EVAL_MISSIONS.join(", ")} or all`,
+  }),
   trials: z.coerce.number().int().min(1).max(20),
   cases: z.string().optional(),
   audience: z.enum(["public-demo", "owner"]),
   offline: z.boolean(),
   replay: z.string().optional(),
-  concurrency: z.coerce.number().int().min(1).max(4),
+  concurrency: z.coerce.number().int().min(1).max(8),
   baseline: z.boolean(),
   "no-judge": z.boolean(),
   threshold: z.coerce.number().min(0).max(1),
   tag: z.string().optional(),
 });
 
+export type ParsedEvalArgs = RunEvalOptions & { missions: EvalMission[] };
+
 export function parseEvalArgs(
   argv: readonly string[],
   defaults: { trials: number },
-): RunEvalOptions {
+): ParsedEvalArgs {
   const { values } = parseArgs({
     args: argv.filter((arg) => arg !== "--"),
     options: {
@@ -48,11 +54,16 @@ export function parseEvalArgs(
     strict: true,
   });
   const args = ArgsSchema.parse(values);
+  const missions: EvalMission[] = args.mission === "all" ? [...EVAL_MISSIONS] : [args.mission];
+  if (missions.length > 1 && (args.replay !== undefined || args.cases !== undefined))
+    throw new Error("--replay and --cases name one mission's runs and cases; pick one --mission");
   const caseIds = args.cases
     ?.split(",")
     .map((id) => id.trim())
     .filter((id) => id !== "");
   return {
+    missions,
+    mission: missions[0] ?? "xray",
     trials: args.trials,
     ...(caseIds === undefined ? {} : { caseIds }),
     ...(args.tag === undefined ? {} : { tag: args.tag }),
@@ -79,6 +90,7 @@ export function liveDeps(options: RunEvalOptions): RunEvalDeps {
     sleep,
     judgeCompleter: createRouterCompleter({ env, audience: options.audience, sleep }),
     checkLinks: (urls) => checkLinks(urls, { cache: linkCache, sleep }),
+    answerQuestion: answerWithRuntime,
     log: (line) => {
       process.stderr.write(`${line}\n`);
     },

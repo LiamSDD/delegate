@@ -1,10 +1,21 @@
-import {
-  CompanyXrayBriefSchema,
-  SECTION_KEYS,
-  type ModelRole,
-  type RunEvent,
-} from "@delegate/runtime";
+import { CompanyXrayBriefSchema, SECTION_KEYS, type RunEvent } from "@delegate/runtime";
 import { z } from "zod";
+
+import {
+  budgetChecks,
+  checkScore,
+  hardFailuresOf,
+  hygieneChecks,
+  runMetrics,
+  runOutcome,
+  servingFrom,
+  type GradedCheck,
+  type RunMetrics,
+  type RunOutcome,
+  type ServingRecord,
+} from "./run-metrics";
+
+export { INFRASTRUCTURE_FAILURES, type GradedCheck, type ServingRecord } from "./run-metrics";
 
 export interface XrayTargets {
   maxLatencyMs: number;
@@ -32,52 +43,22 @@ export const HARD_CHECKS = [
   "quotes_in_sources",
 ] as const;
 
-export const INFRASTRUCTURE_FAILURES: readonly string[] = [
-  "no_model_available",
-  "site_unreachable",
-  "cancelled",
-];
-
 export interface LinkStatus {
   ok: boolean;
   status?: number;
   error?: string;
 }
 
-export interface GradedCheck {
-  kind: string;
-  passed: boolean;
-  severity: "hard" | "soft";
-  skipped?: boolean;
-  detail?: string;
-}
-
-export interface XrayMetrics {
+export interface XrayMetrics extends RunMetrics {
   claims: number;
   citations: number;
   sources: number;
   sectionsCovered: number;
   sectionsInsufficient: number;
-  latencyMs: number;
-  costMicroUsd: number;
-  totalTokens: number;
-  toolsUsed: string[];
-  toolCalls: number;
-  redundantFetches: number;
-  policyDenials: number;
-  injectionFlags: number;
-  fallbacks: number;
-}
-
-export interface ServingRecord {
-  role: ModelRole;
-  provider: string;
-  model: string;
-  calls: number;
 }
 
 export interface XrayGrade {
-  outcome: "completed" | "failed" | "errored";
+  outcome: RunOutcome;
   failureCode?: string;
   checks: GradedCheck[];
   hardFailures: string[];
@@ -132,16 +113,6 @@ export function normaliseText(text: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
-}
-
-function normaliseUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    parsed.hash = "";
-    return `${parsed.host.replace(/^www\./, "")}${parsed.pathname.replace(/\/+$/, "")}${parsed.search}`.toLowerCase();
-  } catch {
-    return url.trim().toLowerCase();
-  }
 }
 
 function collectClaims(value: unknown, into: LooseClaim[]): void {
@@ -220,41 +191,6 @@ function snapshots(events: readonly RunEvent[]) {
   return bySource;
 }
 
-function servingFrom(events: readonly RunEvent[]): ServingRecord[] {
-  const roleByStep = new Map<string, ModelRole>();
-  const counts = new Map<string, ServingRecord>();
-  for (const event of events) {
-    if (event.type === "agent.spawned") roleByStep.set(event.stepId, event.payload.modelRole);
-    if (event.type !== "usage.updated") continue;
-    const role =
-      (event.stepId === undefined ? undefined : roleByStep.get(event.stepId)) ?? "worker";
-    const key = `${role}\u0000${event.payload.provider}\u0000${event.payload.model}`;
-    const existing = counts.get(key);
-    counts.set(
-      key,
-      existing === undefined
-        ? { role, provider: event.payload.provider, model: event.payload.model, calls: 1 }
-        : { ...existing, calls: existing.calls + 1 },
-    );
-  }
-  return [...counts.values()].sort(
-    (a, b) =>
-      a.role.localeCompare(b.role) ||
-      a.provider.localeCompare(b.provider) ||
-      a.model.localeCompare(b.model),
-  );
-}
-
-function fetchKey(event: RunEvent): string | undefined {
-  if (event.type !== "tool.called" || event.payload.tool !== "fetch_page") return undefined;
-  try {
-    const args = z.object({ url: z.string() }).safeParse(JSON.parse(event.payload.argsSummary));
-    return args.success ? normaliseUrl(args.data.url) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function list(items: readonly string[], max = 5): string {
   return items.length <= max
     ? items.join(", ")
@@ -275,14 +211,8 @@ export function gradeXray(input: GradeInput): XrayGrade {
     });
   };
 
-  const failed = events.find((event) => event.type === "run.failed");
-  const completed = events.some((event) => event.type === "run.completed");
-  const failureCode = failed?.type === "run.failed" ? failed.payload.error.code : undefined;
-  const outcome: XrayGrade["outcome"] = completed
-    ? "completed"
-    : failureCode !== undefined && INFRASTRUCTURE_FAILURES.includes(failureCode)
-      ? "errored"
-      : "failed";
+  const { outcome, failureCode } = runOutcome(events);
+  const completed = outcome === "completed";
 
   const raw = finalBrief(events);
   const brief = looseBrief(raw);
@@ -377,69 +307,17 @@ export function gradeXray(input: GradeInput): XrayGrade {
     `${sectionsCovered} ok, ${sectionsInsufficient} insufficient_evidence (min ${targets.minSectionsCovered} ok)`,
   );
 
-  const first = events[0];
-  const last = events.at(-1);
-  const latencyMs =
-    first === undefined || last === undefined ? 0 : Date.parse(last.at) - Date.parse(first.at);
-  let costMicroUsd = 0;
-  let totalTokens = 0;
-  for (const event of events) {
-    if (event.type !== "usage.updated") continue;
-    costMicroUsd += event.payload.costMicroUsd;
-    totalTokens += event.payload.inputTokens + event.payload.outputTokens;
-  }
-  add(
-    "max_latency_ms",
-    latencyMs <= targets.maxLatencyMs,
-    `${(latencyMs / 1000).toFixed(1)} s (target < ${targets.maxLatencyMs / 1000} s)`,
-  );
-  add(
-    "max_cost_micro_usd",
-    costMicroUsd <= targets.maxCostMicroUsd,
-    `${costMicroUsd} micro-USD (max ${targets.maxCostMicroUsd})`,
-  );
-  add(
-    "within_token_budget",
-    totalTokens <= targets.maxTokens,
-    `${totalTokens} tokens (max ${targets.maxTokens})`,
-  );
-
-  const toolsUsed = [
-    ...new Set(
-      events.flatMap((event) => (event.type === "tool.called" ? [event.payload.tool] : [])),
-    ),
-  ].sort();
-  const missingTools = targets.requiredTools.filter((tool) => !toolsUsed.includes(tool));
+  const metrics = runMetrics(events);
+  for (const entry of budgetChecks(metrics, targets)) add(entry.kind, entry.passed, entry.detail);
+  const missingTools = targets.requiredTools.filter((tool) => !metrics.toolsUsed.includes(tool));
   add(
     "required_tools_used",
     missingTools.length === 0,
     missingTools.length === 0
-      ? `used ${toolsUsed.join(", ")}`
+      ? `used ${metrics.toolsUsed.join(", ")}`
       : `missing ${missingTools.join(", ")}`,
   );
-  let redundantFetches = 0;
-  const seenFetches = new Set<string>();
-  for (const event of events) {
-    const key = fetchKey(event);
-    if (key === undefined) continue;
-    if (seenFetches.has(key)) redundantFetches += 1;
-    seenFetches.add(key);
-  }
-  add(
-    "no_redundant_fetches",
-    redundantFetches === 0,
-    `${redundantFetches} repeated fetch_page URLs`,
-  );
-  const denials = events.flatMap((event) =>
-    event.type === "policy.decided" && event.payload.decision === "deny"
-      ? [`${event.payload.tool}: ${event.payload.reason.slice(0, 80)}`]
-      : [],
-  );
-  add(
-    "no_policy_denials",
-    denials.length === 0,
-    denials.length === 0 ? "0 denials" : `denied: ${list(denials, 3)}`,
-  );
+  for (const entry of hygieneChecks(events, metrics)) add(entry.kind, entry.passed, entry.detail);
   const injectionSpans = events.flatMap((event) =>
     event.type === "critic.flagged" && event.payload.category === "injection_suspected"
       ? [normaliseText(event.payload.claim)]
@@ -457,10 +335,7 @@ export function gradeXray(input: GradeInput): XrayGrade {
     `${injectionSpans.length} injection flags${leaked.length === 0 ? "" : `, ${leaked.length} span(s) repeated in the brief`}`,
   );
 
-  const hardFailures =
-    outcome === "errored"
-      ? []
-      : checks.filter((entry) => entry.severity === "hard" && !entry.passed).map((e) => e.kind);
+  const hardFailures = hardFailuresOf(outcome, checks);
 
   return {
     outcome,
@@ -468,20 +343,13 @@ export function gradeXray(input: GradeInput): XrayGrade {
     checks,
     hardFailures,
     metrics: {
+      ...metrics,
       claims: claims.length,
       citations: citationCount,
       sources: brief?.sources.length ?? 0,
       sectionsCovered,
       sectionsInsufficient,
-      latencyMs,
-      costMicroUsd,
-      totalTokens,
-      toolsUsed,
-      toolCalls: events.filter((event) => event.type === "tool.called").length,
-      redundantFetches,
-      policyDenials: denials.length,
       injectionFlags: injectionSpans.length,
-      fallbacks: events.filter((event) => event.type === "model.fallback").length,
     },
     serving: servingFrom(events),
     brief: raw,
@@ -489,7 +357,5 @@ export function gradeXray(input: GradeInput): XrayGrade {
 }
 
 export function deterministicScore(grade: XrayGrade): number {
-  const counted = grade.checks.filter((entry) => entry.skipped !== true);
-  if (counted.length === 0) return 0;
-  return counted.filter((entry) => entry.passed).length / counted.length;
+  return checkScore(grade.checks);
 }

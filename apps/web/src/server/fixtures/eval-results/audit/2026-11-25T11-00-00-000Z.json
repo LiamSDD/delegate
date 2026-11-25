@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "id": "2026-11-25T11-00-00-000Z",
+  "mission": "audit",
+  "mode": "replay",
+  "replayOf": "2026-11-25T10-30-00-000Z",
+  "dataset": {
+    "name": "automation-audit",
+    "version": 1
+  },
+  "audience": "public-demo",
+  "startedAt": "2026-11-25T11:00:00.000Z",
+  "finishedAt": "2026-11-25T11:01:00.000Z",
+  "durationMs": 60000,
+  "trialsPerCase": 2,
+  "promptVersions": {
+    "automation-audit-analyst": 1,
+    "audit-judge": 1
+  },
+  "models": [
+    {
+      "role": "planner",
+      "provider": "fixture",
+      "model": "small",
+      "calls": 2
+    }
+  ],
+  "judgeModels": [
+    {
+      "provider": "fixture",
+      "model": "judge",
+      "calls": 2
+    }
+  ],
+  "totals": {
+    "trials": 2,
+    "costMicroUsd": 0,
+    "tokens": 60000
+  },
+  "cases": [
+    {
+      "caseId": "xero",
+      "company": "Xero",
+      "trials": [
+        {
+          "trial": 0,
+          "runId": "fixture-run-5",
+          "outcome": "completed",
+          "passed": false,
+          "score": 0.5,
+          "citationsVerified": true,
+          "judgeOverall": 0.5,
+          "latencyMs": 30000,
+          "costMicroUsd": 0,
+          "tokens": 30000,
+          "metrics": {
+            "opportunities": 6,
+            "workflowRecall": 0.5
+          }
+        },
+        {
+          "trial": 1,
+          "runId": "fixture-run-6",
+          "outcome": "completed",
+          "passed": false,
+          "score": 0.5,
+          "citationsVerified": true,
+          "judgeOverall": 0.75,
+          "latencyMs": 30000,
+          "costMicroUsd": 0,
+          "tokens": 30000,
+          "metrics": {
+            "opportunities": 6,
+            "workflowRecall": 0.5
+          }
+        }
+      ]
+    }
+  ],
+  "agreement": {
+    "status": "no_human_labels",
+    "labels": 0
+  },
+  "missionMetrics": {
+    "opportunities": {
+      "mean": 6,
+      "lower": null,
+      "upper": null,
+      "n": 2
+    },
+    "workflowRecall": {
+      "mean": 0.5,
+      "lower": 0.5,
+      "upper": 0.5,
+      "n": 2
+    },
+    "unlisted": {
+      "mean": 3,
+      "lower": null,
+      "upper": null,
+      "n": 2
+    }
+  },
+  "judgeCriteria": {
+    "overall": {
+      "mean": 0.625,
+      "lower": null,
+      "upper": null,
+      "n": 2
+    }
+  }
+}
