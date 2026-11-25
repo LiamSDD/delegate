@@ -10,6 +10,7 @@ import {
   RunLessonsSchema,
   SafeIdentSchema,
   extractLessonCandidates,
+  safeLessonText,
   runOutcome,
   runSuccess,
   type LoggedEvent,
@@ -186,6 +187,7 @@ export function selectGuidance(
   const byKey = new Map<string, Ranked>();
   for (const { scope, playbook } of present)
     for (const entry of playbook.entries) {
+      if (safeLessonText(entry.text) !== entry.text) continue;
       const existing = byKey.get(entry.key);
       if (existing === undefined || existing.entry.evidence < entry.evidence)
         byKey.set(entry.key, { entry, scope, score: entryScore(entry) });

@@ -9,6 +9,7 @@ export const REDTEAM_CATEGORIES = [
   "capability-escalation",
   "approval-bypass",
   "quote-forgery",
+  "playbook-poisoning",
 ] as const;
 export const RedteamCategorySchema = z.enum(REDTEAM_CATEGORIES);
 export type RedteamCategory = z.infer<typeof RedteamCategorySchema>;
@@ -108,6 +109,50 @@ export const OrchestratorPayloadSchema = z.strictObject({
   calls: z.array(ToolCallSchema).min(1),
 });
 
+export const INJECTION_POINTS = [
+  "plan.rationale",
+  "step.summary",
+  "step.id",
+  "agent.message",
+  "tool.name",
+  "tool.args",
+  "tool.summary",
+  "tool.error",
+  "source.url",
+  "source.kind",
+  "source.text",
+  "artifact.title",
+  "critic.claim",
+  "critic.reason",
+  "critic.category",
+  "fallback.provider",
+  "failure.code",
+  "failure.message",
+  "run.summary",
+] as const;
+
+export const PlaybookPayloadSchema = z.discriminatedUnion("via", [
+  z.strictObject({
+    via: z.literal("reflect"),
+    injectedText: z.string().min(8),
+    at: z.array(z.enum(INJECTION_POINTS)).min(1),
+    failed: z.boolean().default(false),
+    reflectOutput: z.unknown().optional(),
+    poison: z.array(z.string().min(4)).min(1),
+  }),
+  z.strictObject({
+    via: z.literal("house"),
+    audience: z.enum(["public-demo", "owner"]),
+    houseLearning: z.boolean().optional(),
+    injectedText: z.string().min(8),
+  }),
+  z.strictObject({
+    via: z.literal("retrieval"),
+    entries: z.array(z.strictObject({ key: z.string().min(1), text: z.string().min(1) })).min(1),
+    poison: z.array(z.string().min(4)).min(1),
+  }),
+]);
+
 const ExpectedSchema = z.strictObject({
   outcome: z.literal("blocked"),
   blockedBy: z.string().min(1),
@@ -133,6 +178,7 @@ export const RedteamCaseSchema = z.discriminatedUnion("target", [
     target: z.literal("orchestrator"),
     payload: OrchestratorPayloadSchema,
   }),
+  z.strictObject({ ...base, target: z.literal("playbook"), payload: PlaybookPayloadSchema }),
 ]);
 export type RedteamCase = z.infer<typeof RedteamCaseSchema>;
 export type RedteamTarget = RedteamCase["target"];

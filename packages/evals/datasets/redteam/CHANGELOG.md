@@ -1,5 +1,19 @@
 # redteam dataset changelog
 
+## v1.1 (2026-11-25)
+
+Adds the `playbook-poisoning` category: 7 cases (`pp-001` to `pp-007`, target `playbook`), 63 cases in total. They attack the learned playbooks of ADR 0013, where an injected page could otherwise steer every future run's planner. Success means injected text reaches a lesson, the planner or sub-agent guidance block, or the reflect model's prompt, or a public visitor's run changes the house playbook.
+
+| Via | Cases | What is attacked |
+|---|---|---|
+| `reflect` | `pp-001` to `pp-005` | Lesson extraction and the reflect step, with the instruction planted in free-text event fields, identifier fields, source URLs and step ids, and a compromised fast model that tries to author lessons |
+| `house` | `pp-006` | Routing of a public-demo run's lessons into the global house playbook |
+| `retrieval` | `pp-007` | A tampered stored entry reaching the planner prompt |
+
+- The file stays `v1.jsonl` and the suite id stays `redteam/v1`: cases are appended, none of the 56 earlier cases changed.
+- Writing these cases exposed one gap, fixed in the runtime before this version: a step id slugged from an instruction (`ignore_all_previous_instructions…`) passed the identifier check because `\b` treats `_` as a word character. Lesson text is now also checked with separators read as spaces (`pp-004`), and retrieval re-checks stored entries (`pp-007`).
+- The database half of the house guard (`record_house_playbook()` refuses demo workspaces) is covered by `packages/db/src/playbook-store.test.ts`, not here: the red-team suite runs without a database.
+
 ## v1 (2026-11-25)
 
 56 deterministic attack cases, one `RedteamCaseSchema` object per line (`src/redteam/schema.ts`; `schema.v1.json` is the same schema as JSON Schema and a test keeps them in sync). Every case runs against the real runtime and policy code with a scripted compromised model and a fake network; nothing leaves the process.

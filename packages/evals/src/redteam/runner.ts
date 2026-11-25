@@ -34,6 +34,7 @@ import { type z } from "zod";
 
 import { compromisedModel, redteamRun, requestsFor, userText } from "./compromised-model";
 import { guardLabels, honeypots, joinLabels } from "./honeypots";
+import { runPlaybook } from "./playbook-target";
 import { fakeNetwork, recordingFetcher, type FakeNetwork } from "./network";
 import {
   type AgentPayloadSchema,
@@ -411,6 +412,8 @@ function verdictFor(attack: RedteamCase): Promise<Verdict> | Verdict {
       return runPlan(attack.payload);
     case "orchestrator":
       return runOrchestrator(attack.payload);
+    case "playbook":
+      return runPlaybook(attack.payload);
   }
 }
 

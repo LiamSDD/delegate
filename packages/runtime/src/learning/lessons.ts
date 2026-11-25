@@ -107,7 +107,10 @@ export function playbookKey(missionId: string, input: unknown): string {
 export function safeLessonText(text: string): string | undefined {
   const { text: redacted } = redactPii(text.replace(/\s+/g, " ").trim());
   const capped = redacted.slice(0, LESSON_LIMITS.textChars);
-  if (capped === "" || detectInjection(capped) !== undefined) return undefined;
+  if (capped === "") return undefined;
+  const spaced = capped.replace(/[_\-./>:]+/g, " ");
+  if (detectInjection(capped) !== undefined || detectInjection(spaced) !== undefined)
+    return undefined;
   return capped;
 }
 

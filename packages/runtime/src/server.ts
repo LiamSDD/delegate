@@ -23,7 +23,7 @@ import { type Actor, type PlaybookApplied, type RunEvent, type RunEventDraft } f
 import { playbookKey, type LoggedEvent } from "./learning/lessons";
 import { PlaybookSchema, selectGuidance, type Playbook } from "./learning/playbook";
 import { reflectRun } from "./learning/reflect";
-import { type PlaybookStore } from "./learning/store";
+import { recordRunLessons, type PlaybookStore } from "./learning/store";
 import {
   parseModelsConfig,
   resolveBaseUrl,
@@ -432,7 +432,10 @@ async function learnFromRun(
     run.key,
     { ctx, prompt: run.prompt },
   );
-  await store.record(lessons, { house: options.houseLearning ?? audience === "owner" });
+  await recordRunLessons(store, lessons, {
+    audience,
+    ...(options.houseLearning === undefined ? {} : { houseLearning: options.houseLearning }),
+  });
 }
 
 export interface ResumeMissionOptions extends Omit<RunMissionOptions, "missionId" | "input"> {

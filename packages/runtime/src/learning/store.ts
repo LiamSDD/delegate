@@ -6,6 +6,20 @@ export interface PlaybookPair {
   house: Playbook | null;
 }
 
+export function contributesToHouse(audience: "public-demo" | "owner", override?: boolean): boolean {
+  return override ?? audience === "owner";
+}
+
+export async function recordRunLessons(
+  store: PlaybookStore,
+  lessons: RunLessons,
+  options: { audience: "public-demo" | "owner"; houseLearning?: boolean },
+): Promise<void> {
+  await store.record(lessons, {
+    house: contributesToHouse(options.audience, options.houseLearning),
+  });
+}
+
 export interface PlaybookStore {
   read(key: string): Promise<PlaybookPair>;
   record(run: RunLessons, options: { house: boolean }): Promise<void>;
