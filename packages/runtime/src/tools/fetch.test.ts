@@ -192,24 +192,26 @@ describe("SSRF matrix", () => {
     ).toBe("port");
   });
 
-  it("stops an oversize body while streaming", async () => {
+  it("keeps the first maxBytes of an oversize body and marks it truncated", async () => {
     const h = harness({
       "https://acme.example/": () =>
         new Response(endlessBody(64 * 1024), { headers: { "content-type": "text/html" } }),
     });
-    expect(
-      await blockedCode(createFetcher(h.options).fetch({ url: "https://acme.example/" })),
-    ).toBe("too_large");
+    const document = await createFetcher({ ...h.options, maxBytes: 100_000 }).fetch({
+      url: "https://acme.example/",
+    });
+    expect(document.bytes).toBe(100_000);
+    expect(document.truncated).toBe(true);
   });
 
-  it("rejects an oversize content-length before reading", async () => {
+  it("reads a page whose declared length exceeds the cap instead of refusing it", async () => {
     const h = harness({
       "https://acme.example/": () =>
         html("small", { headers: { "content-type": "text/html", "content-length": "5000000" } }),
     });
-    expect(
-      await blockedCode(createFetcher(h.options).fetch({ url: "https://acme.example/" })),
-    ).toBe("too_large");
+    const document = await createFetcher(h.options).fetch({ url: "https://acme.example/" });
+    expect(document.text).toContain("small");
+    expect(document.truncated).toBeUndefined();
   });
 
   it("times out a slow body", async () => {

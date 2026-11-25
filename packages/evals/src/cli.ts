@@ -68,8 +68,7 @@ export function parseEvalArgs(
 }
 
 export function liveDeps(options: RunEvalOptions): RunEvalDeps {
-  if (!options.offline && options.audience === "owner" && existsSync(REPO_ENV_FILE))
-    process.loadEnvFile(REPO_ENV_FILE);
+  if (!options.offline && existsSync(REPO_ENV_FILE)) process.loadEnvFile(REPO_ENV_FILE);
   const env = { ...process.env };
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
   const linkCache = new Map<string, { ok: boolean; status?: number; error?: string }>();

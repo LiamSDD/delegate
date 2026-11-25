@@ -73,6 +73,7 @@ export interface FetchedDocument {
   contentType: string;
   text: string;
   bytes: number;
+  truncated?: true;
   fetchedAt: string;
 }
 
@@ -187,21 +188,25 @@ async function readCapped(
   body: ReadableStream<Uint8Array>,
   maxBytes: number,
   deadline: Deadline,
-  url: string,
-): Promise<Uint8Array> {
+): Promise<{ bytes: Uint8Array; truncated: boolean }> {
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let truncated = false;
   const aborted = deadline.whenAborted();
   aborted.catch(() => undefined);
   try {
     for (;;) {
       const result = await Promise.race([reader.read(), aborted]);
       if (result.done) break;
-      total += result.value.byteLength;
-      if (total > maxBytes) {
-        throw new FetchBlockedError("too_large", url, `Body exceeds ${maxBytes} bytes`);
+      const room = maxBytes - total;
+      if (result.value.byteLength > room) {
+        chunks.push(result.value.subarray(0, room));
+        total += room;
+        truncated = true;
+        break;
       }
+      total += result.value.byteLength;
       chunks.push(result.value);
     }
   } finally {
@@ -213,7 +218,7 @@ async function readCapped(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return bytes;
+  return { bytes, truncated };
 }
 
 export function createFetcher(options: FetcherOptions): Fetcher {
@@ -394,20 +399,11 @@ export function createFetcher(options: FetcherOptions): Fetcher {
             `Content type ${type || "missing"} is not allowed`,
           );
         }
-        const declared = Number(response.headers.get("content-length") ?? "0");
-        if (Number.isFinite(declared) && declared > maxBytes) {
-          await response.body?.cancel().catch(() => undefined);
-          throw new FetchBlockedError(
-            "too_large",
-            url.href,
-            `Body of ${declared} bytes exceeds ${maxBytes}`,
-          );
-        }
-        const bytes =
+        const { bytes, truncated } =
           response.body === null
-            ? new Uint8Array()
-            : await readCapped(response.body, maxBytes, deadline, url.href).catch(
-                (error: unknown) => fail(url.href, error),
+            ? { bytes: new Uint8Array(), truncated: false }
+            : await readCapped(response.body, maxBytes, deadline).catch((error: unknown) =>
+                fail(url.href, error),
               );
         return {
           url: input.url,
@@ -416,6 +412,7 @@ export function createFetcher(options: FetcherOptions): Fetcher {
           contentType: type,
           text: decode(bytes, charsetOf(header)),
           bytes: bytes.byteLength,
+          ...(truncated ? { truncated: true } : {}),
           fetchedAt: now().toISOString(),
         };
       }
