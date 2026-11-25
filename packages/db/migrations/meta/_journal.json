@@ -71,6 +71,13 @@
       "when": 1795624096154,
       "tag": "0009_autopilot_children",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795635772210,
+      "tag": "0011_platform_interfaces",
+      "breakpoints": true
     }
   ]
 }
