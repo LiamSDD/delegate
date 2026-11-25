@@ -16,6 +16,7 @@
     "check": "turbo run typecheck lint lint:root test test:root build",
     "gate": "pnpm check && pnpm --filter @delegate/evals gate",
     "eval": "pnpm --filter @delegate/evals eval",
+    "redteam": "pnpm --filter @delegate/evals redteam",
     "smoke": "pnpm --filter @delegate/runtime smoke",
     "db:generate": "pnpm --filter @delegate/db db:generate",
     "db:migrate": "pnpm --filter @delegate/db db:migrate",

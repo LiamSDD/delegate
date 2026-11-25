@@ -10,3 +10,6 @@ export * from "./judge/xray-judge";
 export * from "./judge/calibration";
 export * from "./gate-verdict";
 export * from "./runner";
+export * from "./redteam/schema";
+export * from "./redteam/report";
+export { HarnessError, runCase, runSuite, type CaseOutcome } from "./redteam/runner";

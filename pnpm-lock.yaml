@@ -511,6 +511,9 @@ importers:
 
   packages/evals:
     dependencies:
+      '@delegate/policy':
+        specifier: workspace:*
+        version: link:../policy
       '@delegate/runtime':
         specifier: workspace:*
         version: link:../runtime

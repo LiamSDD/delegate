@@ -17,9 +17,11 @@
     "test": "vitest run",
     "eval": "tsx src/run-eval.ts",
     "gate": "tsx src/gate.ts",
-    "agreement": "tsx src/agreement.ts"
+    "agreement": "tsx src/agreement.ts",
+    "redteam": "tsx src/redteam/cli.ts"
   },
   "dependencies": {
+    "@delegate/policy": "workspace:*",
     "@delegate/runtime": "workspace:*",
     "zod": "catalog:"
   },
