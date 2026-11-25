@@ -1,16 +1,24 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { posix } from "node:path";
 
 const GIT_IDENTITY = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"];
 
-export async function createFixtureRepo(files: Record<string, string>): Promise<string> {
+export async function createFixtureRepo(
+  files: Record<string, string>,
+  symlinks: Record<string, string> = {},
+): Promise<string> {
   const dir = await realpath(await mkdtemp(posix.join(tmpdir(), "delegate-fixture-repo-")));
   for (const [path, content] of Object.entries(files)) {
     const target = posix.join(dir, path);
     await mkdir(posix.dirname(target), { recursive: true });
     await writeFile(target, content);
+  }
+  for (const [path, target] of Object.entries(symlinks)) {
+    const link = posix.join(dir, path);
+    await mkdir(posix.dirname(link), { recursive: true });
+    await symlink(target, link);
   }
   const git = (args: string[]) =>
     execFileSync("git", [...GIT_IDENTITY, ...args], { cwd: dir, stdio: "pipe" });

@@ -614,15 +614,15 @@ export function createShipAPrMission(deps: ShipAPrDependencies): PlannedMission 
         throw new FatalStepError("ship_inputs_missing", "The diff or test reports are missing");
       const { diff } = recorded;
       const branch = branchName(improvement, runId);
-      let { mode, reason, session } = await decideMode(after);
-      if (mode === "pull_request") {
-        const decision = await policyAllowsPr(task.step.id, task.grant.capabilities);
-        if (decision.decision === "deny") {
-          mode = "patch";
-          session = null;
-          reason = `Policy ${decision.policyId} denies pull requests here: ${cut(decision.reason, 200)}`;
-        }
-      }
+      const policy = await policyAllowsPr(task.step.id, task.grant.capabilities);
+      const { mode, reason, session } =
+        policy.decision === "deny"
+          ? {
+              mode: "patch" as const,
+              session: null,
+              reason: `${ctx.audience === "owner" ? "" : "Public demo runs never push to GitHub. "}Policy ${policy.policyId} denies pull requests here: ${cut(policy.reason, 200)}`,
+            }
+          : await decideMode(after);
       const base =
         session === null
           ? (input.ref ?? "default branch")

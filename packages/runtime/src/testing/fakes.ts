@@ -135,6 +135,8 @@ export function testRun(options: {
   return { ctx, events, sleeps };
 }
 
+export { createFixtureRepo } from "./fixture-repo";
+
 export const RESEARCH_STEP = {
   id: "s1",
   capabilities: [CAPABILITIES.webFetch] as string[],
