@@ -103,6 +103,16 @@ function officialSite(claims: Record<string, z.infer<typeof SnakValueSchema>[]> 
   return undefined;
 }
 
+const ORGANISATION_PROPERTIES = ["P452", "P159", "P1128", "P749", "P112", "P1454", "P414", "P2139"];
+const PLACE_PROPERTIES = ["P1082", "P625", "P2046", "P131"];
+
+function organisationScore(claims: Record<string, unknown[]> | undefined): number {
+  const has = (property: string) => (claims?.[property]?.length ?? 0) > 0;
+  return (
+    ORGANISATION_PROPERTIES.filter(has).length - (PLACE_PROPERTIES.filter(has).length > 1 ? 2 : 0)
+  );
+}
+
 export interface CompanyResolver {
   tool: RegisteredTool;
   resolved: () => GoalCompany | null;
@@ -113,7 +123,7 @@ export function createCompanyResolver(fetcher: Fetcher, signal?: AbortSignal): C
   const tool = defineTool({
     name: "resolve_company",
     description:
-      "Find the official website of a company named in the goal: Wikidata search, accepting only an entity whose label matches the name and that lists an official website.",
+      "Find the official website of a company named in the goal: Wikidata search, accepting only an entity whose label matches the name and that lists an official website, preferring organisations (industry, headquarters, employees) over places with the same name.",
     capability: CAPABILITIES.webFetch,
     inputSchema: z.object({
       names: z.array(z.string().trim().min(2).max(80)).min(1).max(GOAL_TOOL_LIMITS.brandLookups),
@@ -144,12 +154,18 @@ export function createCompanyResolver(fetcher: Fetcher, signal?: AbortSignal): C
           WikidataEntitiesSchema,
           signal,
         );
-        for (const id of ids) {
+        const candidates = ids.flatMap((id, order) => {
           const entity = entities.value.entities[id];
           const label = entity?.labels?.en?.value;
-          if (entity === undefined || label === undefined || !labelMatches(label, name)) continue;
+          if (entity === undefined || label === undefined || !labelMatches(label, name)) return [];
           const url = officialSite(entity.claims);
-          if (url === undefined) continue;
+          if (url === undefined) return [];
+          return [{ id, label, url, order, score: organisationScore(entity.claims) }];
+        });
+        candidates.sort((a, b) => b.score - a.score || a.order - b.order);
+        const best = candidates[0];
+        if (best !== undefined) {
+          const { id, label, url } = best;
           resolved = { name: label, url, resolvedBy: "wikidata", entity: id };
           return {
             summary: `Resolved ${name} to ${label} (${id}), official site ${url}`,

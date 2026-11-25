@@ -49,6 +49,40 @@ const entities = {
 };
 
 describe("createCompanyResolver", () => {
+  it("prefers a matching organisation over a matching place that also lists a website", async () => {
+    const claim = (value: unknown) => [{ mainsnak: { datavalue: { value } } }];
+    const web = fakeWeb((url) => {
+      if (url.searchParams.get("action") === "wbsearchentities")
+        return json({ search: [{ id: "Q10" }, { id: "Q11" }, { id: "Q12" }] });
+      if (url.searchParams.get("action") === "wbgetentities")
+        return json({
+          entities: {
+            Q10: { labels: { en: { value: "Patagonia" } }, claims: { P625: claim({}) } },
+            Q11: {
+              labels: { en: { value: "Patagonia" } },
+              claims: {
+                P856: claim("http://townofpatagonia.com/"),
+                P625: claim({ latitude: 31.5, longitude: -110.7 }),
+                P1082: claim({ amount: "+913" }),
+              },
+            },
+            Q12: {
+              labels: { en: { value: "Patagonia" } },
+              claims: {
+                P856: claim("https://www.patagonia.com/"),
+                P452: claim({ id: "Q1" }),
+                P159: claim({ id: "Q2" }),
+              },
+            },
+          },
+        });
+      return undefined;
+    });
+    const resolver = createCompanyResolver(web.fetcher);
+    await call(resolver.tool, { names: ["Patagonia"] });
+    expect(resolver.resolved()).toMatchObject({ url: "https://www.patagonia.com/", entity: "Q12" });
+  });
+
   it("accepts the first entity whose label matches and that lists a non-code-host official site", async () => {
     const web = fakeWeb((url) => {
       if (url.searchParams.get("action") === "wbsearchentities")
