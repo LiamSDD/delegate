@@ -25,6 +25,8 @@ export const RUN_EVENT_TYPES = [
   "ship.approval.decided",
   "pr.opened",
   "playbook.applied",
+  "child.started",
+  "child.completed",
 ] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
