@@ -341,8 +341,10 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
     if (!options.scope(url)) return reject("scope", "outside the crawl scope");
     const focused =
       focusPath === undefined || underFocus(url, focusPath) || context.fromFocus === true;
-    if (!focused && context.source === "sitemap")
-      return reject("focus", "sitemap URL outside the crawl focus");
+    if (!focused && context.source === "sitemap") {
+      skip(url, "focus", "sitemap URL outside the crawl focus");
+      return false;
+    }
     const nonContent = nonContentReason(url);
     if (nonContent !== undefined) return reject("non_content", nonContent);
     if (otherLocale(new URL(url), startUrl)) return reject("non_content", "other locale");

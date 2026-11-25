@@ -347,17 +347,26 @@ describe("crawl engine", () => {
 
 describe("crawl focus on a section of a shared host (gate run, companies-house 2026-11-25)", () => {
   const SECTION = `${ORIGIN}/government/organisations/registry`;
+  const later =
+    (response: () => Response): Route =>
+    () =>
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve(response());
+        }, 30);
+      });
   const routes: Record<string, Route> = {
-    [SECTION]: () =>
+    [SECTION]: later(() =>
       html(
         page(
           "Registry",
           `${words(11)} <a href="/guidance/file-accounts">File accounts</a> <a href="/government/organisations/registry/about/complaints">Complaints</a>`,
         ),
       ),
+    ),
     [`${ORIGIN}/sitemap.xml`]: () =>
       xml(
-        `<urlset>${["/armed-forces-covenant/firm-a", "/armed-forces-covenant/firm-b", "/government/organisations/registry/about/foi"].map((path) => `<url><loc>${ORIGIN}${path}</loc></url>`).join("")}</urlset>`,
+        `<urlset>${["/guidance/file-accounts", "/armed-forces-covenant/firm-a", "/armed-forces-covenant/firm-b", "/government/organisations/registry/about/foi"].map((path) => `<url><loc>${ORIGIN}${path}</loc></url>`).join("")}</urlset>`,
       ),
     [`${ORIGIN}/guidance/file-accounts`]: () =>
       html(page("File accounts", `${words(12)} <a href="/unrelated/deep">deep</a>`)),
@@ -369,7 +378,7 @@ describe("crawl focus on a section of a shared host (gate run, companies-house 2
     [`${ORIGIN}/unrelated/deep`]: () => html(page("Deep", words(17))),
   };
 
-  it("skips sitemap URLs outside the section and fetches pages linked from it first", async () => {
+  it("skips sitemap URLs outside the section but still follows the section's links to them", async () => {
     const { fetcher } = site(routes);
     const stored: string[] = [];
     const result = await crawl(
