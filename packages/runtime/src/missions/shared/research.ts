@@ -411,6 +411,7 @@ export function createResearchKit(options: ResearchKitOptions): ResearchKit {
         `Feeds found: ${env.discoveries.feeds.length === 0 ? "none" : env.discoveries.feeds.join(", ")}`,
         "Already fetched:",
         ...fetched.map((url) => `- ${url}`),
+        ...(task.guidance ?? []),
       ].join("\n");
       const before = new Set(env.sources.all().map((document) => document.record.sourceId));
       const loop = await runAgentLoop({

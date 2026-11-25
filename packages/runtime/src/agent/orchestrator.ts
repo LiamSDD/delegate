@@ -40,6 +40,7 @@ export interface OrchestrateOptions {
   maxRevisions?: number;
   replan?: Replanner;
   resume?: OrchestratorResume;
+  guidance?: (step: PlanStep) => readonly string[];
 }
 
 export interface OrchestratorResume {
@@ -158,6 +159,7 @@ export async function orchestrate(
         agent,
         inputs,
         spawn: (role, modelRole) => spawn(step.id, role, modelRole),
+        ...(options.guidance === undefined ? {} : { guidance: options.guidance(step) }),
       });
       const result = SubAgentResultSchema.parse(raw);
       results.set(step.id, result);

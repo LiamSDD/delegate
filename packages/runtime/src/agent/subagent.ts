@@ -35,6 +35,7 @@ export interface SubAgentTask {
   agent: AgentHandle;
   inputs: ReadonlyMap<string, SubAgentResult>;
   spawn: (role: AgentRole, modelRole: ModelRole) => Promise<AgentHandle>;
+  guidance?: readonly string[];
 }
 
 export interface StepExecutor {

@@ -171,6 +171,26 @@ const samples: Record<RunEvent["type"], unknown> = {
       retryAfterMs: 15000,
     },
   },
+  "playbook.applied": {
+    type: "playbook.applied",
+    payload: {
+      key: "company-xray",
+      runs: 4,
+      sources: [{ scope: "workspace", version: 4 }],
+      entries: [
+        {
+          id: "pb_0a1b2c3d",
+          scope: "workspace",
+          kind: "source",
+          polarity: "keep",
+          text: "Cited wikipedia source en.wikipedia.org (1 of 1 fetched page).",
+          evidence: 3,
+          score: 0.7,
+        },
+      ],
+      tokens: 26,
+    },
+  },
 };
 
 function envelope(seq: number, body: unknown): unknown {
@@ -182,9 +202,9 @@ function build(bodies: unknown[]): RunEvent[] {
 }
 
 describe("RunEvent", () => {
-  it("lists exactly the twenty event types", () => {
-    expect(RUN_EVENT_TYPES).toHaveLength(20);
-    expect(new Set(RUN_EVENT_TYPES).size).toBe(20);
+  it("lists exactly the twenty-one event types", () => {
+    expect(RUN_EVENT_TYPES).toHaveLength(21);
+    expect(new Set(RUN_EVENT_TYPES).size).toBe(21);
     expect(Object.keys(samples).sort()).toEqual([...RUN_EVENT_TYPES].sort());
   });
 

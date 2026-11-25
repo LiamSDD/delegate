@@ -21,6 +21,7 @@ export const RUN_EVENT_TYPES = [
   "run.completed",
   "run.failed",
   "model.fallback",
+  "playbook.applied",
 ] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
@@ -185,6 +186,31 @@ export const ForkOriginSchema = z.object({
 });
 export type ForkOrigin = z.infer<typeof ForkOriginSchema>;
 
+export const PlaybookAppliedEntrySchema = z.object({
+  id: z.string().regex(/^pb_[0-9a-f]{8}$/),
+  scope: z.enum(["workspace", "house"]),
+  kind: z.string().min(1).max(40),
+  polarity: z.enum(["keep", "avoid"]),
+  text: z.string().min(1).max(240),
+  stepId: id.optional(),
+  evidence: z.number().int().positive(),
+  score: z.number().min(0).max(1),
+});
+export type PlaybookAppliedEntry = z.infer<typeof PlaybookAppliedEntrySchema>;
+
+export const PlaybookAppliedSchema = z.object({
+  key: z.string().min(1).max(100),
+  runs: tokenCount,
+  sources: z
+    .array(
+      z.object({ scope: z.enum(["workspace", "house"]), version: z.number().int().nonnegative() }),
+    )
+    .max(2),
+  entries: z.array(PlaybookAppliedEntrySchema).min(1).max(8),
+  tokens: tokenCount,
+});
+export type PlaybookApplied = z.infer<typeof PlaybookAppliedSchema>;
+
 export const RunEventSchema = z.discriminatedUnion("type", [
   event(
     "run.created",
@@ -328,6 +354,7 @@ export const RunEventSchema = z.discriminatedUnion("type", [
     }),
   ),
   event("model.fallback", ModelFallbackPayloadSchema),
+  event("playbook.applied", PlaybookAppliedSchema),
 ]);
 
 export type RunEvent = z.infer<typeof RunEventSchema>;
@@ -424,6 +451,7 @@ export interface RunState {
   pendingApprovals: PendingApproval[];
   artifacts: Record<string, ArtifactIndexEntry>;
   fallbacks: FallbackRecord[];
+  playbook?: PlaybookApplied & { seq: number };
   summary?: string;
   error?: { code: string; message: string };
   lastSeq: number;
@@ -623,6 +651,9 @@ export function foldRun(events: readonly RunEvent[]): RunState {
           seq: event.seq,
           ...(event.stepId === undefined ? {} : { stepId: event.stepId }),
         });
+        break;
+      case "playbook.applied":
+        state.playbook = { ...event.payload, seq: event.seq };
         break;
       case "run.completed":
         state.summary = event.payload.summary;

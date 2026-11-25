@@ -19,7 +19,11 @@ import { createMemoryKnowledgeStore } from "./knowledge/memory-store";
 import { type KnowledgeStore, type MemoryStore } from "./knowledge/types";
 import { memoryNotes, recordRunMemory } from "./knowledge/workspace-memory";
 import { Budget, type RunBudgetLimits } from "./budget";
-import { type Actor, type RunEvent, type RunEventDraft } from "./events";
+import { type Actor, type PlaybookApplied, type RunEvent, type RunEventDraft } from "./events";
+import { playbookKey, type LoggedEvent } from "./learning/lessons";
+import { PlaybookSchema, selectGuidance, type Playbook } from "./learning/playbook";
+import { reflectRun } from "./learning/reflect";
+import { type PlaybookStore } from "./learning/store";
 import {
   parseModelsConfig,
   resolveBaseUrl,
@@ -74,6 +78,10 @@ export interface RunMissionOptions {
   assistants?: AssistantStore;
   memory?: MemoryStore;
   embeddings?: EmbeddingProvider | null;
+  playbooks?: PlaybookStore;
+  houseLearning?: boolean;
+  shippedHouse?: (key: string) => Playbook | null;
+  graderScore?: (events: readonly LoggedEvent[]) => number | undefined;
 }
 
 export const RUNTIME_PROMPT_FILES = {
@@ -91,7 +99,10 @@ export const RUNTIME_PROMPT_FILES = {
   gaps: "build-agent.gaps.v1.md",
   answer: "assistant.answer.v1.md",
   rerank: "retrieval.rerank.v1.md",
+  reflect: "reflect.v1.md",
 } as const;
+
+export const REFLECT_BUDGET: RunBudgetLimits = { maxTokens: 20_000, maxMicroUsd: 0 };
 
 export const BUILD_AGENT_FETCH_PAGES = 80;
 
@@ -128,6 +139,33 @@ function readRepoFile(relative: string): string {
 
 export function loadPrompt(fileName: string): PromptFile {
   return parsePromptFile(fileName, readRepoFile(`../prompts/${fileName}`));
+}
+
+export function loadShippedPlaybook(key: string): Playbook | null {
+  try {
+    const raw = readRepoFile(`../playbooks/${key.replace(":", ".")}.house.json`);
+    const parsed = PlaybookSchema.safeParse(JSON.parse(raw) as unknown);
+    return parsed.success && parsed.data.key === key && parsed.data.scope === "house"
+      ? parsed.data
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function retrievePlaybook(
+  options: RunMissionOptions,
+  key: string,
+): Promise<PlaybookApplied | undefined> {
+  if (options.playbooks === undefined) return undefined;
+  const pair = await options.playbooks.read(key).catch(() => ({ workspace: null, house: null }));
+  const house = pair.house ?? (options.shippedHouse ?? loadShippedPlaybook)(key);
+  return (
+    selectGuidance([
+      { scope: "workspace", playbook: pair.workspace },
+      { scope: "house", playbook: house },
+    ]) ?? undefined
+  );
 }
 
 export function loadModelsConfig(override?: unknown): ModelsConfig {
@@ -196,6 +234,8 @@ function invalid(
 interface MissionResume {
   point?: ResumePoint;
   artifacts: readonly ExistingArtifact[];
+  events?: readonly RunEvent[];
+  playbook?: PlaybookApplied;
 }
 
 export function runMission(options: RunMissionOptions): Promise<RunMissionResult> {
@@ -227,7 +267,9 @@ async function executeMission(
   const now = options.now ?? (() => new Date());
   const resolveDns = options.resolveDns ?? systemResolveDns;
   const produced: { kind: string; content: unknown; artifactId: string }[] = [];
+  const logged: LoggedEvent[] = [...(resume?.events ?? [])];
   const emit = async (event: RunEventDraft) => {
+    logged.push({ ...event, at: now().toISOString() });
     if (event.type === "artifact.created")
       produced.push({
         artifactId: event.payload.artifactId,
@@ -281,6 +323,8 @@ async function executeMission(
       : restorable
         ? resume.point
         : { ...resume.point, completed: new Map(), failed: new Set<string>() };
+  const key = playbookKey(mission.id, parsed.data);
+  const playbook = resume === undefined ? await retrievePlaybook(options, key) : resume.playbook;
   const run = {
     ...(options.awaitPlanApproval === undefined
       ? {}
@@ -288,6 +332,7 @@ async function executeMission(
     ...(options.planApprover === undefined ? {} : { approver: options.planApprover }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
     ...(point === undefined ? {} : { resume: point }),
+    ...(playbook === undefined ? {} : { playbook }),
   };
   const notes =
     options.memory === undefined ? [] : memoryNotes(await options.memory.read().catch(() => []));
@@ -332,7 +377,62 @@ async function executeMission(
       at: now().toISOString(),
       artifacts: produced,
     }).catch(() => undefined);
+  if (options.playbooks !== undefined && options.signal?.aborted !== true)
+    await learnFromRun(options, {
+      key,
+      missionId: mission.id,
+      input: parsed.data,
+      events: logged,
+      config,
+      prompt: prompts.reflect,
+      now,
+    }).catch(() => undefined);
   return { status };
+}
+
+async function learnFromRun(
+  options: RunMissionOptions,
+  run: {
+    key: string;
+    missionId: string;
+    input: unknown;
+    events: readonly LoggedEvent[];
+    config: ModelsConfig;
+    prompt: PromptFile;
+    now: () => Date;
+  },
+): Promise<void> {
+  const store = options.playbooks;
+  if (store === undefined) return;
+  const audience = options.context.audience;
+  const ctx = createRunContext({
+    runId: `${options.runId}-reflect`,
+    workspaceId: options.workspaceId ?? "unscoped",
+    audience,
+    classification: options.context.classification,
+    config: run.config,
+    env: options.env,
+    emitter: createRunEmitter(() => Promise.resolve()),
+    budget: new Budget({ run: REFLECT_BUDGET }),
+    policies: [audience === "public-demo" ? defaultPolicy : ownerDefaultPolicy],
+    createProvider: (entry) => createServerProvider(entry, options.env, options.fetchImpl),
+    environment: "server",
+    ...(options.latency === undefined ? {} : { latency: options.latency }),
+    now: run.now,
+    ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
+  });
+  const graderScore = options.graderScore?.(run.events);
+  const lessons = await reflectRun(
+    {
+      runId: options.runId,
+      frame: { missionId: run.missionId, input: run.input },
+      events: run.events,
+      ...(graderScore === undefined ? {} : { graderScore }),
+    },
+    run.key,
+    { ctx, prompt: run.prompt },
+  );
+  await store.record(lessons, { house: options.houseLearning ?? audience === "owner" });
 }
 
 export interface ResumeMissionOptions extends Omit<RunMissionOptions, "missionId" | "input"> {
@@ -345,6 +445,11 @@ export interface ResumeMissionResult {
   resumed: boolean;
   skippedSteps: string[];
   rerunSteps: string[];
+}
+
+function appliedPlaybook(events: readonly RunEvent[]): { playbook?: PlaybookApplied } {
+  const applied = events.find((event) => event.type === "playbook.applied");
+  return applied?.type === "playbook.applied" ? { playbook: applied.payload } : {};
 }
 
 export async function resumeMission(options: ResumeMissionOptions): Promise<ResumeMissionResult> {
@@ -369,6 +474,8 @@ export async function resumeMission(options: ResumeMissionOptions): Promise<Resu
       {
         ...(analysis.point === undefined ? {} : { point: analysis.point }),
         artifacts: analysis.artifacts,
+        events: options.events,
+        ...appliedPlaybook(options.events),
       },
     );
   if (options.lease === undefined) {
