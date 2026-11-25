@@ -35,7 +35,8 @@
     "live:xray": "vitest run --config vitest.live.config.ts src/live/company-xray.live.test.ts",
     "live:nvidia": "vitest run --config vitest.live.config.ts src/live/nvidia-discovery.live.test.ts",
     "live:audit": "vitest run --config vitest.live.config.ts src/live/automation-audit.live.test.ts",
-    "live:build-agent": "vitest run --config vitest.live.config.ts src/live/build-agent.live.test.ts"
+    "live:build-agent": "vitest run --config vitest.live.config.ts src/live/build-agent.live.test.ts",
+    "crawl-bench": "tsx src/crawl/bench-cli.ts"
   },
   "dependencies": {
     "@delegate/policy": "workspace:*",
@@ -51,6 +52,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "eslint": "catalog:",
+    "tsx": "4.23.15",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
