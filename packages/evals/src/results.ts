@@ -7,6 +7,8 @@ import {
   type ProportionInterval,
 } from "./stats";
 
+export { wilsonInterval, type ProportionInterval } from "./stats";
+
 export const EVAL_RESULT_FILE_VERSION = 1;
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
