@@ -1,5 +1,6 @@
 import { auditLog, mcpConnectors, withTenant } from "@delegate/db";
-import { createMemoryAssistantStore } from "@delegate/runtime/server";
+import { type AssistantRecord, createMemoryAssistantStore } from "@delegate/runtime/server";
+import { assistantFixture } from "@delegate/runtime/testing";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -59,7 +60,7 @@ async function seed(label: string): Promise<Seeded> {
       kind: "assistant",
       title: `Assistant ${label}`,
       version: 1,
-      content: { id: assistantId, name: `Assistant ${label}` },
+      content: { ...assistantFixture(), id: assistantId, name: `Assistant ${label}` },
     },
   });
   await appendEvent(app, finished, { type: "run.completed", payload: { summary: "built" } });
@@ -74,6 +75,11 @@ async function seed(label: string): Promise<Seeded> {
   );
   await updateAutomation(app, guest.session, { autoApprovePlans: true });
   return { guest, finished, active, assistantId, token };
+}
+
+function stored(id: string, runId: string): AssistantRecord {
+  const config = { ...assistantFixture(), id };
+  return { id, runId, name: config.name, collection: config.collection, config };
 }
 
 function deps(overrides: Partial<DeleteDeps> = {}): DeleteDeps & Pick<TestDeps, "tasks"> {
@@ -122,13 +128,10 @@ describe("POST /settings/data/delete", () => {
     const b = await seed("b");
     const store = createMemoryAssistantStore();
     for (const seeded of [a, b])
-      await store.save({
-        id: seeded.assistantId,
-        runId: seeded.finished.runId,
-        name: "Assistant",
-        collection: `assistant-${seeded.assistantId}`,
-        config: {},
-      });
+      await store.save(stored(seeded.assistantId, seeded.finished.runId));
+    expect((await listAssistants(app, a.guest.session)).map((entry) => entry.id)).toEqual([
+      a.assistantId,
+    ]);
     const d = deps({ assistantStore: () => store });
     const executing = d.registry.register(a.active.runId).signal;
     const otherBefore = await dataInventory(app, b.guest.session);
@@ -267,12 +270,12 @@ describe("POST /settings/data/delete", () => {
 describe("evicting assistants from this instance's memory", () => {
   it("drops only the listed assistants and tolerates a store without records", async () => {
     const store = createMemoryAssistantStore();
-    for (const id of ["one", "two"])
-      await store.save({ id, runId: "run", name: id, collection: id, config: {} });
-    expect(evictAssistants(["one", "missing"], store)).toBe(1);
-    expect(await store.get("one")).toBeNull();
-    expect(await store.get("two")).not.toBeNull();
-    expect(evictAssistants(["two"], { get: () => Promise.resolve(null) })).toBe(0);
-    expect(evictAssistants(["two"], null)).toBe(0);
+    const [one, two] = [crypto.randomUUID(), crypto.randomUUID()];
+    for (const id of [one, two]) await store.save(stored(id, "run"));
+    expect(evictAssistants([one, crypto.randomUUID()], store)).toBe(1);
+    expect(await store.get(one)).toBeNull();
+    expect(await store.get(two)).not.toBeNull();
+    expect(evictAssistants([two], { get: () => Promise.resolve(null) })).toBe(0);
+    expect(evictAssistants([two], null)).toBe(0);
   });
 });

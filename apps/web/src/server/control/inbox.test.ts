@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { approvals, withTenant } from "@delegate/db";
 import type { PlanStep, ShipApprovalRequest } from "@delegate/runtime";
 import type { ToolApprovalRequest } from "@delegate/runtime/server";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   EXPIRED_NEEDS_THE_RUN,
@@ -100,12 +100,30 @@ async function inbox(guest: TestGuest, now?: Date): Promise<InboxItem[]> {
 }
 
 async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
+  const giveUpAt = Date.now() + 20_000;
+  while (Date.now() < giveUpAt) {
     const value = await read();
     if (value !== undefined) return value;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error("the approval never appeared in the inbox");
+}
+
+const A_DAY_MS = 24 * 60 * 60_000;
+let clockSkewMs = 0;
+const clock = () => Date.now() + clockSkewMs;
+
+beforeEach(() => {
+  clockSkewMs = 0;
+});
+
+async function lapse<T>(outstanding: Promise<T>[]): Promise<T[]> {
+  clockSkewMs = A_DAY_MS;
+  try {
+    return await Promise.all(outstanding);
+  } finally {
+    clockSkewMs = 0;
+  }
 }
 
 function itemOf<K extends InboxItem["kind"]>(guest: TestGuest, ctx: RunContext, kind: K) {
@@ -117,33 +135,21 @@ function itemOf<K extends InboxItem["kind"]>(guest: TestGuest, ctx: RunContext, 
   );
 }
 
-function waitForPlan(ctx: RunContext, plan: PlanStep[] = steps, timeoutMs?: number) {
-  return createPlanApprovalWaiter({
-    app,
-    ctx,
-    autoApprove: false,
-    pollMs: 5,
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-  })({ version: 1, steps: plan, kind: "initial" });
+function waitForPlan(ctx: RunContext, plan: PlanStep[] = steps) {
+  return createPlanApprovalWaiter({ app, ctx, autoApprove: false, pollMs: 5, now: clock })({
+    version: 1,
+    steps: plan,
+    kind: "initial",
+  });
 }
 
-async function waitForShip(ctx: RunContext, timeoutMs?: number) {
+async function waitForShip(ctx: RunContext) {
   await appendEvent(app, ctx, { type: "ship.approval.requested", payload: shipRequest });
-  return createShipApprovalWaiter({
-    app,
-    ctx,
-    pollMs: 5,
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-  })(shipRequest);
+  return createShipApprovalWaiter({ app, ctx, pollMs: 5, now: clock })(shipRequest);
 }
 
-function waitForTool(ctx: RunContext, request = toolRequest, timeoutMs?: number) {
-  return createToolApprovalGate({
-    app,
-    ctx,
-    pollMs: 5,
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-  }).decide(request);
+function waitForTool(ctx: RunContext, request = toolRequest) {
+  return createToolApprovalGate({ app, ctx, pollMs: 5, now: clock }).decide(request);
 }
 
 describe("approvals inbox aggregation", () => {
@@ -160,11 +166,11 @@ describe("approvals inbox aggregation", () => {
       input: { goal: "Unblock payments" },
     });
     const foreign = await newRun(app, other);
-    const pending = [
-      waitForPlan(planRun, steps, 2_000),
-      waitForShip(shipRun, 2_000),
-      waitForTool(toolRun, toolRequest, 2_000),
-      waitForPlan(foreign, steps, 2_000),
+    const pending: Promise<unknown>[] = [
+      waitForPlan(planRun),
+      waitForShip(shipRun),
+      waitForTool(toolRun),
+      waitForPlan(foreign),
     ];
     const plan = await itemOf(guest, planRun, "plan");
     const ship = await itemOf(guest, shipRun, "ship");
@@ -214,7 +220,7 @@ describe("approvals inbox aggregation", () => {
     const theirs = await inbox(other);
     expect(theirs).toHaveLength(1);
     expect(theirs[0]?.runId).toBe(foreign.runId);
-    await Promise.all(pending);
+    await lapse(pending);
   });
 
   it("is empty for a workspace with nothing waiting", async () => {
@@ -226,20 +232,20 @@ describe("approvals inbox aggregation", () => {
   it("hides approvals of finished runs, older duplicates and rows it cannot read", async () => {
     const guest = await newGuest(app);
     const finished = await newRun(app, guest);
-    const outstanding = waitForPlan(finished, steps, 1_000);
+    const outstanding = waitForPlan(finished);
     await itemOf(guest, finished, "plan");
     await appendEvent(app, finished, {
       type: "run.failed",
       payload: { error: { code: "cancelled", message: "cancelled by user" } },
     });
     expect(await inbox(guest)).toEqual([]);
-    await outstanding;
+    await lapse([outstanding]);
 
     const resumed = await newRun(app, guest);
-    const first = waitForPlan(resumed, steps, 1_000);
+    const first = waitForPlan(resumed);
     await itemOf(guest, resumed, "plan");
     const smaller = steps.slice(0, 1);
-    const second = waitForPlan(resumed, smaller, 1_000);
+    const second = waitForPlan(resumed, smaller);
     const newest = await until(async () =>
       (await inbox(guest)).find((item) => item.kind === "plan" && item.steps.length === 1),
     );
@@ -270,13 +276,13 @@ describe("approvals inbox aggregation", () => {
       ]),
     );
     expect((await inbox(guest)).filter((item) => item.runId === broken.runId)).toEqual([]);
-    await Promise.all([first, second]);
+    await lapse([first, second]);
   });
 
   it("marks a request past its deadline and offers only the run page for it", async () => {
     const guest = await newGuest(app);
     const ctx = await newRun(app, guest);
-    const outstanding = waitForTool(ctx, toolRequest, 1_000);
+    const outstanding = waitForTool(ctx);
     const live = await itemOf(guest, ctx, "tool");
     expect(live.expired).toBe(false);
     const later = new Date(Date.parse(live.expiresAt) + 1);
@@ -289,7 +295,7 @@ describe("approvals inbox aggregation", () => {
         href: `/runs/${ctx.runId}`,
         why: EXPIRED_NEEDS_THE_RUN,
       });
-    await outstanding;
+    await lapse([outstanding]);
   });
 });
 
@@ -325,11 +331,11 @@ describe("deciding from the inbox uses the run page's endpoints and guards", () 
   it("never approves a plan the reviewer did not see", async () => {
     const guest = await newGuest(app);
     const ctx = await newRun(app, guest);
-    const first = waitForPlan(ctx, steps, 1_500);
+    const first = waitForPlan(ctx);
     const reviewed = await itemOf(guest, ctx, "plan");
 
     const replaced: PlanStep[] = [{ ...steps[0], id: "crawl" } as PlanStep];
-    const second = waitForPlan(ctx, replaced, 1_500);
+    const second = waitForPlan(ctx, replaced);
     await until(async () =>
       (await inbox(guest)).find((item) => item.kind === "plan" && item.steps[0]?.id === "crawl"),
     );
@@ -341,7 +347,7 @@ describe("deciding from the inbox uses the run page's endpoints and guards", () 
       ...steps,
       { ...steps[1], id: "write", inputs: ["rank"], budgetShare: 0.1 } as PlanStep,
     ];
-    const third = waitForPlan(ctx, wider, 1_500);
+    const third = waitForPlan(ctx, wider);
     await until(async () =>
       (await inbox(guest)).find((item) => item.kind === "plan" && item.steps.length === 3),
     );
@@ -349,7 +355,7 @@ describe("deciding from the inbox uses the run page's endpoints and guards", () 
     expect(narrowed.status).toBe(200);
     expect(await narrowed.json()).toEqual({ decision: "approved", edited: true });
     await expect(third).resolves.toEqual({ decision: "approved", steps });
-    await Promise.all([first, second]);
+    await lapse([first, second]);
   });
 
   it("approves a connector call by sending the hash of the arguments that were shown", async () => {
@@ -384,22 +390,22 @@ describe("deciding from the inbox uses the run page's endpoints and guards", () 
   it("answers 409 when the arguments changed after they were shown", async () => {
     const guest = await newGuest(app);
     const ctx = await newRun(app, guest);
-    const first = waitForTool(ctx, toolRequest, 1_500);
+    const first = waitForTool(ctx);
     const reviewed = await itemOf(guest, ctx, "tool");
     const swapped = '{"body":"Delete every ticket","id":"4711"}';
-    const second = waitForTool(
-      ctx,
-      { ...toolRequest, argsJson: swapped, argsSha256: sha256(swapped) },
-      1_500,
-    );
+    const second = waitForTool(ctx, {
+      ...toolRequest,
+      argsJson: swapped,
+      argsSha256: sha256(swapped),
+    });
     await until(async () =>
       (await inbox(guest)).find((item) => item.kind === "tool" && item.argsJson === swapped),
     );
     const stale = await send(inboxAction(reviewed, "approved"), guest.cookie);
     expect(stale.status).toBe(409);
     expect(await errorCode(stale)).toBe("arguments_changed");
-    await expect(second).resolves.toMatchObject({ resolution: "rejected" });
-    await first;
+    const [, unapproved] = await lapse([first, second]);
+    expect(unapproved).toMatchObject({ resolution: "rejected" });
   });
 
   it("links to the run page instead of approving a ship request, and can reject it", async () => {
@@ -448,10 +454,10 @@ describe("deciding from the inbox uses the run page's endpoints and guards", () 
     const planRun = await newRun(app, guest);
     const shipRun = await newRun(app, guest, { missionId: "ship-a-pr" });
     const toolRun = await newRun(app, guest, { missionId: "custom-goal" });
-    const outstanding = [
-      waitForPlan(planRun, steps, 1_500),
-      waitForShip(shipRun, 1_500),
-      waitForTool(toolRun, toolRequest, 1_500),
+    const outstanding: Promise<unknown>[] = [
+      waitForPlan(planRun),
+      waitForShip(shipRun),
+      waitForTool(toolRun),
     ];
     const actions = [
       inboxAction(await itemOf(guest, planRun, "plan"), "approved"),
@@ -469,6 +475,6 @@ describe("deciding from the inbox uses the run page's endpoints and guards", () 
       expect(await errorCode(crossSite)).toBe("forbidden_origin");
     }
     expect(await inbox(guest)).toHaveLength(3);
-    await Promise.all(outstanding);
+    await lapse(outstanding);
   });
 });
