@@ -161,11 +161,19 @@ function entryTargetPath(
 ): string | null {
   const joined = joinPath(manifestDir, target.replace(/^\.\//, ""));
   if (joined === null) return null;
-  const candidates = [
+  const output = /^(.*?)(?:dist|distribution|build|out|lib|esm|cjs)\/(.*)$/.exec(joined);
+  const stems = [
     joined,
-    joined.replace(/^(.*?)(dist|build|lib)\//, "$1src/").replace(/\.(c|m)?js$/, ".ts"),
-    joined.replace(/\.(c|m)?js$/, ".ts"),
+    ...(output === null
+      ? []
+      : ["src", "source", "lib"].map((root) => `${output[1] ?? ""}${root}/${output[2] ?? ""}`)),
   ];
+  const candidates = stems.flatMap((stem) => [
+    stem,
+    stem.replace(/\.(c|m)?js$/, ".ts"),
+    stem.replace(/\.(c|m)?js$/, ".tsx"),
+    stem.replace(/\.(c|m)?js$/, ".mts"),
+  ]);
   return candidates.find((candidate) => files.has(candidate)) ?? null;
 }
 
@@ -183,7 +191,7 @@ function pythonScriptTarget(files: ReadonlyMap<string, RepoFile>, target: string
 }
 
 const CONVENTIONAL_ENTRIES = [
-  /^(src\/)?(index|main|cli|app|server)\.[cm]?[jt]sx?$/,
+  /^((src|source|lib)\/)?(index|main|cli|app|server)\.[cm]?[jt]sx?$/,
   /^(src\/)?[\w-]+\/__main__\.py$/,
   /^__main__\.py$/,
   /^(src\/)?main\.py$/,

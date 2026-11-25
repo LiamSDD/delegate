@@ -255,4 +255,22 @@ describe("analyseSnapshot", () => {
     ]);
     expect(analysis.gaps.map((gap) => gap.module)).toEqual(["src/pkg/io", "src/pkg/plugins"]);
   });
+
+  it("maps a built entry point back to its source and detects node:test and AVA in CI", async () => {
+    const { analysis } = await analyse({
+      "package.json": JSON.stringify(
+        { name: "kite", exports: { default: "./distribution/index.js" } },
+        null,
+        2,
+      ),
+      "source/index.ts": "export function kite() {\n  return 1;\n}\n",
+      "test/kite.ts": "import test from 'node:test';\nimport { kite } from '../source/index.js';\n",
+      ".github/workflows/main.yml": "jobs:\n  test:\n    steps:\n      - run: npx ava 'test/**'\n",
+    });
+    expect(analysis.entryPoints).toEqual([
+      { path: "source/index.ts", kind: "exports", declaredIn: { path: "package.json", line: 3 } },
+    ]);
+    expect(analysis.tests.frameworks.map((framework) => framework.name)).toEqual(["node:test"]);
+    expect(analysis.ci[0]?.testLine).toBe(4);
+  });
 });

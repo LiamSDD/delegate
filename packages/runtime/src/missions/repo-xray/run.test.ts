@@ -487,9 +487,10 @@ describe("Repo X-ray failures", () => {
     expect(
       RepoXrayInputSchema.safeParse({ url: "https://github.com/settings/profile" }).success,
     ).toBe(false);
-    expect(
-      RepoXrayInputSchema.safeParse({ url: `https://${"user"}:${"pw"}@github.com/a/b` }).success,
-    ).toBe(false);
+    const withCredentials = new URL("https://github.com/a/b");
+    withCredentials.username = "user";
+    withCredentials.password = "pw";
+    expect(RepoXrayInputSchema.safeParse({ url: withCredentials.href }).success).toBe(false);
     expect(RepoXrayInputSchema.safeParse({ url: "github.com/a/b", ref: "../../etc" }).success).toBe(
       false,
     );

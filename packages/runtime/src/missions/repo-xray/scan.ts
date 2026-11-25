@@ -269,7 +269,7 @@ export function detectCi(file: RepoFile): CiConfig | null {
                   : null;
   if (provider === null) return null;
   const index = fileLines(file).findIndex((line) =>
-    /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\bpytest\b|\btox\b|\bnox\b|\bgo test\b|\bcargo test\b|\bmake test\b|\brake\b|\bnpx (vitest|jest)\b/.test(
+    /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\bpytest\b|\btox\b|\bnox\b|\bgo test\b|\bcargo test\b|\bmake test\b|\brake\b|\b(npx|pnpm exec|yarn) (vitest|jest|ava|mocha|playwright test)\b|\bnode --test\b/.test(
       line,
     ),
   );
