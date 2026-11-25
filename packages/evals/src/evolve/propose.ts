@@ -113,6 +113,23 @@ export const StoredProposalSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+export function revalidateProposal(
+  proposal: Proposal,
+  targets: readonly PromptFile[],
+  pools: readonly Playbook[],
+): Proposal | undefined {
+  if (proposal.kind === "prompt") {
+    const parsed = promptProposalSchema(targets).safeParse(proposal);
+    return parsed.success
+      ? { kind: "prompt", proposer: proposal.proposer, ...parsed.data }
+      : undefined;
+  }
+  const parsed = playbookProposalSchema(pools).safeParse(proposal);
+  return parsed.success
+    ? { kind: "playbook", proposer: proposal.proposer, ...parsed.data }
+    : undefined;
+}
+
 export class ProposalError extends Error {
   override readonly name = "ProposalError";
 }

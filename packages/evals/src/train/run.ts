@@ -17,6 +17,7 @@ import {
   candidatePlaybook,
   candidatePrompt,
   renderPromptFile,
+  revalidateProposal,
   type Proposal,
   type ProposalInput,
 } from "../evolve/propose";
@@ -588,9 +589,12 @@ async function runStep(
     return finish({ baseline, candidate: null, built: null, proposal: undefined, redteam: null });
 
   const stored = session.proposals[key];
+  const promptTargets = targets.prompts.map((entry) => head.prompts[entry]);
   let proposal: Proposal | undefined =
-    stored?.baseline === baseFingerprint ? stored.proposal : undefined;
-  let nextVersion = stored?.baseline === baseFingerprint ? stored.nextPromptVersion : undefined;
+    stored?.baseline === baseFingerprint && stored.proposal.kind === kind
+      ? revalidateProposal(stored.proposal, promptTargets, baseline.arm.pool)
+      : undefined;
+  let nextVersion = proposal === undefined ? undefined : stored?.nextPromptVersion;
   let built: Candidate | null = null;
   let proposalError: string | undefined;
   try {
@@ -602,7 +606,7 @@ async function runStep(
       proposal = await deps.propose({
         kind,
         mission: { id: mission, title: adapter.title },
-        targets: targets.prompts.map((entry) => head.prompts[entry]),
+        targets: promptTargets,
         digest: digestRows(baseline.arm.rows),
         pools: baseline.arm.pool,
       });
