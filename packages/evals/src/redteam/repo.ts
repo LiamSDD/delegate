@@ -178,7 +178,7 @@ export async function runRepo(payload: z.infer<typeof RepoPayloadSchema>): Promi
     prompts: {
       reader: loadPrompt("quarantine-reader.v1.md"),
       repoArchitect: loadPrompt("repo-xray.architect.v1.md"),
-      repoImprover: loadPrompt("repo-xray.improver.v1.md"),
+      repoImprover: loadPrompt("repo-xray.improver.v2.md"),
       planner: loadPrompt("planner.v2.md"),
       critic: loadPrompt("critic.v1.md"),
       editor: loadPrompt("editor.v1.md"),

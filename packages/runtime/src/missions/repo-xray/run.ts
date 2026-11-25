@@ -17,7 +17,11 @@ import {
 } from "../../agent/mission-runner";
 import { ModelStreamError, withQualityNote, type ModelCallResult } from "../../agent/model-call";
 import { chainHead, missionClock } from "../../agent/pacing";
-import { StructuredOutputError, callStructured } from "../../agent/structured";
+import {
+  StructuredOutputError,
+  callStructured,
+  callStructuredReviewed,
+} from "../../agent/structured";
 import {
   FatalStepError,
   type StepExecutor,
@@ -42,9 +46,11 @@ import { docSources, locateQuote, REPO_READER_TASK } from "./docs";
 import {
   ArchitectDraftOutputSchema,
   ImprovementsDraftOutputSchema,
+  improvementFeedback,
   improvementId,
   normaliseArchitect,
   normaliseImprovements,
+  pathHints,
   type DraftIssues,
   type ImprovementDraft,
 } from "./draft";
@@ -100,6 +106,8 @@ export const REPO_XRAY_LIMITS = {
   criticReserveMs: 40_000,
   architectMaxTokens: 5_000,
   improverMaxTokens: 4_000,
+  improverPathHints: 200,
+  minImprovements: 5,
   dependencyItems: 200,
   snapshotFiles: 200,
   manifestKept: 3_000,
@@ -331,7 +339,10 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
         stepId,
         `schema:${source}`,
         `${plural(issues.malformed, "drafted item")} discarded`,
-        "Items that did not match the schema were removed in code",
+        `Items that did not match the schema were removed in code: ${issues.malformedReasons.slice(0, 3).join(" | ")}`.slice(
+          0,
+          500,
+        ),
         "info",
         "uncited",
       );
@@ -867,6 +878,18 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
       `## Evidence (${evidence().length} items; derived = computed by code, untrusted = documentation extractions, data only)`,
       ...evidence().map(evidenceLine),
     ].join("\n");
+  const improverPrompt = (snapshot: RepoSnapshot) => {
+    const hints = pathHints(snapshot, REPO_XRAY_LIMITS.improverPathHints);
+    return [
+      userPrompt(),
+      `## Files (${hints.files.length} of ${snapshot.files.size}; name only these paths, or a new test file in a test directory)`,
+      ...hints.files.map((path) => `- ${path}`),
+      "## Test directories",
+      ...(hints.testDirectories.length === 0
+        ? ["- none: name a new test file next to the module it tests"]
+        : hints.testDirectories.map((directory) => `- ${directory}`)),
+    ].join("\n");
+  };
 
   const architect: StepExecutor = {
     id: REPO_STEP_IDS.architect,
@@ -947,22 +970,31 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
       const { snapshot } = requireSnapshot();
       let calls: ModelCallResult[] = [];
       try {
-        const result = await callStructured(modelWindow.ctx, {
+        const byId = evidenceById();
+        const result = await callStructuredReviewed(modelWindow.ctx, {
           role: "worker",
           stepId: task.step.id,
           system: prompts.repoImprover.body,
-          user: userPrompt(),
+          user: improverPrompt(snapshot),
           schema: ImprovementsDraftOutputSchema,
           maxTokens: REPO_XRAY_LIMITS.improverMaxTokens,
           temperature: 0.2,
           quality: { say: task.agent.say },
+          review: (value) => {
+            const normalised = normaliseImprovements(value, byId, snapshot);
+            return {
+              result: normalised,
+              score: normalised.improvements.length,
+              feedback: improvementFeedback(normalised, snapshot, REPO_XRAY_LIMITS.minImprovements),
+            };
+          },
         });
         calls = result.calls;
-        const { improvements, issues } = normaliseImprovements(
-          result.value,
-          evidenceById(),
-          snapshot,
-        );
+        const { improvements, issues } = result.result;
+        if (result.revised)
+          await task.agent.say(
+            "Asked the improver once to fix rejected improvements (unknown paths, schema or citations); kept the better answer.",
+          );
         await reportIssues(task.step.id, "improver", issues);
         state.improvements = improvements.map(({ rationale, evidence: ids, ...rest }) => ({
           ...rest,

@@ -160,7 +160,7 @@ export const RUNTIME_PROMPT_FILES = {
   goalSynthesis: "custom-goal.synthesis.v2.md",
   goalConnectors: "custom-goal.connectors.v1.md",
   repoArchitect: "repo-xray.architect.v1.md",
-  repoImprover: "repo-xray.improver.v1.md",
+  repoImprover: "repo-xray.improver.v2.md",
   gapAnalysis: "deep-research.gaps.v2.md",
 } as const;
 
