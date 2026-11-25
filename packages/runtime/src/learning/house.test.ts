@@ -1,4 +1,10 @@
+import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
+
+import { loadShippedPlaybook } from "../server";
 
 import {
   housePlaybookFileName,
@@ -51,6 +57,24 @@ describe("house playbook files", () => {
     ).toBeNull();
     expect(parseHousePlaybook("repo-xray", "{not json")).toBeNull();
     expect(parseHousePlaybook("repo-xray", JSON.stringify({ ...house, extra: 1 }))).toBeNull();
+  });
+
+  it("names the file the runtime's shipped-playbook loader reads, for any mission key", () => {
+    const dir = fileURLToPath(new URL("../../playbooks", import.meta.url));
+    const created = !existsSync(dir);
+    const keys = ["zz-loader-probe", "zz-loader-probe:growth"];
+    try {
+      mkdirSync(dir, { recursive: true });
+      for (const key of keys) {
+        expect(loadShippedPlaybook(key)).toBeNull();
+        const house = { ...emptyPlaybook(key, "house", at), version: 2 };
+        writeFileSync(join(dir, housePlaybookFileName(key)), JSON.stringify(house));
+        expect(loadShippedPlaybook(key)).toEqual(house);
+      }
+    } finally {
+      for (const key of keys) rmSync(join(dir, housePlaybookFileName(key)), { force: true });
+      if (created && readdirSync(dir).length === 0) rmdirSync(dir);
+    }
   });
 
   it("derives the keys a mission's inputs resolve to, with goal categories", () => {

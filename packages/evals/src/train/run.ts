@@ -371,6 +371,10 @@ function comparisonsAgainst(records: readonly TrainingRecord[], fingerprint: str
 
 function writeNew(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
+  if (existsSync(path)) {
+    if (readFileSync(path, "utf8") === content) return;
+    throw new Error(`${path} already exists with other content; a shipped version is never edited`);
+  }
   writeFileSync(path, content, { flag: "wx" });
 }
 
@@ -698,6 +702,7 @@ function openSession(
 
 export async function runTraining(options: TrainOptions, deps: TrainDeps): Promise<TrainReport> {
   if (options.trials < 2) throw new Error("--trials must be at least 2 for a per-case comparison");
+  if (options.dryRun) throw new Error("A dry run plans with planTraining and runs nothing");
   const started = deps.now();
   const records = loadTrainingRecords(options.trainingDir);
   const session = openSession(options, records, started);

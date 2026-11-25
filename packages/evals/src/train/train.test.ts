@@ -641,6 +641,25 @@ describe("resuming and the time budget", () => {
     expect(retry.proposals.map((input) => input.kind)).toEqual(["playbook"]);
   });
 
+  it("never overwrites a prompt version that exists with other content", async () => {
+    const live = loadRuntimePrompts().synthesis;
+    const h = harness();
+    mkdirSync(h.options.promptsDir, { recursive: true });
+    const taken = join(h.options.promptsDir, `${live.name}.v${live.version + 1}.md`);
+    writeFileSync(taken, "written by hand");
+    await runTraining({ ...h.options, rounds: 1 }, h.deps);
+    expect(readFileSync(taken, "utf8")).toBe("written by hand");
+    expect(h.records()[0]?.change.prompt).toMatchObject({
+      from: live.version,
+      to: live.version + 2,
+    });
+    expect(readdirSync(h.options.promptsDir).sort()).toEqual([
+      `${live.name}.v${live.version + 1}.md`,
+      `${live.name}.v${live.version + 2}.md`,
+    ]);
+    await expect(runTraining({ ...h.options, dryRun: true }, h.deps)).rejects.toThrow(/dry run/);
+  });
+
   it("plans a dry run without running, asking or writing anything", () => {
     const h = harness({ dryRun: true, missions: ["xray", "goal"], budgetMs: 35 * 60_000 });
     const plan = planTraining(h.options, { now: h.deps.now, estimateArmMs: () => ARM_MS });
