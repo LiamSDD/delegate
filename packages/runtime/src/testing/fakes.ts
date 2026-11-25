@@ -5,6 +5,7 @@ import { createRunEmitter } from "../agent/emitter";
 import { Budget } from "../budget";
 import { type RunEventDraft } from "../events";
 import { parseModelsConfig, type ModelsConfig } from "../models";
+import { type ToolApprovalGate } from "../tools/approvals";
 import {
   type ModelProvider,
   type ModelRequest,
@@ -104,6 +105,7 @@ export function testRun(options: {
   maxTokens?: number;
   signal?: AbortSignal;
   clock?: () => number;
+  approvals?: ToolApprovalGate;
 }): TestRun {
   const events: RunEventDraft[] = [];
   const sleeps: number[] = [];
@@ -131,6 +133,7 @@ export function testRun(options: {
       return Promise.resolve();
     },
     ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.approvals === undefined ? {} : { approvals: options.approvals }),
   });
   return { ctx, events, sleeps };
 }

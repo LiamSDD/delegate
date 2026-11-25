@@ -145,6 +145,12 @@ export function createPinnedFetch(
       request.on("error", (error) => {
         reject(error);
       });
-      request.end();
+      const body = init?.body;
+      if (body === undefined || body === null) request.end();
+      else if (typeof body === "string" || body instanceof Uint8Array) request.end(body);
+      else {
+        request.destroy();
+        reject(new Error("Unsupported request body type"));
+      }
     });
 }

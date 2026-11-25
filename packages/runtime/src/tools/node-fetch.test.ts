@@ -16,6 +16,15 @@ beforeAll(async () => {
       response.end(gzipSync("compressed hello"));
       return;
     }
+    if (request.url === "/echo") {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/plain" });
+        response.end(`${request.method ?? ""} ${Buffer.concat(chunks).toString("utf8")}`);
+      });
+      return;
+    }
     if (request.url === "/redirect") {
       response.writeHead(302, { location: "/plain" });
       response.end();
@@ -37,6 +46,18 @@ afterAll(async () => {
 });
 
 describe("createPinnedFetch", () => {
+  it("sends string request bodies", async () => {
+    const pinned = createPinnedFetch(() => Promise.resolve(["127.0.0.1"]), {
+      isAllowedAddress: () => true,
+    });
+    const response = await pinned(`http://pinned.test:${port}/echo`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"jsonrpc":"2.0"}',
+    });
+    expect(await response.text()).toBe('POST {"jsonrpc":"2.0"}');
+  });
+
   it("refuses to connect when the name resolves to a blocked address at connect time", async () => {
     const pinned = createPinnedFetch(() => Promise.resolve(["127.0.0.1"]));
     await expect(pinned(`http://rebind.test:${port}/plain`)).rejects.toThrow(/blocked|resolves/i);

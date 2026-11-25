@@ -14,16 +14,22 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "stdio": "tsx src/stdio.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@delegate/sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "tsx": "4.23.15"
+  },
+  "bin": {
+    "delegate-mcp": "./src/stdio.ts"
   }
 }

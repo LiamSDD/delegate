@@ -480,3 +480,6 @@ export {
 export { reciprocalRankFusion, retrieve, RETRIEVAL_DEFAULTS } from "./knowledge/retrieve";
 export { memoryNotes, recordRunMemory, MEMORY_KEYS } from "./knowledge/workspace-memory";
 export { assistantIdForRun } from "./missions/build-agent/run";
+export * from "./connectors";
+export * from "./tools/approvals";
+export { createPinnedFetch } from "./tools/node-fetch";

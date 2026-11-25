@@ -11,6 +11,7 @@ import {
   type ModelsConfig,
 } from "../models";
 import { type ModelProvider } from "../providers/types";
+import { type ToolApprovalGate } from "../tools/approvals";
 import { ModelRouter } from "../router";
 import { type RunEmitter } from "./emitter";
 
@@ -64,6 +65,7 @@ export interface RunContext {
   attributeTo: (stepId: string | undefined) => void;
   gate: ProviderGate;
   quality?: QualitySettings;
+  approvals?: ToolApprovalGate;
 }
 
 export interface ProviderGate {
@@ -127,6 +129,7 @@ export interface RunContextOptions {
   localOptIn?: boolean;
   latency?: LatencyMode;
   quality?: QualitySettings;
+  approvals?: ToolApprovalGate;
   signal?: AbortSignal;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
@@ -215,5 +218,6 @@ export function createRunContext(options: RunContextOptions): RunContext {
     },
     gate: createProviderGate((role) => resolveChain(role, options.env, routing)[0]),
     ...(options.quality === undefined ? {} : { quality: options.quality }),
+    ...(options.approvals === undefined ? {} : { approvals: options.approvals }),
   };
 }

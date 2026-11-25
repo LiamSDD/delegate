@@ -368,6 +368,12 @@ importers:
       '@delegate/evals':
         specifier: workspace:*
         version: link:../../packages/evals
+      '@delegate/mcp-server':
+        specifier: workspace:*
+        version: link:../../packages/mcp-server
+      '@delegate/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@delegate/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -542,6 +548,9 @@ importers:
 
   packages/mcp-server:
     dependencies:
+      '@delegate/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.32.2(zod@4.6.7)
@@ -555,6 +564,9 @@ importers:
       eslint:
         specifier: 'catalog:'
         version: 10.15.0(jiti@2.7.0)
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -589,6 +601,9 @@ importers:
       '@delegate/policy':
         specifier: workspace:*
         version: link:../policy
+      '@modelcontextprotocol/sdk':
+        specifier: 'catalog:'
+        version: 1.32.2(zod@4.6.7)
       '@opentelemetry/api':
         specifier: 'catalog:'
         version: 1.10.0
@@ -625,6 +640,10 @@ importers:
         version: 5.1.1(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
 
   packages/sdk:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

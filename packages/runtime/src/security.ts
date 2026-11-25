@@ -36,3 +36,5 @@ export {
   type StepGrant,
   type ToolCallOutcome,
 } from "./tools/registry";
+export * from "./connectors";
+export * from "./tools/approvals";

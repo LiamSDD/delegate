@@ -189,7 +189,52 @@ export async function executeToolCall(
     spentDayMicroUsd: 0,
   });
   await decide(decision.decision, decision.policyId, decision.reason);
-  if (decision.decision !== "allow") {
+  let approvedBy: Actor | undefined;
+  if (decision.decision === "require_approval" && run.approvals !== undefined) {
+    const approvalId = run.nextId("ap");
+    await run.emitter.emit({
+      runId: run.runId,
+      type: "approval.requested",
+      stepId: step.id,
+      payload: {
+        approvalId,
+        toolCallId,
+        policyId: decision.policyId,
+        reason: cap(decision.reason, 500),
+        summary: cap(`${tool.name}: ${prepared.call.argsSummary}`, TOOL_SUMMARY_MAX_CHARS),
+      },
+    });
+    const resolved = await run.approvals.decide({
+      approvalId,
+      toolCallId,
+      stepId: step.id,
+      tool: tool.name,
+      capability: tool.capability,
+      argsSummary: prepared.call.argsSummary,
+      policyId: decision.policyId,
+      reason: decision.reason,
+    });
+    await run.emitter.emit({
+      runId: run.runId,
+      type: "approval.resolved",
+      stepId: step.id,
+      payload: {
+        approvalId,
+        resolution: resolved.resolution,
+        resolvedBy: resolved.resolvedBy,
+        ...(resolved.note === undefined ? {} : { note: cap(resolved.note, 500) }),
+      },
+    });
+    if (resolved.resolution === "approved") approvedBy = resolved.resolvedBy;
+    else
+      return {
+        ok: false,
+        toolCallId,
+        decision: "require_approval",
+        content: `Approval was not granted: ${resolved.note ?? decision.reason}`,
+      };
+  }
+  if (decision.decision !== "allow" && approvedBy === undefined) {
     const verb =
       decision.decision === "deny"
         ? "Denied by policy"

@@ -8,6 +8,8 @@ export const CAPABILITIES = {
   repoWrite: "repo.write",
   messageSend: "message.send",
   webhookSend: "webhook.send",
+  connectorRead: "connector.read",
+  connectorWrite: "connector.write",
 } as const;
 
 export type Capability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];
@@ -17,6 +19,7 @@ export const SIDE_EFFECT_CAPABILITIES: readonly Capability[] = [
   CAPABILITIES.repoWrite,
   CAPABILITIES.messageSend,
   CAPABILITIES.webhookSend,
+  CAPABILITIES.connectorWrite,
 ];
 
 export const EGRESS_CAPABILITIES: readonly Capability[] = [
@@ -24,7 +27,38 @@ export const EGRESS_CAPABILITIES: readonly Capability[] = [
   CAPABILITIES.repoWrite,
   CAPABILITIES.messageSend,
   CAPABILITIES.webhookSend,
+  CAPABILITIES.connectorRead,
+  CAPABILITIES.connectorWrite,
 ];
+
+export const CONNECTOR_CAPABILITIES: readonly Capability[] = [
+  CAPABILITIES.connectorRead,
+  CAPABILITIES.connectorWrite,
+];
+
+export function withConnectorAccess(base: Policy, connectorHosts: readonly string[]): Policy {
+  if (connectorHosts.length === 0) return base;
+  return PolicySchema.parse({
+    ...base,
+    id: `${base.id}+connectors`,
+    rules: [
+      ...base.rules.map((rule) =>
+        rule.kind === "capability_allowlist" || rule.kind === "egress_allowlist"
+          ? {
+              ...rule,
+              capabilities: [...new Set([...rule.capabilities, ...CONNECTOR_CAPABILITIES])],
+            }
+          : rule,
+      ),
+      {
+        id: "connector-hosts",
+        kind: "egress_allowlist",
+        capabilities: [...CONNECTOR_CAPABILITIES],
+        domains: [...new Set(connectorHosts.map((host) => host.toLowerCase()))],
+      },
+    ],
+  });
+}
 
 export const defaultPolicy: Policy = PolicySchema.parse({
   id: "guest-demo",
