@@ -97,16 +97,97 @@ function normalise(text: string): string {
 }
 
 const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u;
+const LETTER = /[\p{L}\p{M}]/u;
+const DIGIT = /\p{Nd}/u;
+const NUMBER_SEPARATOR = /[.,]/;
+const UNSPACED_SCRIPT =
+  /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Thai}\p{scx=Lao}\p{scx=Khmer}\p{scx=Myanmar}]/u;
+const MIN_DROPPED_MODIFIER_CHARS = 4;
+const INVERTING_MODIFIERS: ReadonlySet<string> = new Set([
+  "anti",
+  "contra",
+  "contre",
+  "counter",
+  "ehemals",
+  "fake",
+  "faux",
+  "former",
+  "gegen",
+  "halb",
+  "kein",
+  "keine",
+  "miss",
+  "never",
+  "nicht",
+  "ohne",
+  "over",
+  "pseudo",
+  "quasi",
+  "sans",
+  "schein",
+  "semi",
+  "under",
+]);
 
-function isWordChar(char: string | undefined): boolean {
-  return char !== undefined && WORD_CHAR.test(char);
+function matches(pattern: RegExp, char: string | undefined): boolean {
+  return char !== undefined && pattern.test(char);
+}
+
+function continuesNumber(text: string, at: number): boolean {
+  const before = text[at - 1];
+  const after = text[at];
+  if (matches(DIGIT, before) && matches(DIGIT, after)) return true;
+  if (matches(DIGIT, before) && matches(NUMBER_SEPARATOR, after))
+    return matches(DIGIT, text[at + 1]);
+  if (matches(NUMBER_SEPARATOR, before) && matches(DIGIT, after))
+    return matches(DIGIT, text[at - 2]);
+  return false;
+}
+
+function isSpacedWordChar(char: string | undefined): boolean {
+  return matches(WORD_CHAR, char) && !matches(UNSPACED_SCRIPT, char);
+}
+
+function joinsSpacedWord(left: string | undefined, right: string | undefined): boolean {
+  return isSpacedWordChar(left) && isSpacedWordChar(right);
+}
+
+function isHyphenJoin(text: string, hyphenAt: number): boolean {
+  return (
+    text[hyphenAt] === "-" &&
+    matches(LETTER, text[hyphenAt - 1]) &&
+    matches(LETTER, text[hyphenAt + 1])
+  );
+}
+
+function droppedModifier(text: string, start: number): string {
+  const end = isHyphenJoin(text, start - 1) ? start - 1 : start;
+  let wordStart = end;
+  while (isSpacedWordChar(text[wordStart - 1])) wordStart -= 1;
+  return text.slice(wordStart, end);
+}
+
+function isCompoundModifier(prefix: string): boolean {
+  return (
+    prefix.length >= MIN_DROPPED_MODIFIER_CHARS &&
+    [...prefix].every((char) => LETTER.test(char)) &&
+    !INVERTING_MODIFIERS.has(prefix)
+  );
+}
+
+function startsCleanly(text: string, start: number): boolean {
+  if (continuesNumber(text, start)) return false;
+  const joined = joinsSpacedWord(text[start - 1], text[start]) || isHyphenJoin(text, start - 1);
+  return !joined || isCompoundModifier(droppedModifier(text, start));
+}
+
+function endsCleanly(text: string, end: number): boolean {
+  if (continuesNumber(text, end)) return false;
+  return !joinsSpacedWord(text[end - 1], text[end]) && !isHyphenJoin(text, end);
 }
 
 function alignsWithWords(haystack: string, needle: string, start: number): boolean {
-  const end = start + needle.length;
-  const startsInsideWord = isWordChar(needle[0]) && isWordChar(haystack[start - 1]);
-  const endsInsideWord = isWordChar(needle.at(-1)) && isWordChar(haystack[end]);
-  return !startsInsideWord && !endsInsideWord;
+  return startsCleanly(haystack, start) && endsCleanly(haystack, start + needle.length);
 }
 
 export function quoteAppearsIn(quote: string, source: string): boolean {

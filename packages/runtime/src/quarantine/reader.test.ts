@@ -67,6 +67,36 @@ describe("quoteAppearsIn word alignment", () => {
   it("accepts a later word-aligned occurrence after a misaligned one", () => {
     expect(quoteAppearsIn("safe for kids", "unsafe for kids, but safe for kids")).toBe(true);
   });
+
+  it.each([
+    [
+      "東京で設立されたソフトウェア企業であり",
+      "株式会社サンプルは2020年に東京で設立されたソフトウェア企業であり、従業員は50名です。",
+    ],
+    ["設立されたソフトウェア企業", "2020年に東京で設立されたソフトウェア企業であり"],
+    ["บริษัทก่อตั้งในกรุงเทพ", "ในปี 2020 บริษัทก่อตั้งในกรุงเทพมหานคร"],
+    ["Straße 12 in Berlin", "Der Sitz liegt in der Hauptstraße 12 in Berlin."],
+    ["known robotics company", "Acme is a well-known robotics company."],
+  ])("accepts %s inside a script or compound without word spaces", (quote, text) => {
+    expect(quoteAppearsIn(quote, text)).toBe(true);
+  });
+
+  it.each([
+    ["safe for fragile glassware", "Our grippers are unsafe for fragile glassware."],
+    ["sicher für Glas", "Die Greifer sind unsicher für Glas."],
+    ["Raucher willkommen", "Nichtraucher willkommen."],
+    ["toxic to humans", "The coating is non-toxic to humans."],
+    ["has ever been breached", "The vault has never been breached."],
+    ["CEO of Acme", "She is the ex-CEO of Acme."],
+    ["funded program", "An underfunded program."],
+    ["5% in 2025", "Revenue grew 1.5% in 2025."],
+    ["500 employees worldwide", "Acme has 1,500 employees worldwide."],
+    ["Revenue grew 1", "Revenue grew 1.5% in 2025."],
+    ["2020年に東京で設立", "12020年に東京で設立"],
+    ["contains sugar", "The drink contains sugar-free syrup."],
+  ])("rejects %s cut from a longer word or number", (quote, text) => {
+    expect(quoteAppearsIn(quote, text)).toBe(false);
+  });
 });
 
 describe("detectInjection", () => {
