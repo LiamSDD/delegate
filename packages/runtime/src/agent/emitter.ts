@@ -7,6 +7,7 @@ export interface RunEmitter {
   emit(event: RunEventDraft): Promise<void>;
   queue(event: RunEventDraft): void;
   flush(): Promise<void>;
+  history(): readonly RunEventDraft[];
 }
 
 const VALIDATION_ENVELOPE = { seq: 0, at: "1970-01-01T00:00:00.000Z" };
@@ -17,12 +18,17 @@ function validated(input: RunEventDraft): RunEventDraft {
   return event;
 }
 
-export function createRunEmitter(deliver: EmitFn): RunEmitter {
+export function createRunEmitter(
+  deliver: EmitFn,
+  stored: readonly RunEventDraft[] = [],
+): RunEmitter {
   let tail: Promise<void> = Promise.resolve();
   let failure: unknown;
   let failed = false;
+  const log: RunEventDraft[] = [...stored];
 
   const enqueue = (event: RunEventDraft): Promise<void> => {
+    log.push(event);
     const next = tail.then(() => deliver(event));
     tail = next.catch((error: unknown) => {
       if (!failed) {
@@ -55,6 +61,7 @@ export function createRunEmitter(deliver: EmitFn): RunEmitter {
       await tail;
       if (failed) throw failure instanceof Error ? failure : new Error(String(failure));
     },
+    history: () => log,
   };
 }
 

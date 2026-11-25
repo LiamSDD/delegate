@@ -388,7 +388,7 @@ async function executeMission(
     env: options.env,
     missionId: mission.id,
     ...(learnedRouting === undefined ? {} : { learnedRouting }),
-    emitter: createRunEmitter(emit),
+    emitter: createRunEmitter(emit, resume?.events),
     budget: new Budget({ run: RUN_BUDGETS[audience] }),
     policies: policiesFor(mission.id, audience, options.findInstallation !== undefined).map(
       (policy) => withConnectorAccess(policy, options.connections?.hosts ?? []),

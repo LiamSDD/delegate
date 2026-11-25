@@ -1,14 +1,18 @@
 import { BudgetExceededError } from "../budget";
 import { diffPlans, type PlanPhase, type PlanStep } from "../events";
+import { buildBlackboard } from "./blackboard";
 import { RunAbortedError, type RunContext } from "./context";
 import { executorFor, type ReplanState, type RevisedPlan, type StepStatusView } from "./planner";
+import { selfCheck, type SelfCheckOptions } from "./self-check";
 import {
   FatalStepError,
   SubAgentResultSchema,
   type AgentHandle,
   type StepExecutor,
   type SubAgentResult,
+  type SubAgentTask,
 } from "./subagent";
+import { createTeamHandle, type TeamCounter } from "./team";
 
 export const ORCHESTRATOR_DEFAULTS = {
   concurrency: 4,
@@ -54,6 +58,7 @@ export interface OrchestrateOptions {
   replan?: Replanner;
   resume?: OrchestratorResume;
   guidance?: (step: PlanStep) => readonly string[];
+  selfCheck?: Pick<SelfCheckOptions, "prompt" | "fits">;
 }
 
 export interface OrchestratorResume {
@@ -131,6 +136,7 @@ export async function orchestrate(
     }
   }
   const running = new Map<string, Promise<void>>();
+  const teamMembers: TeamCounter = { spawned: 0 };
   const finished: string[] = [];
   let fatal: unknown;
   const stopped = () => fatal !== undefined;
@@ -170,15 +176,53 @@ export async function orchestrate(
         const result = results.get(id);
         if (result !== undefined) inputs.set(id, result);
       }
-      const raw = await executor.run({
+      const grant = { id: step.id, capabilities: grantedCapabilities(step, executor) };
+      const spawnHere = (role: StepExecutor["role"], modelRole: StepExecutor["modelRole"]) =>
+        spawn(step.id, role, modelRole);
+      const blackboard = () => buildBlackboard(ctx.emitter.history());
+      const task: SubAgentTask = {
         step,
-        grant: { id: step.id, capabilities: grantedCapabilities(step, executor) },
+        grant,
         agent,
         inputs,
-        spawn: (role, modelRole) => spawn(step.id, role, modelRole),
+        spawn: spawnHere,
+        blackboard,
         ...(options.guidance === undefined ? {} : { guidance: options.guidance(step) }),
-      });
-      const result = SubAgentResultSchema.parse(raw);
+        ...(step.team === undefined || executor.team === undefined
+          ? {}
+          : {
+              team: createTeamHandle({
+                ctx,
+                step,
+                team: step.team,
+                grant,
+                spawn: spawnHere,
+                blackboard,
+                counter: teamMembers,
+              }),
+            }),
+      };
+      const first = SubAgentResultSchema.parse(await executor.run(task));
+      const result =
+        executor.selfCheck !== true || options.selfCheck === undefined
+          ? first
+          : (
+              await selfCheck(ctx, {
+                ...options.selfCheck,
+                step,
+                modelRole: executor.modelRole,
+                result: first,
+                say: agent.say,
+                rerun: async (unmet) =>
+                  SubAgentResultSchema.parse(
+                    await executor.run({
+                      ...task,
+                      unmetAcceptance: unmet,
+                      guidance: [...(task.guidance ?? []), ...unmet],
+                    }),
+                  ),
+              })
+            ).result;
       results.set(step.id, result);
       statuses.set(step.id, "succeeded");
       await emit({
