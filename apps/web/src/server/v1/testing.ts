@@ -1,5 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
+import { type RedteamCase, RedteamCaseSchema } from "@delegate/evals/redteam-schema";
 import { OPERATIONS, type OperationId } from "@delegate/sdk/contract";
 
 import type { AnswerEvent } from "@/lib/m3-contract";
@@ -7,7 +10,7 @@ import type { AnswerEvent } from "@/lib/m3-contract";
 import type { ApiDeps } from "../api";
 import { createApiToken } from "../api-tokens";
 import type { AssistantStores } from "../assistants";
-import type { AppDatabase } from "../db";
+import { type AppDatabase, resolveRepoRoot } from "../db";
 import { createFakeRunner } from "../fake-runner";
 import { createRunRegistry, type RunRegistry } from "../run-registry";
 import { createSecretBox, type SecretBox } from "../secrets";
@@ -249,4 +252,17 @@ export function createTestWebhooks(
     },
   };
   return state;
+}
+
+export function redteamCases<Target extends RedteamCase["target"]>(
+  target: Target,
+): Extract<RedteamCase, { target: Target }>[] {
+  const file = path.join(resolveRepoRoot(), "packages", "evals", "datasets", "redteam", "v2.jsonl");
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => RedteamCaseSchema.parse(JSON.parse(line)))
+    .filter(
+      (attack): attack is Extract<RedteamCase, { target: Target }> => attack.target === target,
+    );
 }

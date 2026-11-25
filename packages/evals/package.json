@@ -16,6 +16,10 @@
     "./evolution": {
       "types": "./src/evolve/log.ts",
       "default": "./src/evolve/log.ts"
+    },
+    "./redteam-schema": {
+      "types": "./src/redteam/schema.ts",
+      "default": "./src/redteam/schema.ts"
     }
   },
   "scripts": {

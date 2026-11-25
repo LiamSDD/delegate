@@ -1,4 +1,3 @@
-import { loadRedteamDataset, type RedteamCase } from "@delegate/evals";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { type AppDatabase, createPgliteAppDatabase } from "../db";
@@ -7,6 +6,7 @@ import {
   createBackground,
   createTestWebhooks,
   PUBLIC_TEST_ADDRESS,
+  redteamCases,
   TEST_ORIGIN,
   TEST_SESSION_SECRET,
   testApiDeps,
@@ -16,11 +16,8 @@ import { configureWebhooks } from "./runtime";
 import { handleAddWebhookEndpoint } from "./settings-api";
 import { createWebhookTransport } from "./transport";
 
-type DeliveryCase = Extract<RedteamCase, { target: "webhook-delivery" }>;
-
-const cases = loadRedteamDataset().filter(
-  (attack): attack is DeliveryCase => attack.target === "webhook-delivery",
-);
+const cases = redteamCases("webhook-delivery");
+type DeliveryCase = (typeof cases)[number];
 
 let app: AppDatabase;
 const background = createBackground();

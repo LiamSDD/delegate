@@ -1,4 +1,3 @@
-import { loadRedteamDataset, type RedteamCase } from "@delegate/evals";
 import {
   IDEMPOTENCY_KEY_HEADER,
   IDEMPOTENCY_REPLAYED_HEADER,
@@ -13,18 +12,15 @@ import {
   createBackground,
   createTestWebhooks,
   dispatchV1,
+  redteamCases,
   type SendOptions,
   testV1Deps,
   v1Request,
   workspaceWithToken,
 } from "./testing";
 
-type TenantCase = Extract<RedteamCase, { target: "tenant" }>;
-type Attack = TenantCase["payload"]["attack"];
-
-const cases = loadRedteamDataset().filter(
-  (attack): attack is TenantCase => attack.target === "tenant",
-);
+const cases = redteamCases("tenant");
+type Attack = (typeof cases)[number]["payload"]["attack"];
 
 let app: AppDatabase;
 const background = createBackground();
