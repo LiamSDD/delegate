@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import { loadPrompt } from "../server";
 import { scriptedProvider, testRun, textTurn } from "../testing/fakes";
 import { type ModelRequest } from "../providers/types";
-import { claimVerdict, runCritic, type CriticClaim } from "./critic";
+import {
+  claimVerdict,
+  countDropped,
+  mergeKeptParts,
+  runCritic,
+  type CriticClaim,
+  type KeptClaim,
+} from "./critic";
 
 const prompts = { critic: loadPrompt("critic.v2.md"), editor: loadPrompt("editor.v2.md") };
 
@@ -255,5 +262,34 @@ describe("runCritic", () => {
       citationAccuracy: null,
     });
     expect(said[0]).toMatch(/unverified/);
+  });
+});
+
+describe("mergeKeptParts and countDropped (gate run, click 2026-11-25)", () => {
+  const kept = new Map<string, KeptClaim>([
+    ["summary.0", { id: "summary.0", text: "Whole.", citations: ["E1"], support: "supported" }],
+    [
+      "summary.1#1",
+      { id: "summary.1#1", text: "First part.", citations: ["E2"], support: "supported" },
+    ],
+    [
+      "summary.1#2",
+      { id: "summary.1#2", text: "Second part.", citations: ["E2", "E3"], support: "weak" },
+    ],
+  ]);
+
+  it("joins the kept parts of a split claim instead of losing them", () => {
+    expect(mergeKeptParts(kept, "summary.1")).toEqual({
+      id: "summary.1",
+      text: "First part. Second part.",
+      citations: ["E2", "E3"],
+      support: "weak",
+    });
+    expect(mergeKeptParts(kept, "summary.0")?.text).toBe("Whole.");
+    expect(mergeKeptParts(kept, "summary.2")).toBeUndefined();
+  });
+
+  it("counts a claim as dropped only when no part of it was kept, never below zero", () => {
+    expect(countDropped(["summary.0", "summary.1", "summary.2"], kept)).toBe(1);
   });
 });

@@ -310,6 +310,27 @@ export function keptParts(kept: ReadonlyMap<string, KeptClaim>, id: string): Kep
   return parts;
 }
 
+export function mergeKeptParts(
+  kept: ReadonlyMap<string, KeptClaim>,
+  id: string,
+): KeptClaim | undefined {
+  const parts = keptParts(kept, id);
+  const [first] = parts;
+  if (first === undefined) return undefined;
+  if (parts.length === 1) return first;
+  const weakest = parts.find((part) => part.support !== "supported")?.support ?? "supported";
+  return {
+    id,
+    text: parts.map((part) => part.text).join(" "),
+    citations: [...new Set(parts.flatMap((part) => part.citations))],
+    support: weakest,
+  };
+}
+
+export function countDropped(ids: readonly string[], kept: ReadonlyMap<string, KeptClaim>): number {
+  return ids.filter((id) => keptParts(kept, id).length === 0).length;
+}
+
 type Flaggable = Verdict | "uncited" | "unverified" | undefined;
 
 function isFlagged(verdict: Flaggable): verdict is "contradicted" | "not_enough_info" | "uncited" {

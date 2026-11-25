@@ -3,7 +3,9 @@ import { CAPABILITIES } from "@delegate/policy";
 import { BudgetExceededError } from "../../budget";
 import { type RunContext } from "../../agent/context";
 import {
+  countDropped,
   formatAccuracy,
+  mergeKeptParts,
   runCriticSafely,
   unverifiedOutcome,
   type CriticClaim,
@@ -1044,7 +1046,7 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
 
   const applyClaims = (kept: ReadonlyMap<string, KeptClaim>) => {
     const pick = (id: string, fallbackTitle?: string): StateClaim | null => {
-      const claim = kept.get(id);
+      const claim = mergeKeptParts(kept, id);
       if (claim === undefined) return null;
       const text =
         fallbackTitle !== undefined && claim.text.startsWith(`${fallbackTitle}: `)
@@ -1136,7 +1138,10 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
         canFix: () => clock.fits(["worker", "fast"]),
       });
       applyClaims(outcome.kept);
-      const dropped = claims.length - outcome.kept.size;
+      const dropped = countDropped(
+        claims.map((claim) => claim.id),
+        outcome.kept,
+      );
       state.claimsDropped += dropped;
       const checked = deterministic.checked + verified.checked;
       const valid = deterministic.valid + verified.valid;
