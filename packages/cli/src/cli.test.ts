@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { IDEMPOTENCY_KEY_HEADER, type Run } from "@delegate/sdk";
 import { afterEach, describe, expect, it } from "vitest";
@@ -110,6 +112,33 @@ describe("delegate: usage", () => {
     for (const code of Object.values(EXIT)) expect(HELP).toMatch(new RegExp(`\\b${code} `));
     expect(Object.keys(EXIT_MEANINGS).sort()).toEqual(Object.keys(EXIT).sort());
     expect(new Set(Object.values(EXIT)).size).toBe(Object.values(EXIT).length);
+  });
+
+  it("keeps docs/guides/cli.md in step with the exit codes and commands", () => {
+    const guide = readFileSync(
+      fileURLToPath(new URL("../../../docs/guides/cli.md", import.meta.url)),
+      "utf8",
+    );
+    const documented = [...guide.matchAll(/^\| (\d+) \| /gm)].map((match) => Number(match[1]));
+    expect(documented).toEqual(Object.values(EXIT).sort((a, b) => a - b));
+    for (const command of [
+      "delegate login",
+      "delegate logout",
+      "delegate missions",
+      "delegate run <mission> <input>",
+      "delegate runs list",
+      "delegate runs get <run-id>",
+      "delegate runs events <run-id>",
+      "delegate runs cancel <run-id>",
+      "delegate approve-plan <run-id>",
+      "delegate reject-plan <run-id>",
+      "delegate artifacts list <run-id>",
+      "delegate artifacts get <run-id> <artifact-id>",
+    ]) {
+      expect(guide, command).toContain(command);
+      expect(HELP, command).toContain(command);
+    }
+    for (const variable of [TOKEN_ENV, URL_ENV, CONFIG_ENV]) expect(guide).toContain(variable);
   });
 
   it("exits 2 for unknown commands, unknown options and missing arguments", async () => {
