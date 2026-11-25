@@ -344,3 +344,49 @@ describe("crawl engine", () => {
     expect(result.checkpoint.frontier.length + result.pages.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("crawl focus on a section of a shared host (gate run, companies-house 2026-11-25)", () => {
+  const SECTION = `${ORIGIN}/government/organisations/registry`;
+  const routes: Record<string, Route> = {
+    [SECTION]: () =>
+      html(
+        page(
+          "Registry",
+          `${words(11)} <a href="/guidance/file-accounts">File accounts</a> <a href="/government/organisations/registry/about/complaints">Complaints</a>`,
+        ),
+      ),
+    [`${ORIGIN}/sitemap.xml`]: () =>
+      xml(
+        `<urlset>${["/armed-forces-covenant/firm-a", "/armed-forces-covenant/firm-b", "/government/organisations/registry/about/foi"].map((path) => `<url><loc>${ORIGIN}${path}</loc></url>`).join("")}</urlset>`,
+      ),
+    [`${ORIGIN}/guidance/file-accounts`]: () =>
+      html(page("File accounts", `${words(12)} <a href="/unrelated/deep">deep</a>`)),
+    [`${ORIGIN}/government/organisations/registry/about/complaints`]: () =>
+      html(page("Complaints", words(13))),
+    [`${ORIGIN}/government/organisations/registry/about/foi`]: () => html(page("FOI", words(14))),
+    [`${ORIGIN}/armed-forces-covenant/firm-a`]: () => html(page("Firm A", words(15))),
+    [`${ORIGIN}/armed-forces-covenant/firm-b`]: () => html(page("Firm B", words(16))),
+    [`${ORIGIN}/unrelated/deep`]: () => html(page("Deep", words(17))),
+  };
+
+  it("skips sitemap URLs outside the section and fetches pages linked from it first", async () => {
+    const { fetcher } = site(routes);
+    const stored: string[] = [];
+    const result = await crawl(
+      options(fetcher, {
+        seeds: [SECTION],
+        focusPath: "/government/organisations/registry",
+        budget: { maxPages: 4 },
+        concurrency: 1,
+        onPage: (crawled) => {
+          if (crawled.kind === "fetched") stored.push(crawled.entry.url);
+          return Promise.resolve(true);
+        },
+      }),
+    );
+    expect(stored).toContain(`${ORIGIN}/guidance/file-accounts`);
+    expect(stored).toContain(`${ORIGIN}/government/organisations/registry/about/foi`);
+    expect(stored.some((url) => url.includes("armed-forces-covenant"))).toBe(false);
+    expect(result.skipped.some((skip) => skip.code === "focus")).toBe(true);
+  });
+});

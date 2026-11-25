@@ -40,6 +40,7 @@ export const FrontierEntrySchema = z.object({
   source: z.enum(["seed", "sitemap", "feed", "link"]),
   topic: z.string().optional(),
   lastmod: z.string().optional(),
+  focused: z.boolean().optional(),
   attempts: count,
   seq: count,
 });

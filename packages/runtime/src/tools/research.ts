@@ -4,7 +4,7 @@ import { z } from "zod";
 import { crawl, type CrawlProgress } from "../crawl/engine";
 import { extractPage, pageSourceText, type ExtractedPage } from "../crawl/extract";
 import { COMPANY_PROFILE, type CrawlProfile } from "../crawl/priority";
-import { normaliseUrl, urlKey } from "../crawl/url";
+import { localeOf, normaliseUrl, urlKey } from "../crawl/url";
 import { FetchBlockedError, type FetchedDocument, type Fetcher } from "./fetch";
 import { type HtmlDocument } from "./html";
 import { defineTool, type RegisteredTool, type ToolExecution, type ToolOutcome } from "./registry";
@@ -52,6 +52,7 @@ export interface CrawledSource {
   score: number;
   topic?: string;
   depth: number;
+  focused?: boolean;
 }
 
 export interface ResearchEnvironment {
@@ -246,20 +247,39 @@ function readingValue(source: CrawledSource): number {
   return source.score + textBonus + structuredBonus;
 }
 
+export function focusPathOf(siteUrl: string): string | undefined {
+  let segments: string[];
+  try {
+    segments = new URL(siteUrl).pathname.split("/").filter((segment) => segment !== "");
+  } catch {
+    return undefined;
+  }
+  const last = segments.at(-1);
+  if (last !== undefined && /^(?:index|default|home)\.\w+$/i.test(last)) segments.pop();
+  if (segments.length === 0) return undefined;
+  if (segments.length === 1 && localeOf(segments[0]) !== undefined) return undefined;
+  return `/${segments.join("/")}`;
+}
+
 export function pickForReading(
   sources: readonly (CrawledSource & { key: string })[],
   topics: readonly string[],
   limit: number,
 ): (CrawledSource & { key: string })[] {
-  const ranked = [...sources].sort((a, b) => readingValue(b) - readingValue(a));
+  const ranked = [...sources].sort(
+    (a, b) =>
+      Number(b.focused !== false) - Number(a.focused !== false) ||
+      readingValue(b) - readingValue(a),
+  );
   const picked: (CrawledSource & { key: string })[] = [];
   const take = (source: CrawledSource & { key: string }) => {
     if (picked.length < limit && !picked.includes(source)) picked.push(source);
   };
   const home = ranked.find((source) => source.depth === 0);
   if (home !== undefined) take(home);
+  const focusedFirst = ranked.filter((source) => source.focused !== false);
   for (const topic of topics) {
-    const best = ranked.find((source) => source.topic === topic && !picked.includes(source));
+    const best = focusedFirst.find((source) => source.topic === topic && !picked.includes(source));
     if (best !== undefined) take(best);
   }
   for (const source of ranked) take(source);
@@ -280,10 +300,12 @@ function crawlSite(env: ResearchEnvironment): RegisteredTool {
       `crawl ${env.scope.root} (up to ${env.crawl.maxPages} pages, read ${input.maxPages ?? RESEARCH_LIMITS.defaultCrawlPages})`,
     execute: async (input, execution) => {
       const readPages = input.maxPages ?? RESEARCH_LIMITS.defaultCrawlPages;
+      const focus = focusPathOf(env.siteUrl);
       const result = await crawl({
         fetcher: env.fetcher,
         seeds: [env.siteUrl],
         scope: (url) => env.scope.contains(url),
+        ...(focus === undefined ? {} : { focusPath: focus }),
         profile: env.crawl.profile,
         budget: { maxPages: env.crawl.maxPages, maxDurationMs: env.crawl.maxDurationMs },
         ...(env.crawl.concurrency === undefined ? {} : { concurrency: env.crawl.concurrency }),
@@ -297,6 +319,7 @@ function crawlSite(env: ResearchEnvironment): RegisteredTool {
             score: crawled.entry.score,
             depth: crawled.entry.depth,
             ...(crawled.entry.topic === undefined ? {} : { topic: crawled.entry.topic }),
+            ...(crawled.entry.focused === undefined ? {} : { focused: crawled.entry.focused }),
           });
           return Promise.resolve(true);
         },

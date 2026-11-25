@@ -9,6 +9,7 @@ export interface FrontierEntry {
   source: UrlSource;
   topic?: string;
   lastmod?: string;
+  focused?: boolean;
   attempts: number;
   seq: number;
 }

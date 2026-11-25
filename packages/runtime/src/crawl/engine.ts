@@ -117,6 +117,7 @@ export interface CrawlOptions {
   fetch?: CrawlFetch;
   seeds: readonly string[];
   scope: (url: string) => boolean;
+  focusPath?: string;
   profile?: CrawlProfile;
   budget?: Partial<CrawlBudget>;
   concurrency?: number;
@@ -132,6 +133,20 @@ export interface CrawlOptions {
   progressEveryMs?: number;
   onCheckpoint?: (checkpoint: CrawlCheckpoint, progress: CrawlProgress) => Promise<void>;
   checkpointEveryPages?: number;
+}
+
+const FOCUS_BONUS = 300;
+const OFF_FOCUS_PENALTY = 60;
+
+export function underFocus(url: string, focusPath: string): boolean {
+  let path: string;
+  try {
+    path = new URL(url).pathname.replace(/\/+$/, "");
+  } catch {
+    return false;
+  }
+  const prefix = focusPath.replace(/\/+$/, "");
+  return path === prefix || path.startsWith(`${prefix}/`);
 }
 
 const SITEMAP_ACCEPT = "application/xml,text/xml;q=0.9,text/plain;q=0.5";
@@ -268,6 +283,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
     options.signal === undefined
       ? controller.signal
       : AbortSignal.any([controller.signal, options.signal]);
+  const focusPath = options.focusPath;
   const startUrl = new URL(normaliseUrl(options.seeds[0] ?? "") ?? options.seeds[0] ?? "");
 
   const frontier = new Frontier(budget.maxQueue);
@@ -310,6 +326,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
       anchorText?: string;
       lastmod?: string;
       inMainContent?: boolean;
+      fromFocus?: boolean;
     },
   ): boolean => {
     const url = normaliseUrl(raw);
@@ -322,6 +339,10 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
       return false;
     };
     if (!options.scope(url)) return reject("scope", "outside the crawl scope");
+    const focused =
+      focusPath === undefined || underFocus(url, focusPath) || context.fromFocus === true;
+    if (!focused && context.source === "sitemap")
+      return reject("focus", "sitemap URL outside the crawl focus");
     const nonContent = nonContentReason(url);
     if (nonContent !== undefined) return reject("non_content", nonContent);
     if (otherLocale(new URL(url), startUrl)) return reject("non_content", "other locale");
@@ -341,15 +362,18 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
       ...(context.lastmod === undefined ? {} : { lastmod: context.lastmod }),
       ...(context.inMainContent === undefined ? {} : { inMainContent: context.inMainContent }),
     });
+    const focusAdjustment =
+      focusPath === undefined ? 0 : focused ? FOCUS_BONUS : -OFF_FOCUS_PENALTY;
     return frontier.add({
       url,
       key,
       host: hostOf(url),
       depth: context.depth,
-      score: scored.score,
+      score: scored.score + focusAdjustment,
       source: context.source,
       ...(scored.topic === undefined ? {} : { topic: scored.topic }),
       ...(context.lastmod === undefined ? {} : { lastmod: context.lastmod }),
+      ...(focusPath === undefined ? {} : { focused }),
     });
   };
 
@@ -450,6 +474,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
         attempts: entry.attempts,
         ...(entry.topic === undefined ? {} : { topic: entry.topic }),
         ...(entry.lastmod === undefined ? {} : { lastmod: entry.lastmod }),
+        ...(entry.focused === undefined ? {} : { focused: entry.focused }),
       });
     }
     lastCheckpointPages = stats.stored;
@@ -464,6 +489,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
         depth: 0,
         score: 10_000,
         source: "seed",
+        ...(focusPath === undefined ? {} : { focused: true }),
       });
     }
   }
@@ -614,6 +640,8 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
       ...page.links.filter((link) => page.mainLinks.has(link.href)),
       ...page.links.filter((link) => !page.mainLinks.has(link.href)),
     ];
+    const linksFromFocus =
+      focusPath !== undefined && (entry.depth === 0 || underFocus(finalUrl, focusPath));
     let considered = 0;
     for (const link of ordered) {
       if (considered >= budget.maxLinksPerPage) {
@@ -630,6 +658,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlResult> {
         source: "link",
         anchorText: link.text,
         inMainContent: page.mainLinks.has(link.href),
+        fromFocus: linksFromFocus,
       });
     }
     if (!discovered) return;

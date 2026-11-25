@@ -7,6 +7,7 @@ import { executeToolCall, type ToolCaller } from "./registry";
 import {
   createResearchEnvironment,
   createResearchTools,
+  focusPathOf,
   pickForReading,
   siteScope,
   type ResearchEnvironment,
@@ -57,7 +58,42 @@ describe("siteScope", () => {
   });
 });
 
+describe("focusPathOf", () => {
+  it("focuses a crawl on an organisation's section of a shared host, not on a locale or the root", () => {
+    expect(focusPathOf("https://www.gov.uk/government/organisations/companies-house")).toBe(
+      "/government/organisations/companies-house",
+    );
+    expect(focusPathOf("https://acme.example/")).toBeUndefined();
+    expect(focusPathOf("https://acme.example/en/")).toBeUndefined();
+    expect(focusPathOf("https://acme.example/en-gb")).toBeUndefined();
+    expect(focusPathOf("https://acme.example/index.html")).toBeUndefined();
+  });
+});
+
 describe("pickForReading", () => {
+  it("reads pages in the crawl focus before off-focus pages of the same host", () => {
+    const source = (key: string, score: number, focused: boolean, topic?: string) => ({
+      key,
+      score,
+      depth: 1,
+      focused,
+      ...(topic === undefined ? {} : { topic }),
+      document: {} as never,
+      page: { mainText: "x".repeat(600), structuredLines: [] } as never,
+    });
+    const picked = pickForReading(
+      [
+        source("covenant-firm", 150, false, "about"),
+        source("registry-complaints", 120, true),
+        source("file-accounts", 110, true, "pricing"),
+        source("unrelated", 140, false),
+      ],
+      ["about", "pricing"],
+      2,
+    );
+    expect(picked.map((entry) => entry.key)).toEqual(["file-accounts", "registry-complaints"]);
+  });
+
   it("keeps the homepage, then the best page per research topic, then the highest scores", () => {
     const source = (key: string, score: number, depth: number, topic?: string) => ({
       key,
