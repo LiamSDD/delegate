@@ -87,7 +87,7 @@ describe("runEval", () => {
       model: "openai",
       calls: 4,
     });
-    expect(summary.promptVersions).toMatchObject({ "company-xray-synthesis": 1, "xray-judge": 1 });
+    expect(summary.promptVersions).toMatchObject({ "company-xray-synthesis": 2, "xray-judge": 1 });
     const dirOfRun = runDir(dir, "xray", summary.id);
     expect(existsSync(join(dirOfRun, "atlassian", "0.events.jsonl"))).toBe(true);
     expect(existsSync(join(dirOfRun, "zed", "1.judge.json"))).toBe(true);
