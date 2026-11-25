@@ -1,7 +1,7 @@
 import { foldRun } from "@delegate/runtime";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { type ApiDeps, handleCreateRun, handleForkRun } from "./api";
+import { type ApiDeps, forkRefusalResponse, handleCreateRun, handleForkRun } from "./api";
 import { type AppDatabase, createPgliteAppDatabase } from "./db";
 import { createFakeRunner } from "./fake-runner";
 import type { MissionRunner } from "./mission-runner";
@@ -291,6 +291,20 @@ describe("POST /api/runs/[id]/fork", () => {
       expect(await response.json()).toMatchObject({ error: { code } });
     }
     expect(d.tasks).toHaveLength(0);
+  });
+
+  it("answers every fork refusal with a 4xx, never a 500", async () => {
+    const cases = [
+      ["run_not_finished", 409, "run_not_finished"],
+      ["unknown_step", 400, "invalid_step"],
+      ["step_not_completed", 400, "invalid_step"],
+      ["invalid_objective", 400, "invalid_step"],
+    ] as const;
+    for (const [reason, status, code] of cases) {
+      const response = forkRefusalResponse({ ok: false, reason, message: "refused" });
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ error: { code, message: "refused" } });
+    }
   });
 
   it("refuses to fork a run that has not finished", async () => {

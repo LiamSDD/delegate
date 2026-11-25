@@ -1,4 +1,4 @@
-import { MAX_FORK_OBJECTIVE_CHARS } from "@delegate/runtime";
+import { type ForkPlan, MAX_FORK_OBJECTIVE_CHARS } from "@delegate/runtime";
 import { z } from "zod";
 
 import { RUNNABLE_MISSION_IDS } from "@/lib/m2-contract";
@@ -514,6 +514,17 @@ function isRunnableMission(mission: string): mission is (typeof RUNNABLE_MISSION
   return (RUNNABLE_MISSION_IDS as readonly string[]).includes(mission);
 }
 
+export function forkRefusalResponse(refusal: Extract<ForkPlan, { ok: false }>): Response {
+  switch (refusal.reason) {
+    case "run_not_finished":
+      return apiError(409, "run_not_finished", refusal.message);
+    case "unknown_step":
+    case "step_not_completed":
+    case "invalid_objective":
+      return apiError(400, "invalid_step", refusal.message);
+  }
+}
+
 export async function handleForkRun(
   request: Request,
   runId: string,
@@ -556,11 +567,7 @@ export async function handleForkRun(
     }
     const started = Date.now();
     const fork = planRunFork(await readAllEvents(app, session.userId, parent.id), parsed.data);
-    if (!fork.ok) {
-      return fork.reason === "run_not_finished"
-        ? apiError(409, "run_not_finished", fork.message)
-        : apiError(400, "invalid_step", fork.message);
-    }
+    if (!fork.ok) return forkRefusalResponse(fork);
     const runner = deps.runner();
     const created = await createForkRecord(app, session, parent, fork, runner.execution);
     const ctx = { runId: created.runId, workspaceId: session.workspaceId, userId: session.userId };

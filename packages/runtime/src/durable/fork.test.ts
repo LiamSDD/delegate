@@ -176,6 +176,26 @@ describe("planFork", () => {
     expect(blank.ok && blank.objectiveEdited).toBe(false);
   });
 
+  it("refuses an edited objective that leaves the plan invalid instead of throwing", () => {
+    const events = completedRun().map((event) =>
+      event.type === "plan.proposed"
+        ? {
+            ...event,
+            payload: {
+              ...event.payload,
+              steps: event.payload.steps.map((planned) => ({ ...planned, budgetShare: 0.5 })),
+            },
+          }
+        : event,
+    );
+    expect(() => planFork(events, { stepId: "index", objective: "Index only docs" })).not.toThrow();
+    expect(planFork(events, { stepId: "index", objective: "Index only docs" })).toMatchObject({
+      ok: false,
+      reason: "invalid_objective",
+    });
+    expect(planFork(events, { stepId: "index" })).toMatchObject({ ok: true });
+  });
+
   it("refuses unfinished runs, unknown steps and steps that never finished", () => {
     const events = completedRun();
     expect(planFork(events.slice(0, -1), { stepId: "index" })).toMatchObject({

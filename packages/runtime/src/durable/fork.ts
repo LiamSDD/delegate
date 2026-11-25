@@ -18,7 +18,8 @@ export interface ForkableStep {
   outcome: "succeeded" | "failed";
 }
 
-export type ForkRefusal = "run_not_finished" | "unknown_step" | "step_not_completed";
+export type ForkRefusal =
+  "run_not_finished" | "unknown_step" | "step_not_completed" | "invalid_objective";
 
 export type ForkPlan =
   | {
@@ -94,13 +95,20 @@ export function planFork(events: readonly RunEvent[], request: ForkRequest): For
   const before = foldRun(events.filter((event) => event.seq < cut.seq));
   let steps = before.plan?.steps ?? planned;
   if (objectiveEdited) {
-    const edited = PlanStepsSchema.parse(
+    const checked = PlanStepsSchema.safeParse(
       steps.map((step) =>
         step.id === request.stepId
           ? { ...step, objective: objective.slice(0, MAX_FORK_OBJECTIVE_CHARS) }
           : step,
       ),
     );
+    if (!checked.success)
+      return {
+        ok: false,
+        reason: "invalid_objective",
+        message: `The edited plan is not valid: ${checked.error.issues.map((issue) => issue.message).join("; ")}`,
+      };
+    const edited = checked.data;
     seed.push({
       type: "plan.revised",
       payload: {
