@@ -1,9 +1,16 @@
 import { type z } from "zod";
 
+import { BudgetExceededError } from "../budget";
 import { type ModelRole } from "../events";
 import { type ChatMessage } from "../providers/types";
+import { NoModelAvailableError } from "../router";
 import { type RunContext } from "./context";
-import { callModel, type ModelCallResult, type QualityRequest } from "./model-call";
+import {
+  ModelStreamError,
+  callModel,
+  type ModelCallResult,
+  type QualityRequest,
+} from "./model-call";
 
 const MAX_ISSUES_IN_REPAIR = 12;
 const MAX_ECHOED_ANSWER_CHARS = 12_000;
@@ -198,4 +205,93 @@ export async function callStructured<T>(
     "Model output failed validation after one repair attempt",
     secondCheck.issues,
   );
+}
+
+export interface StructuredReview<R> {
+  result: R;
+  score: number;
+  feedback?: string | undefined;
+}
+
+export interface ReviewedCallOptions<T, R> extends StructuredCallOptions<T> {
+  review: (value: T) => StructuredReview<R>;
+  canRevise?: () => boolean;
+}
+
+export interface ReviewedResult<R> {
+  result: R;
+  revised: boolean;
+  feedback?: string | undefined;
+  calls: ModelCallResult[];
+}
+
+function revisionUnavailable(error: unknown): boolean {
+  return (
+    error instanceof StructuredOutputError ||
+    error instanceof NoModelAvailableError ||
+    error instanceof ModelStreamError ||
+    (error instanceof BudgetExceededError && error.scope === "step")
+  );
+}
+
+export async function callStructuredReviewed<T, R>(
+  ctx: RunContext,
+  options: ReviewedCallOptions<T, R>,
+): Promise<ReviewedResult<R>> {
+  const first = await callStructured(ctx, options);
+  const firstReview = options.review(first.value);
+  const kept = (calls: ModelCallResult[]): ReviewedResult<R> => ({
+    result: firstReview.result,
+    revised: false,
+    ...(firstReview.feedback === undefined ? {} : { feedback: firstReview.feedback }),
+    calls,
+  });
+  const answered = first.calls.at(-1);
+  if (
+    firstReview.feedback === undefined ||
+    answered === undefined ||
+    options.canRevise?.() === false
+  )
+    return kept(first.calls);
+  const history: ChatMessage[] = [
+    { role: "user", content: options.user },
+    { role: "assistant", content: answered.text.slice(0, MAX_ECHOED_ANSWER_CHARS) },
+    {
+      role: "user",
+      content: `Your answer parsed, but code rejected parts of it:\n${firstReview.feedback}\n\nReply with the complete corrected JSON object in the same shape: fix or replace every rejected item, keep the accepted ones. No prose, no code fences.`,
+    },
+  ];
+  let second: ModelCallResult;
+  try {
+    second = await callModel(ctx, {
+      role: options.role,
+      stepId: options.stepId,
+      request: {
+        system: options.system,
+        messages: history,
+        maxTokens: options.maxTokens,
+        ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
+      },
+    });
+  } catch (error) {
+    if (!revisionUnavailable(error)) throw error;
+    return kept(first.calls);
+  }
+  const calls = [...first.calls, second];
+  let check: ReturnType<typeof validate<T>>;
+  try {
+    check = validate(options.schema, second);
+  } catch (error) {
+    if (!revisionUnavailable(error)) throw error;
+    return kept(calls);
+  }
+  if (!check.ok) return kept(calls);
+  const secondReview = options.review(check.value);
+  if (secondReview.score <= firstReview.score) return kept(calls);
+  return {
+    result: secondReview.result,
+    revised: true,
+    ...(secondReview.feedback === undefined ? {} : { feedback: secondReview.feedback }),
+    calls,
+  };
 }

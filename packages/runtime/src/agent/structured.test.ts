@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { scriptedProvider, testRun, textTurn } from "../testing/fakes";
-import { StructuredOutputError, callStructured, extractJson } from "./structured";
+import {
+  StructuredOutputError,
+  callStructured,
+  callStructuredReviewed,
+  extractJson,
+} from "./structured";
 
 const Schema = z.object({ name: z.string(), count: z.number().int() });
 
@@ -117,6 +122,90 @@ describe("callStructured", () => {
     ]);
     const { ctx } = testRun({ provider });
     await expect(callStructured(ctx, options)).rejects.toThrow(/refus/);
+    expect(provider.requests).toHaveLength(1);
+  });
+});
+
+describe("callStructuredReviewed", () => {
+  const Items = z.object({ items: z.array(z.string()) });
+  const options = {
+    role: "fast" as const,
+    stepId: "s1",
+    system: "Return JSON.",
+    user: "List.",
+    schema: Items,
+    maxTokens: 200,
+  };
+  const review = (value: z.infer<typeof Items>) => {
+    const kept = value.items.filter((item) => item.startsWith("ok"));
+    const rejected = value.items.filter((item) => !item.startsWith("ok"));
+    return {
+      result: kept,
+      score: kept.length,
+      feedback:
+        kept.length >= 2
+          ? undefined
+          : `- ${rejected.map((item) => `${item}: does not start with ok`).join("\n- ")}`,
+    };
+  };
+
+  it("accepts a first answer that passes review without a second call", async () => {
+    const provider = scriptedProvider("fake", [textTurn('{"items":["ok a","ok b"]}')]);
+    const { ctx } = testRun({ provider });
+    const result = await callStructuredReviewed(ctx, { ...options, review });
+    expect(result).toMatchObject({ result: ["ok a", "ok b"], revised: false });
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  it("asks once to fix rejected items with the reasons and keeps the better answer", async () => {
+    const provider = scriptedProvider("fake", [
+      textTurn('{"items":["ok a","bad b"]}'),
+      textTurn('{"items":["ok a","ok b","ok c"]}'),
+    ]);
+    const { ctx } = testRun({ provider });
+    const result = await callStructuredReviewed(ctx, { ...options, review });
+    expect(result).toMatchObject({ result: ["ok a", "ok b", "ok c"], revised: true });
+    const revision = provider.requests[1];
+    expect(revision?.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+    ]);
+    expect(revision?.messages[2]?.content).toContain("bad b: does not start with ok");
+    expect(result.calls).toHaveLength(2);
+  });
+
+  it("keeps the first answer when the revision is worse, invalid or unavailable", async () => {
+    const worse = scriptedProvider("fake", [
+      textTurn('{"items":["ok a","bad b"]}'),
+      textTurn('{"items":["bad"]}'),
+    ]);
+    const first = await callStructuredReviewed(testRun({ provider: worse }).ctx, {
+      ...options,
+      review,
+    });
+    expect(first).toMatchObject({ result: ["ok a"], revised: false });
+
+    const invalid = scriptedProvider("fake", [
+      textTurn('{"items":["ok a","bad b"]}'),
+      textTurn("not json"),
+    ]);
+    const second = await callStructuredReviewed(testRun({ provider: invalid }).ctx, {
+      ...options,
+      review,
+    });
+    expect(second).toMatchObject({ result: ["ok a"], revised: false });
+  });
+
+  it("skips the revision when the caller has no time for it", async () => {
+    const provider = scriptedProvider("fake", [textTurn('{"items":["bad"]}')]);
+    const { ctx } = testRun({ provider });
+    const result = await callStructuredReviewed(ctx, {
+      ...options,
+      review,
+      canRevise: () => false,
+    });
+    expect(result).toMatchObject({ result: [], revised: false });
     expect(provider.requests).toHaveLength(1);
   });
 });
