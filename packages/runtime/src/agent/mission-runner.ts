@@ -203,7 +203,10 @@ export async function runPlannedMission(
         payload: { version, approvedBy: AUTO_APPROVER, reason: AUTO_APPROVAL_REASON },
       });
     } else {
-      const raw = await options.awaitPlanApproval({ version, steps: [...steps] }, ctx.signal);
+      const raw = await options.awaitPlanApproval(
+        { version, steps: [...steps], kind: "initial" },
+        ctx.signal,
+      );
       const decision = PlanApprovalDecisionSchema.parse(raw);
       if (decision.decision === "rejected")
         return await fail({
@@ -267,7 +270,12 @@ export async function runPlannedMission(
           return true;
         }
         const raw = await options.awaitPlanApproval(
-          { version: revision.version, steps: [...revision.steps] },
+          {
+            version: revision.version,
+            steps: [...revision.steps],
+            kind: "revision",
+            required: needed.required,
+          },
           ctx.signal,
         );
         const decision = PlanApprovalDecisionSchema.parse(raw);

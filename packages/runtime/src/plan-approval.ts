@@ -8,7 +8,15 @@ export const PlanApprovalDecisionSchema = z.discriminatedUnion("decision", [
 ]);
 export type PlanApprovalDecision = z.infer<typeof PlanApprovalDecisionSchema>;
 
+export type PlanApprovalRequest = { version: number; steps: PlanStep[] } & (
+  { kind: "initial" } | { kind: "revision"; required: boolean }
+);
+
+export function mayAutoApprovePlan(request: PlanApprovalRequest): boolean {
+  return request.kind === "initial" || !request.required;
+}
+
 export type AwaitPlanApproval = (
-  plan: { version: number; steps: PlanStep[] },
+  plan: PlanApprovalRequest,
   signal?: AbortSignal,
 ) => Promise<PlanApprovalDecision>;

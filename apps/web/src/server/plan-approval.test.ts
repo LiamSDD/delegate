@@ -1,13 +1,22 @@
 import type { PlanStep } from "@delegate/runtime";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { type ApiDeps, handlePlanDecision } from "./api";
+import { AUTO_APPROVE_COOKIE } from "@/lib/runs/preferences";
+
+import { type ApiDeps, handleCreateRun, handlePlanDecision } from "./api";
 import { type AppDatabase, createPgliteAppDatabase } from "./db";
 import { createFakeRunner } from "./fake-runner";
-import { createPlanApprovalWaiter, pendingPlanApproval, readPlanDecision } from "./plan-approval";
+import type { MissionRunner } from "./mission-runner";
+import {
+  createPlanApprovalWaiter,
+  pendingPlanApproval,
+  type PlanDecision,
+  readPlanDecision,
+} from "./plan-approval";
 import { createRunRegistry } from "./run-registry";
 import { appendEvent, createRunRecord, type RunContext } from "./runs";
 import { createRateLimiter, type GuestSession, resolveGuest, signSession } from "./session";
+import { updateAutomation } from "./workspace-settings";
 
 const ORIGIN = "http://localhost:3000";
 const secret = "s".repeat(32);
@@ -88,7 +97,7 @@ describe("plan approval", () => {
   it("waits for an approval with edited steps written through the API", async () => {
     const { ctx, cookie } = await newRun();
     const wait = createPlanApprovalWaiter({ app, ctx, autoApprove: false, pollMs: 5 });
-    const decision = wait({ version: 1, steps }, new AbortController().signal);
+    const decision = wait({ version: 1, steps, kind: "initial" }, new AbortController().signal);
     await waitForPending(ctx);
 
     const edited = [{ ...steps[0], objective: "Map pricing and careers pages" }];
@@ -112,7 +121,7 @@ describe("plan approval", () => {
     const { ctx, cookie } = await newRun();
     const wait = createPlanApprovalWaiter({ app, ctx, autoApprove: false, pollMs: 5 });
     const controller = new AbortController();
-    const decision = wait({ version: 1, steps }, controller.signal);
+    const decision = wait({ version: 1, steps, kind: "initial" }, controller.signal);
     await waitForPending(ctx);
 
     const reordered = [steps[1], steps[0]];
@@ -156,7 +165,7 @@ describe("plan approval", () => {
   it("rejects with a reason and records it", async () => {
     const { ctx, cookie } = await newRun();
     const wait = createPlanApprovalWaiter({ app, ctx, autoApprove: false, pollMs: 5 });
-    const decision = wait({ version: 1, steps }, new AbortController().signal);
+    const decision = wait({ version: 1, steps, kind: "initial" }, new AbortController().signal);
     await waitForPending(ctx);
     const response = await handlePlanDecision(
       post(ctx.runId, cookie, { decision: "rejected", reason: "Wrong department" }),
@@ -176,16 +185,132 @@ describe("plan approval", () => {
       pollMs: 5,
       timeoutMs: 30,
     });
-    await expect(timeout({ version: 1, steps }, new AbortController().signal)).resolves.toEqual({
+    await expect(
+      timeout({ version: 1, steps, kind: "initial" }, new AbortController().signal),
+    ).resolves.toEqual({
       decision: "rejected",
       reason: "Plan approval timed out.",
     });
 
     const second = await newRun();
     const auto = createPlanApprovalWaiter({ app, ctx: second.ctx, autoApprove: true, pollMs: 5 });
-    const result = await auto({ version: 1, steps }, new AbortController().signal);
+    const result = await auto({ version: 1, steps, kind: "initial" }, new AbortController().signal);
     expect(result).toEqual({ decision: "approved", auto: true });
     const recorded = await readPlanDecision(app, second.ctx.userId, second.ctx.runId);
     expect(recorded).toMatchObject({ decision: "approved", auto: true });
+  });
+});
+
+const widened: PlanStep[] = [
+  ...steps,
+  {
+    id: "notify",
+    role: "builder",
+    objective: "Post the summary",
+    inputs: ["rank"],
+    capabilities: ["connector.write"],
+    acceptance: ["ok"],
+    budgetShare: 0.1,
+  },
+];
+
+describe("widening revisions under auto-approve", () => {
+  it("never auto-approves a revision that needs re-approval and times it out into a rejection", async () => {
+    const { ctx } = await newRun();
+    const wait = createPlanApprovalWaiter({
+      app,
+      ctx,
+      autoApprove: true,
+      pollMs: 5,
+      timeoutMs: 30,
+    });
+    await expect(wait({ version: 1, steps, kind: "initial" })).resolves.toEqual({
+      decision: "approved",
+      auto: true,
+    });
+    await expect(
+      wait({ version: 2, steps: widened, kind: "revision", required: true }),
+    ).resolves.toEqual({ decision: "rejected", reason: "Plan approval timed out." });
+    await expect(
+      wait({ version: 3, steps: widened, kind: "revision", required: false }),
+    ).resolves.toEqual({ decision: "approved", auto: true });
+  });
+
+  function revisingRunner(decisions: PlanDecision[]): MissionRunner {
+    return async ({ awaitPlanApproval, signal }) => {
+      decisions.push(await awaitPlanApproval({ version: 1, steps, kind: "initial" }, signal));
+      decisions.push(
+        await awaitPlanApproval(
+          { version: 2, steps: widened, kind: "revision", required: true },
+          signal,
+        ),
+      );
+      return { status: "completed" };
+    };
+  }
+
+  async function startWith(cookies: string[], before?: (session: GuestSession) => Promise<void>) {
+    const { session } = await resolveGuest(app, undefined, secret);
+    await before?.(session);
+    const decisions: PlanDecision[] = [];
+    const tasks: (() => Promise<void>)[] = [];
+    const runDeps: ApiDeps = {
+      ...deps(),
+      runner: () => ({ execution: "simulated", run: revisingRunner(decisions) }),
+      schedule: (task) => {
+        tasks.push(task);
+      },
+    };
+    const cookie = [`delegate_session=${signSession(session, secret)}`, ...cookies].join("; ");
+    const created = await handleCreateRun(
+      new Request(`${ORIGIN}/api/runs`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: ORIGIN,
+          host: "localhost:3000",
+          cookie,
+        },
+        body: JSON.stringify({
+          missionId: "automation-audit",
+          input: { url: "https://acme.example/" },
+        }),
+      }),
+      runDeps,
+    );
+    expect(created.status).toBe(201);
+    const { runId } = (await created.json()) as { runId: string };
+    const ctx = { runId, workspaceId: session.workspaceId, userId: session.userId };
+    const running = tasks.map((task) => task());
+    return { ctx, cookie, decisions, runDeps, running };
+  }
+
+  async function expectHumanClick(started: Awaited<ReturnType<typeof startWith>>) {
+    const { ctx, cookie, decisions, runDeps, running } = started;
+    for (let attempt = 0; decisions.length === 0 && attempt < 200; attempt += 1)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(decisions).toEqual([{ decision: "approved", auto: true }]);
+    await waitForPending(ctx);
+    expect((await pendingPlanApproval(app, ctx.userId, ctx.runId))?.steps).toEqual(widened);
+    const response = await handlePlanDecision(
+      post(ctx.runId, cookie, { decision: "approved" }),
+      ctx.runId,
+      runDeps,
+    );
+    expect(response.status).toBe(200);
+    await Promise.all(running);
+    expect(decisions).toEqual([{ decision: "approved", auto: true }, { decision: "approved" }]);
+  }
+
+  it("holds a widening revision for a human click when the guest auto-approve cookie is set", async () => {
+    await expectHumanClick(await startWith([`${AUTO_APPROVE_COOKIE}=1`]));
+  });
+
+  it("holds a widening revision for a human click when the workspace auto-approves plans", async () => {
+    await expectHumanClick(
+      await startWith([], async (session) => {
+        await updateAutomation(app, session, { autoApprovePlans: true });
+      }),
+    );
   });
 });

@@ -1,6 +1,7 @@
 export { createRunContext, type RunContext } from "./agent/context";
 export { createRunEmitter } from "./agent/emitter";
 export { runAgentLoop, type AgentLoopResult } from "./agent/loop";
+export { runPlannedMission, type PlannedMission } from "./agent/mission-runner";
 export { orchestrate } from "./agent/orchestrator";
 export { missionClock } from "./agent/pacing";
 export {

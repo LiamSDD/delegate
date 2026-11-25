@@ -386,7 +386,10 @@ export function createFakeRunner(options: { delayMs?: number } = {}): MissionRun
     ) {
       return { status: "failed" };
     }
-    const decision = await awaitPlanApproval({ version: 1, steps: AUDIT_SIMULATED_PLAN }, signal);
+    const decision = await awaitPlanApproval(
+      { version: 1, steps: AUDIT_SIMULATED_PLAN, kind: "initial" },
+      signal,
+    );
     if (decision.decision === "rejected") {
       await emit({
         type: "run.failed",

@@ -11,7 +11,12 @@ import {
 import { loadPrompt } from "../server";
 import { scriptedProvider, testRun, textTurn } from "../testing/fakes";
 import { type AwaitPlanApproval } from "../plan-approval";
-import { runPlannedMission, type PlannedMission } from "./mission-runner";
+import {
+  AUTO_APPROVAL_REASON,
+  AUTO_APPROVER,
+  runPlannedMission,
+  type PlannedMission,
+} from "./mission-runner";
 import { missionClock } from "./pacing";
 import { orchestrate, type RevisionGate } from "./orchestrator";
 import {
@@ -404,7 +409,7 @@ describe("runPlannedMission approval semantics for revisions", () => {
   });
 
   it("asks again for a revision that adds a side effect and records the re-approval", async () => {
-    const asked: number[] = [];
+    const asked: unknown[] = [];
     const { status, events, state } = await run(
       (plan) => [
         ...plan,
@@ -415,12 +420,19 @@ describe("runPlannedMission approval semantics for revisions", () => {
         }),
       ],
       (proposal) => {
-        asked.push(proposal.version);
+        asked.push(
+          proposal.kind === "revision"
+            ? [proposal.version, proposal.kind, proposal.required]
+            : [proposal.version, proposal.kind],
+        );
         return Promise.resolve({ decision: "approved" });
       },
     );
     expect(status).toBe("completed");
-    expect(asked).toEqual([1, 2]);
+    expect(asked).toEqual([
+      [1, "initial"],
+      [2, "revision", true],
+    ]);
     const approvals = events.flatMap((event) => (event.type === "plan.approved" ? [event] : []));
     expect(approvals.map((event) => event.payload.version)).toEqual([1, 2]);
     expect(approvals[1]).toMatchObject({
@@ -428,5 +440,23 @@ describe("runPlannedMission approval semantics for revisions", () => {
     });
     expect(state.plan).toMatchObject({ version: 2, approved: true });
     expect(state.steps.find((entry) => entry.id === "notify")?.status).toBe("succeeded");
+  });
+
+  it("auto-approves a widening revision with the no-reviewer reason when no waiter is attached", async () => {
+    const { status, events } = await run((plan) => [
+      ...plan,
+      step("notify", "verify", {
+        inputs: ["check"],
+        capabilities: [CAPABILITIES.connectorWrite],
+        budgetShare: 0.05,
+      }),
+    ]);
+    expect(status).toBe("completed");
+    const approvals = events.flatMap((event) => (event.type === "plan.approved" ? [event] : []));
+    expect(approvals.map((event) => event.payload.version)).toEqual([1, 2]);
+    expect(approvals[1]?.payload).toMatchObject({
+      approvedBy: AUTO_APPROVER,
+      reason: expect.stringContaining(AUTO_APPROVAL_REASON) as unknown,
+    });
   });
 });

@@ -6,7 +6,7 @@ import {
   type TenantTx,
   withTenant,
 } from "@delegate/db";
-import type { PlanStep } from "@delegate/runtime";
+import { mayAutoApprovePlan, type PlanApprovalRequest, type PlanStep } from "@delegate/runtime";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -26,7 +26,7 @@ export type PlanDecision =
   | { decision: "rejected"; reason?: string };
 
 export type AwaitPlanApproval = (
-  plan: { version: number; steps: PlanStep[] },
+  plan: PlanApprovalRequest,
   signal?: AbortSignal,
 ) => Promise<PlanDecision>;
 
@@ -206,7 +206,7 @@ export function createPlanApprovalWaiter(options: PlanApprovalWaiterOptions): Aw
   const now = options.now ?? Date.now;
   return async (plan, signal) => {
     const approvalId = await openPlanApproval(app, ctx, plan.steps);
-    if (options.autoApprove) {
+    if (options.autoApprove && mayAutoApprovePlan(plan)) {
       await recordPlanDecision(app, ctx, approvalId, { decision: "approved", auto: true });
       return { decision: "approved", auto: true };
     }
