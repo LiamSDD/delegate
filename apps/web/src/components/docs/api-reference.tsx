@@ -277,15 +277,18 @@ function Operation({
           <Label>Responses</Label>
           {operation.responses.map((response) => (
             <div key={response.status} className="flex flex-col gap-2">
-              <p className="text-sm text-text">
-                <span className="font-mono text-xs font-medium">{response.status}</span>
+              <div className="flex items-baseline gap-3 text-sm">
+                <span className="shrink-0 font-mono text-xs font-medium text-text">
+                  {response.status}
+                </span>
                 {response.description === null ? null : (
-                  <span className="text-text-muted">
-                    {" · "}
-                    <Prose text={response.description} context={prose} inline />
-                  </span>
+                  <Prose
+                    text={response.description}
+                    context={prose}
+                    className="min-w-0 flex-1 text-sm text-text-muted [&>p]:mt-1"
+                  />
                 )}
-              </p>
+              </div>
               <Contents
                 label={`Response ${response.status} of ${operation.method} ${operation.path}`}
                 contents={response.contents}

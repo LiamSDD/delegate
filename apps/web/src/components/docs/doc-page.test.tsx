@@ -198,6 +198,7 @@ describe("API reference", () => {
               },
             ],
             responses: {
+              "404": { description: "`not_found`: no such run.\n\n`gone`: the run expired." },
               "200": {
                 description: "The run, as `Run`",
                 content: {
@@ -224,6 +225,7 @@ describe("API reference", () => {
     expect(html).toContain("<em>one</em>");
     expect(html).toContain('<strong class="font-semibold text-text">POST /runs</strong>');
     expect(html).toMatch(/The run, as <code class="[^"]*">Run<\/code>/);
+    expect(html).not.toMatch(/<p\b[^>]*>(?:(?!<\/p>).)*<(?:p|div)\b/s);
     expect(html).toContain("&lt;img src=x onerror=1&gt;");
     expect(html).not.toContain("<img");
     expect(html).not.toMatch(/\*\*|`/);
