@@ -171,6 +171,29 @@ export const DOC_MANIFEST: readonly ManifestEntry[] = [
     summary: "The OpenAPI reference served by this deployment.",
   },
   {
+    source: "docs/guides/api.md",
+    slug: ["api", "guide"],
+    section: "api",
+    label: "REST API v1 and SDK",
+    summary:
+      "Bearer tokens, every operation, idempotency, pagination, events and the TypeScript SDK.",
+  },
+  {
+    source: "docs/guides/cli.md",
+    slug: ["api", "cli"],
+    section: "api",
+    label: "The delegate CLI",
+    summary: "Start a mission from a terminal, watch it, decide its plan and fetch the result.",
+  },
+  {
+    source: "docs/guides/webhooks.md",
+    slug: ["api", "webhooks"],
+    section: "api",
+    label: "Webhooks",
+    summary:
+      "Signed notifications when a run finishes or needs a decision, and how to verify them.",
+  },
+  {
     source: "docs/CASE_STUDY.md",
     slug: ["case-study"],
     section: "case-study",
