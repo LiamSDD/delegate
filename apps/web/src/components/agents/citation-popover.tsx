@@ -5,12 +5,15 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import type { IndexedCitation } from "@/lib/agents/chat";
 import { hostOf } from "@/lib/runs/build-agent";
+import { usePopoverPlacement } from "@/components/use-popover-placement";
 import { cn } from "@/lib/utils";
 
 export function CitationPopover({ citation }: { citation: IndexedCitation }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const wrapper = useRef<HTMLSpanElement>(null);
+  const panel = useRef<HTMLSpanElement>(null);
+  const placement = usePopoverPlacement(open, wrapper, panel);
 
   useEffect(() => {
     if (!open) return;
@@ -62,10 +65,15 @@ export function CitationPopover({ citation }: { citation: IndexedCitation }) {
         {citation.index}
       </button>
       <span
+        ref={panel}
         id={id}
         role="note"
         hidden={!open}
-        className="absolute bottom-full left-1/2 z-30 mb-1.5 w-72 max-w-[80vw] -translate-x-1/2 rounded-lg border border-border bg-surface p-3 text-left shadow-lg"
+        style={placement.style}
+        className={cn(
+          "absolute left-1/2 z-30 w-72 max-w-[calc(100vw-1rem)] -translate-x-1/2 rounded-lg border border-border bg-surface p-3 text-left shadow-lg",
+          placement.side === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5",
+        )}
       >
         <span className="block text-xs font-medium text-text">
           {citation.title ?? hostOf(citation.url)}

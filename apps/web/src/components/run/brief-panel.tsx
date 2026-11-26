@@ -1,7 +1,9 @@
 "use client";
 
 import { Check, Copy, Download, FileWarning } from "lucide-react";
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+
+import { usePopoverPlacement } from "@/components/use-popover-placement";
 
 import {
   type Brief,
@@ -33,9 +35,24 @@ function Citations({
 export function CitationMarker({ target }: { target: CitationTarget }) {
   const [open, setOpen] = useState(false);
   const id = useId();
+  const wrapper = useRef<HTMLSpanElement>(null);
+  const panel = useRef<HTMLSpanElement>(null);
+  const placement = usePopoverPlacement(open, wrapper, panel);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (wrapper.current !== null && !wrapper.current.contains(event.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+    };
+  }, [open]);
   const quote = target.source?.quotes[0];
   return (
     <span
+      ref={wrapper}
       className="relative inline-block align-super"
       onMouseEnter={() => {
         setOpen(true);
@@ -48,6 +65,9 @@ export function CitationMarker({ target }: { target: CitationTarget }) {
         type="button"
         aria-describedby={id}
         aria-label={`Citation ${target.number}`}
+        onClick={() => {
+          setOpen(true);
+        }}
         onFocus={() => {
           setOpen(true);
         }}
@@ -67,10 +87,13 @@ export function CitationMarker({ target }: { target: CitationTarget }) {
         {target.number}
       </button>
       <span
+        ref={panel}
         role="tooltip"
         id={id}
+        style={placement.style}
         className={cn(
-          "absolute bottom-full left-1/2 z-40 mb-1.5 w-72 max-w-[80vw] -translate-x-1/2 flex-col gap-1 rounded-lg border border-border-strong bg-surface p-3 text-left align-baseline font-sans text-xs leading-4 shadow-lg",
+          "absolute left-1/2 z-40 w-72 max-w-[calc(100vw-1rem)] -translate-x-1/2 flex-col gap-1 rounded-lg border border-border-strong bg-surface p-3 text-left align-baseline font-sans text-xs leading-4 shadow-lg",
+          placement.side === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5",
           open ? "flex" : "hidden",
         )}
       >
