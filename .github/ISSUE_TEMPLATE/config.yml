@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/LiamSDD/delegate/discussions/categories/q-a
+    about: Ask how to run, self-host or extend Delegate in Discussions Q&A.
+  - name: Ideas
+    url: https://github.com/LiamSDD/delegate/discussions/categories/ideas
+    about: Discuss open-ended ideas for missions, guardrails or integrations before they become a feature request.
+  - name: Report a security vulnerability
+    url: https://github.com/LiamSDD/delegate/security/advisories/new
+    about: Report vulnerabilities privately through GitHub private vulnerability reporting, never in a public issue.
