@@ -1,5 +1,6 @@
 import {
   mcpConnectors,
+  recordAudit,
   type StoredPreapproval,
   type TenantTx,
   withTenant,
@@ -190,4 +191,51 @@ export async function forgetConnectorPreapprovals(
     .update(workspaceSettings)
     .set({ preapprovedTools: kept, updatedAt: sql`now()` })
     .where(eq(workspaceSettings.workspaceId, workspaceId));
+}
+
+export const RUNS_PAUSED_ACTION = "workspace.runs_paused";
+export const RUNS_RESUMED_ACTION = "workspace.runs_resumed";
+
+export async function readRunsPaused(
+  app: AppDatabase,
+  scope: { userId: string; workspaceId: string },
+): Promise<Date | null> {
+  const [row] = await withTenant(app.db, scope.userId, (tx) =>
+    tx
+      .select({ runsPausedAt: workspaceSettings.runsPausedAt })
+      .from(workspaceSettings)
+      .where(eq(workspaceSettings.workspaceId, scope.workspaceId)),
+  );
+  return row?.runsPausedAt ?? null;
+}
+
+export async function setRunsPaused(
+  app: AppDatabase,
+  session: GuestSession,
+  paused: boolean,
+): Promise<{ pausedAt: Date | null; changed: boolean }> {
+  return withTenant(app.db, session.userId, async (tx) => {
+    const [current] = await tx
+      .select({ runsPausedAt: workspaceSettings.runsPausedAt })
+      .from(workspaceSettings)
+      .where(eq(workspaceSettings.workspaceId, session.workspaceId));
+    const pausedAt = current?.runsPausedAt ?? null;
+    if ((pausedAt !== null) === paused) return { pausedAt, changed: false };
+    await recordAudit(tx, {
+      workspaceId: session.workspaceId,
+      action: paused ? RUNS_PAUSED_ACTION : RUNS_RESUMED_ACTION,
+      target: `workspace:${session.workspaceId}`,
+      decision: "n/a",
+    });
+    const runsPausedAt = paused ? sql`now()` : null;
+    const [row] = await tx
+      .insert(workspaceSettings)
+      .values({ workspaceId: session.workspaceId, runsPausedAt })
+      .onConflictDoUpdate({
+        target: workspaceSettings.workspaceId,
+        set: { runsPausedAt, updatedAt: sql`now()` },
+      })
+      .returning({ runsPausedAt: workspaceSettings.runsPausedAt });
+    return { pausedAt: row?.runsPausedAt ?? null, changed: true };
+  });
 }

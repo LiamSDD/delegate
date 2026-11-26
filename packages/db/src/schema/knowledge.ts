@@ -15,7 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { documentClassification } from "./enums";
-import { operators, readers, tenantPolicies } from "./rls";
+import { definerPolicies, operators, readers, tenantPolicies } from "./rls";
 import { runs } from "./runs";
 import { workspaces } from "./tenancy";
 
@@ -53,6 +53,7 @@ export const memories = pgTable(
       update: operators,
       delete: operators,
     }),
+    ...definerPolicies("memories", ["select", "delete"]),
   ],
 ).enableRLS();
 
@@ -82,6 +83,7 @@ export const documents = pgTable(
       update: operators,
       delete: operators,
     }),
+    ...definerPolicies("documents", ["select", "delete"]),
   ],
 ).enableRLS();
 
@@ -149,5 +151,6 @@ export const assistants = pgTable(
       update: operators,
       delete: operators,
     }),
+    ...definerPolicies("assistants", ["select", "delete"]),
   ],
 ).enableRLS();

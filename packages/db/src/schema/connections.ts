@@ -58,7 +58,7 @@ export const apiTokens = pgTable(
       { select: admins, insert: admins, update: admins },
       sql`${t.createdBy} = ${currentUserId}`,
     ),
-    ...definerPolicies("api_tokens", ["select", "update"]),
+    ...definerPolicies("api_tokens", ["select", "update", "delete"]),
   ],
 ).enableRLS();
 
@@ -93,6 +93,7 @@ export const mcpConnectors = pgTable(
       update: admins,
       delete: admins,
     }),
+    ...definerPolicies("mcp_connectors", ["select", "delete"]),
   ],
 ).enableRLS();
 
@@ -137,6 +138,7 @@ export const githubInstallations = pgTable(
       update: admins,
       delete: admins,
     }),
+    ...definerPolicies("github_installations", ["select", "delete"]),
   ],
 ).enableRLS();
 
@@ -148,6 +150,7 @@ export const workspaceSettings = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     autoApprovePlans: boolean("auto_approve_plans").notNull().default(false),
     preapprovedTools: jsonb("preapproved_tools").$type<StoredPreapproval[]>().notNull().default([]),
+    runsPausedAt: timestamp("runs_paused_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -160,5 +163,6 @@ export const workspaceSettings = pgTable(
       insert: admins,
       update: admins,
     }),
+    ...definerPolicies("workspace_settings", ["select", "delete"]),
   ],
 ).enableRLS();

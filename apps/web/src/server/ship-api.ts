@@ -13,13 +13,16 @@ import {
   readCookie,
   readJson,
   retryAfterSeconds,
+  runsPausedResponse,
   serializeSessionCookie,
 } from "./api";
+import { isRunsPausedError } from "./control/pause";
 import { executeRun } from "./execute-run";
 import { createDbLease } from "./leases";
 import { createRunRecord, getRunRecord, isTerminalEventType } from "./runs";
 import { resolveGuest, SESSION_COOKIE, signSession } from "./session";
 import { pendingShipApproval, recordShipDecision, ShipDecisionError } from "./ship-approval";
+import { readRunsPaused } from "./workspace-settings";
 
 const MAX_SHIP_BODY_BYTES = 24 * 1024;
 
@@ -81,6 +84,7 @@ export async function handleCreateShipRun(request: Request, deps: ApiDeps): Prom
     const cookieHeaders: Record<string, string> = issued
       ? { "Set-Cookie": serializeSessionCookie(signSession(session, secret), deps.production) }
       : {};
+    if ((await readRunsPaused(app, session)) !== null) return runsPausedResponse(cookieHeaders);
     const quota = deps.guestLimiter.take(session.userId);
     if (!quota.ok)
       return apiError(429, "rate_limited", "Demo runs are limited per hour. Try again later.", {
@@ -125,6 +129,7 @@ export async function handleCreateShipRun(request: Request, deps: ApiDeps): Prom
     );
     return Response.json({ runId }, { status: 201, headers: { ...NO_STORE, ...cookieHeaders } });
   } catch (error: unknown) {
+    if (isRunsPausedError(error)) return runsPausedResponse();
     console.error("create ship run failed", error instanceof Error ? error.message : "unknown");
     return apiError(500, "internal", "The run could not be created.");
   }

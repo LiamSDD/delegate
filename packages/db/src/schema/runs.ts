@@ -94,12 +94,14 @@ export const runEvents = pgTable(
     runOf(t.runId, t.workspaceId, "run_events_run_fk"),
     unique("run_events_run_seq_unique").on(t.runId, t.seq),
     index("run_events_run_seq_idx").on(t.runId, t.seq),
+    index("run_events_workspace_type_created_idx").on(t.workspaceId, t.type, t.createdAt),
     check("run_events_seq_positive", sql`${t.seq} > 0`),
     check("run_events_type_known", sql`${t.type} in (${runEventTypeList})`),
     ...tenantPolicies("run_events", t.workspaceId, {
       select: readers,
       insert: operators,
     }),
+    ...definerPolicies("run_events", ["select"]),
   ],
 ).enableRLS();
 
@@ -124,6 +126,7 @@ export const artifacts = pgTable(
       insert: operators,
       update: operators,
     }),
+    ...definerPolicies("artifacts", ["select"]),
   ],
 ).enableRLS();
 

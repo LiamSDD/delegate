@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
-import { ArrivalPage } from "@/components/arrival-page";
 import { GitHubAppSetup, type GitHubAppStatus } from "@/components/github-app-setup";
+import { SettingsOverview } from "@/components/settings/overview";
 import { isOwnerModeEnabled, isShipAPrEnabled } from "@/flags";
+import { workspaceOverview } from "@/server/control/workspace";
+import { currentGuest } from "@/server/page-session";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -16,7 +17,7 @@ function sandboxKind(env: NodeJS.ProcessEnv): GitHubAppStatus["sandbox"] {
   return requested === "local" || requested === "vercel" ? requested : "invalid";
 }
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
   const env = process.env;
   const slug = env.GITHUB_APP_SLUG?.trim();
   const status: GitHubAppStatus = {
@@ -27,31 +28,7 @@ export default function SettingsPage() {
     shipEnabled: isShipAPrEnabled(env),
     sandbox: sandboxKind(env),
   };
-  return (
-    <ArrivalPage
-      section="Settings"
-      milestone="M7"
-      title="Who can do what, and with which data"
-      summary="Workspace governance: roles, policies, connectors and where your data goes."
-      willShow={[
-        "Members and roles: owner, admin, operator, viewer",
-        "The policy editor, with a dry-run against past runs",
-        "MCP connectors and API keys",
-        "Model providers, including bring-your-own Claude key",
-        "Data retention and the audit log viewer",
-      ]}
-    >
-      <p className="border-l-2 border-border-strong pl-4 text-sm text-text-muted">
-        Available now:{" "}
-        <Link
-          href="/settings/connections"
-          className="text-text underline underline-offset-4 hover:text-accent"
-        >
-          connections
-        </Link>
-        : API tokens for Claude Code and Codex, your MCP servers, GitHub and automation defaults.
-      </p>
-      <GitHubAppSetup status={status} />
-    </ArrivalPage>
-  );
+  const guest = await currentGuest();
+  const workspace = guest === null ? null : await workspaceOverview(guest.app, guest.session);
+  return <SettingsOverview workspace={workspace} deployment={<GitHubAppSetup status={status} />} />;
 }

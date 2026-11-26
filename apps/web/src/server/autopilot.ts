@@ -30,6 +30,7 @@ import {
 } from "@delegate/runtime";
 import { count, eq } from "drizzle-orm";
 
+import { isRunsPausedError, pausedBefore } from "./control/pause";
 import type { AppDatabase } from "./db";
 import type { DurableDeps } from "./durable";
 import { reviveOrSweep } from "./durable";
@@ -49,7 +50,7 @@ import {
   type RunRecord,
 } from "./runs";
 import type { GuestSession } from "./session";
-import { readAutomation } from "./workspace-settings";
+import { readAutomation, readRunsPaused } from "./workspace-settings";
 
 export const AUTOPILOT_STEP_LIMIT = 8;
 export const AUTOPILOT_LEASE_ATTEMPTS = 3;
@@ -227,6 +228,23 @@ async function step(
       await finish(app, ctx, state, parsedInput.data, move, elapsedMs, now);
       return;
     }
+    if ((await readRunsPaused(app, ctx)) !== null) {
+      await finish(
+        app,
+        ctx,
+        state,
+        parsedInput.data,
+        {
+          kind: "finish",
+          status: "stopped",
+          track: move.track,
+          stop: { reason: "unavailable", message: pausedBefore(move.node.label) },
+        },
+        elapsedMs,
+        now,
+      );
+      return;
+    }
     const quota = deps.guestLimiter.take(ctx.userId);
     if (!quota.ok) {
       await finish(
@@ -396,6 +414,7 @@ async function createChildRecord(
     );
     return true;
   } catch (error: unknown) {
+    if (isRunsPausedError(error)) return false;
     if ((await getRunRecord(app, parent.userId, started.childRunId)) !== null) return false;
     throw error;
   }
