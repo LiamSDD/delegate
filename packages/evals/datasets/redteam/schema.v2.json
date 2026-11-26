@@ -6,7 +6,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -20,7 +20,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -125,7 +126,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -139,7 +140,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -196,7 +198,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -210,7 +212,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -462,7 +465,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -476,7 +479,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -622,7 +626,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -636,7 +640,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -778,7 +783,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -792,7 +797,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -866,7 +872,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -880,7 +886,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -984,7 +991,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -998,7 +1005,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -1045,7 +1053,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -1059,7 +1067,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -1219,7 +1228,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -1233,7 +1242,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -1303,7 +1313,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -1317,7 +1327,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -1471,7 +1482,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -1485,7 +1496,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -1602,7 +1614,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^[a-z]{2}-\\d{3}$"
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
         },
         "category": {
           "type": "string",
@@ -1616,7 +1628,8 @@
             "connector-poisoning",
             "sandbox-escape",
             "playbook-poisoning",
-            "crawler-trap"
+            "crawler-trap",
+            "webhook-forgery"
           ]
         },
         "description": {
@@ -1761,6 +1774,319 @@
               "additionalProperties": false
             }
           ]
+        }
+      },
+      "required": ["id", "category", "description", "expected", "target", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "indirect-injection",
+            "exfiltration",
+            "ssrf",
+            "capability-escalation",
+            "approval-bypass",
+            "quote-forgery",
+            "connector-poisoning",
+            "sandbox-escape",
+            "playbook-poisoning",
+            "crawler-trap",
+            "webhook-forgery"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "blocked"
+            },
+            "blockedBy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["outcome", "blockedBy"],
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "string",
+          "const": "webhook-delivery"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "network": {
+              "type": "object",
+              "properties": {
+                "dns": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "routes": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 599
+                      },
+                      "headers": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["status"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "dnsAtDelivery": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "forbiddenHosts": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": ["url", "forbiddenHosts"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["id", "category", "description", "expected", "target", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "indirect-injection",
+            "exfiltration",
+            "ssrf",
+            "capability-escalation",
+            "approval-bypass",
+            "quote-forgery",
+            "connector-poisoning",
+            "sandbox-escape",
+            "playbook-poisoning",
+            "crawler-trap",
+            "webhook-forgery"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "blocked"
+            },
+            "blockedBy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["outcome", "blockedBy"],
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "string",
+          "const": "webhook-signature"
+        },
+        "payload": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "attack": {
+                  "type": "string",
+                  "const": "replay"
+                },
+                "ageSeconds": {
+                  "type": "integer",
+                  "minimum": 301,
+                  "maximum": 31536000
+                }
+              },
+              "required": ["attack", "ageSeconds"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "attack": {
+                  "type": "string",
+                  "const": "moved-timestamp"
+                },
+                "ageSeconds": {
+                  "type": "integer",
+                  "minimum": 301,
+                  "maximum": 31536000
+                }
+              },
+              "required": ["attack", "ageSeconds"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "attack": {
+                  "type": "string",
+                  "const": "tampered-body"
+                }
+              },
+              "required": ["attack"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "attack": {
+                  "type": "string",
+                  "const": "other-secret"
+                }
+              },
+              "required": ["attack"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "attack": {
+                  "type": "string",
+                  "const": "unsigned"
+                },
+                "signature": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              },
+              "required": ["attack", "signature"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": ["id", "category", "description", "expected", "target", "payload"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z]{2,3}-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "indirect-injection",
+            "exfiltration",
+            "ssrf",
+            "capability-escalation",
+            "approval-bypass",
+            "quote-forgery",
+            "connector-poisoning",
+            "sandbox-escape",
+            "playbook-poisoning",
+            "crawler-trap",
+            "webhook-forgery"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "const": "blocked"
+            },
+            "blockedBy": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["outcome", "blockedBy"],
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "string",
+          "const": "tenant"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "attack": {
+              "type": "string",
+              "enum": ["read-run", "write-run", "replay-idempotency-key"]
+            }
+          },
+          "required": ["attack"],
+          "additionalProperties": false
         }
       },
       "required": ["id", "category", "description", "expected", "target", "payload"],

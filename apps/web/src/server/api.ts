@@ -639,6 +639,31 @@ export async function handleRunChildren(
   );
 }
 
+export async function cancelRun(
+  app: AppDatabase,
+  session: GuestSession,
+  record: RunRecord,
+  deps: ApiDeps,
+): Promise<{ ok: true; aborted: boolean } | { ok: false; reason: "run_finished" }> {
+  try {
+    await appendEvent(
+      app,
+      { runId: record.id, workspaceId: record.workspaceId, userId: session.userId },
+      {
+        type: "run.failed",
+        payload: { error: { code: "cancelled", message: "cancelled by user" } },
+      },
+    );
+  } catch (error: unknown) {
+    if (error instanceof RunAlreadyTerminalError) return { ok: false, reason: "run_finished" };
+    throw error;
+  }
+  const aborted = deps.registry.abort(record.id, "cancelled by user");
+  if (record.mission === AUTOPILOT_MISSION_ID)
+    await cancelAutopilotChildren(app, session.userId, record.id, deps);
+  return { ok: true, aborted };
+}
+
 export async function handleCancelRun(
   request: Request,
   runId: string,
@@ -651,25 +676,9 @@ export async function handleCancelRun(
   if (guest instanceof Response) return guest;
   const record = await getRunRecord(guest.app, guest.session.userId, runId);
   if (record === null) return notFound();
-  try {
-    await appendEvent(
-      guest.app,
-      { runId, workspaceId: record.workspaceId, userId: guest.session.userId },
-      {
-        type: "run.failed",
-        payload: { error: { code: "cancelled", message: "cancelled by user" } },
-      },
-    );
-  } catch (error: unknown) {
-    if (error instanceof RunAlreadyTerminalError) {
-      return apiError(409, "run_finished", "This run has already finished.");
-    }
-    throw error;
-  }
-  const aborted = deps.registry.abort(runId, "cancelled by user");
-  if (record.mission === AUTOPILOT_MISSION_ID)
-    await cancelAutopilotChildren(guest.app, guest.session.userId, runId, deps);
-  return Response.json({ cancelled: true, aborted }, { headers: NO_STORE });
+  const cancelled = await cancelRun(guest.app, guest.session, record, deps);
+  if (!cancelled.ok) return apiError(409, "run_finished", "This run has already finished.");
+  return Response.json({ cancelled: true, aborted: cancelled.aborted }, { headers: NO_STORE });
 }
 
 export async function handleGetArtifact(

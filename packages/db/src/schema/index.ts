@@ -6,3 +6,4 @@ export * from "./runs";
 export * from "./tenancy";
 export * from "./connections";
 export * from "./learning";
+export * from "./platform";

@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import type { AppDatabase } from "./db";
 import type { GuestSession } from "./session";
+import { deliverRunWebhooks, enqueueRunEventWebhooks } from "./webhooks/outbox";
 import { runTarget } from "@/lib/runs/target";
 
 export const GUEST_RUN_BUDGET = { maxTokens: 400_000, maxMicroUsd: 0 } as const;
@@ -235,7 +236,8 @@ export async function appendEvent(
   ctx: RunContext,
   draft: EventDraft,
 ): Promise<RunEvent> {
-  return withTenant(app.db, ctx.userId, async (tx) => {
+  const webhooks = { enqueued: false };
+  const appended = await withTenant(app.db, ctx.userId, async (tx) => {
     await tx
       .select({ id: runs.id })
       .from(runs)
@@ -254,8 +256,11 @@ export async function appendEvent(
     const event = runEventFromRow(row);
     await storeArtifact(tx, ctx, event);
     await mirrorRun(tx, ctx, event);
+    webhooks.enqueued = await enqueueRunEventWebhooks(tx, ctx, event);
     return event;
   });
+  if (webhooks.enqueued) deliverRunWebhooks(app, ctx);
+  return appended;
 }
 
 export async function readEvents(

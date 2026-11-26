@@ -473,6 +473,16 @@ importers:
         version: 5.1.1(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
 
   packages/cli:
+    dependencies:
+      '@delegate/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -538,10 +548,19 @@ importers:
       '@delegate/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@delegate/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       zod:
         specifier: 'catalog:'
         version: 4.6.7
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: 'catalog:'
+        version: 0.6.0
+      '@electric-sql/pglite-pgvector':
+        specifier: 'catalog:'
+        version: 0.1.0(@electric-sql/pglite@0.6.0)
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6

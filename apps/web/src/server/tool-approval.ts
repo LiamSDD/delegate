@@ -20,6 +20,7 @@ import { z } from "zod";
 import type { AppDatabase } from "./db";
 import type { RunContext } from "./runs";
 import { abortableSleep } from "./sse";
+import { notifyApprovalRequested } from "./webhooks/outbox";
 
 export const TOOL_APPROVAL_STEP = "tool";
 export const TOOL_POLL_MS = 500;
@@ -253,6 +254,11 @@ export function createToolApprovalGate(options: ToolApprovalGateOptions): ToolAp
   return {
     async decide(request) {
       const row = await findOrOpen(app, ctx, request);
+      await notifyApprovalRequested(app, ctx, {
+        id: row.id,
+        kind: "tool",
+        summary: `${request.tool}: ${request.argsSummary}`,
+      });
       const deadline = row.requestedAt.getTime() + timeoutMs;
       for (;;) {
         if (signal.aborted) return { resolution: "rejected", resolvedBy: TOOL_TIMEOUT_ACTOR };

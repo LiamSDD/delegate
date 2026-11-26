@@ -7,3 +7,4 @@ export * from "./schema";
 export * from "./knowledge-store";
 export * from "./connections";
 export * from "./playbook-store";
+export * from "./platform";

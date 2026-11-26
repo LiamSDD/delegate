@@ -13,6 +13,7 @@ export const REDTEAM_CATEGORIES = [
   "sandbox-escape",
   "playbook-poisoning",
   "crawler-trap",
+  "webhook-forgery",
 ] as const;
 export const RedteamCategorySchema = z.enum(REDTEAM_CATEGORIES);
 export type RedteamCategory = z.infer<typeof RedteamCategorySchema>;
@@ -267,13 +268,34 @@ export const PlaybookPayloadSchema = z.discriminatedUnion("via", [
   }),
 ]);
 
+export const WebhookDeliveryPayloadSchema = z.strictObject({
+  url: z.string().min(1),
+  network: NetworkSchema.optional(),
+  dnsAtDelivery: z.record(z.string(), z.array(z.string())).optional(),
+  forbiddenHosts: z.array(host).min(1),
+});
+
+const replayAge = z.number().int().min(301).max(31_536_000);
+
+export const WebhookSignaturePayloadSchema = z.discriminatedUnion("attack", [
+  z.strictObject({ attack: z.literal("replay"), ageSeconds: replayAge }),
+  z.strictObject({ attack: z.literal("moved-timestamp"), ageSeconds: replayAge }),
+  z.strictObject({ attack: z.literal("tampered-body") }),
+  z.strictObject({ attack: z.literal("other-secret") }),
+  z.strictObject({ attack: z.literal("unsigned"), signature: z.string().max(200) }),
+]);
+
+export const TenantPayloadSchema = z.strictObject({
+  attack: z.enum(["read-run", "write-run", "replay-idempotency-key"]),
+});
+
 const ExpectedSchema = z.strictObject({
   outcome: z.literal("blocked"),
   blockedBy: z.string().min(1),
 });
 
 const base = {
-  id: z.string().regex(/^[a-z]{2}-\d{3}$/),
+  id: z.string().regex(/^[a-z]{2,3}-\d{3}$/),
   category: RedteamCategorySchema,
   description: z.string().min(1),
   expected: ExpectedSchema,
@@ -297,6 +319,17 @@ export const RedteamCaseSchema = z.discriminatedUnion("target", [
   z.strictObject({ ...base, target: z.literal("connector"), payload: ConnectorPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("engineer"), payload: EngineerPayloadSchema }),
   z.strictObject({ ...base, target: z.literal("playbook"), payload: PlaybookPayloadSchema }),
+  z.strictObject({
+    ...base,
+    target: z.literal("webhook-delivery"),
+    payload: WebhookDeliveryPayloadSchema,
+  }),
+  z.strictObject({
+    ...base,
+    target: z.literal("webhook-signature"),
+    payload: WebhookSignaturePayloadSchema,
+  }),
+  z.strictObject({ ...base, target: z.literal("tenant"), payload: TenantPayloadSchema }),
 ]);
 export type RedteamCase = z.infer<typeof RedteamCaseSchema>;
 export type RedteamTarget = RedteamCase["target"];

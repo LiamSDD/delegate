@@ -1,6 +1,6 @@
 {
   "id": "9f9df5a1-d610-4300-9179-e8dba11d3cf4",
-  "prevId": "40a20b4e-43b9-4c00-90d7-9df009631b10",
+  "prevId": "5b3cb95f-0d08-4781-bd67-8cc8525ac938",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3125,6 +3125,682 @@
         "playbooks_runs_nonnegative": {
           "name": "playbooks_runs_nonnegative",
           "value": "\"playbooks\".\"runs\" >= 0"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.idempotency_keys": {
+      "name": "idempotency_keys",
+      "schema": "",
+      "columns": {
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'in_progress'"
+        },
+        "response_status": {
+          "name": "response_status",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response_body": {
+          "name": "response_body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "locked_until": {
+          "name": "locked_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idempotency_keys_expiry_idx": {
+          "name": "idempotency_keys_expiry_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "idempotency_keys_workspace_id_workspaces_id_fk": {
+          "name": "idempotency_keys_workspace_id_workspaces_id_fk",
+          "tableFrom": "idempotency_keys",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "idempotency_keys_created_by_users_id_fk": {
+          "name": "idempotency_keys_created_by_users_id_fk",
+          "tableFrom": "idempotency_keys",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "idempotency_keys_pk": {
+          "name": "idempotency_keys_pk",
+          "columns": [
+            "workspace_id",
+            "key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "idempotency_keys_definer_select": {
+          "name": "idempotency_keys_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "idempotency_keys_definer_insert": {
+          "name": "idempotency_keys_definer_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_definer"
+          ],
+          "withCheck": "true"
+        },
+        "idempotency_keys_definer_update": {
+          "name": "idempotency_keys_definer_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true",
+          "withCheck": "true"
+        },
+        "idempotency_keys_definer_delete": {
+          "name": "idempotency_keys_definer_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        }
+      },
+      "checkConstraints": {
+        "idempotency_keys_key_format": {
+          "name": "idempotency_keys_key_format",
+          "value": "\"idempotency_keys\".\"key\" ~ '^[!-~]{1,255}$'"
+        },
+        "idempotency_keys_hash_format": {
+          "name": "idempotency_keys_hash_format",
+          "value": "\"idempotency_keys\".\"request_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "idempotency_keys_status_known": {
+          "name": "idempotency_keys_status_known",
+          "value": "\"idempotency_keys\".\"status\" in ('in_progress', 'completed')"
+        },
+        "idempotency_keys_completed_has_response": {
+          "name": "idempotency_keys_completed_has_response",
+          "value": "(\"idempotency_keys\".\"status\" = 'completed') = (\"idempotency_keys\".\"response_status\" is not null and \"idempotency_keys\".\"response_body\" is not null)"
+        },
+        "idempotency_keys_response_is_success": {
+          "name": "idempotency_keys_response_is_success",
+          "value": "\"idempotency_keys\".\"response_status\" is null or \"idempotency_keys\".\"response_status\" between 200 and 299"
+        },
+        "idempotency_keys_response_size": {
+          "name": "idempotency_keys_response_size",
+          "value": "\"idempotency_keys\".\"response_body\" is null or octet_length(\"idempotency_keys\".\"response_body\") <= 262144"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.webhook_deliveries": {
+      "name": "webhook_deliveries",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "endpoint_id": {
+          "name": "endpoint_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_key": {
+          "name": "event_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_status_code": {
+          "name": "last_status_code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_response_excerpt": {
+          "name": "last_response_excerpt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_attempt_at": {
+          "name": "last_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "locked_until": {
+          "name": "locked_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delivered_at": {
+          "name": "delivered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "webhook_deliveries_due_idx": {
+          "name": "webhook_deliveries_due_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "webhook_deliveries_endpoint_created_idx": {
+          "name": "webhook_deliveries_endpoint_created_idx",
+          "columns": [
+            {
+              "expression": "endpoint_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "webhook_deliveries_endpoint_fk": {
+          "name": "webhook_deliveries_endpoint_fk",
+          "tableFrom": "webhook_deliveries",
+          "tableTo": "webhook_endpoints",
+          "columnsFrom": [
+            "endpoint_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "webhook_deliveries_run_fk": {
+          "name": "webhook_deliveries_run_fk",
+          "tableFrom": "webhook_deliveries",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "webhook_deliveries_endpoint_event_unique": {
+          "name": "webhook_deliveries_endpoint_event_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "endpoint_id",
+            "event_key"
+          ]
+        }
+      },
+      "policies": {
+        "webhook_deliveries_select": {
+          "name": "webhook_deliveries_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"webhook_deliveries\".\"workspace_id\") in ('owner', 'admin')"
+        },
+        "webhook_deliveries_definer_select": {
+          "name": "webhook_deliveries_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        },
+        "webhook_deliveries_definer_insert": {
+          "name": "webhook_deliveries_definer_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_definer"
+          ],
+          "withCheck": "true"
+        },
+        "webhook_deliveries_definer_update": {
+          "name": "webhook_deliveries_definer_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true",
+          "withCheck": "true"
+        },
+        "webhook_deliveries_definer_delete": {
+          "name": "webhook_deliveries_definer_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        }
+      },
+      "checkConstraints": {
+        "webhook_deliveries_status_known": {
+          "name": "webhook_deliveries_status_known",
+          "value": "\"webhook_deliveries\".\"status\" in ('pending', 'delivered', 'failed')"
+        },
+        "webhook_deliveries_event_type_known": {
+          "name": "webhook_deliveries_event_type_known",
+          "value": "\"webhook_deliveries\".\"event_type\" in ('run.completed', 'run.failed', 'run.cancelled', 'approval.requested', 'webhook.test')"
+        },
+        "webhook_deliveries_event_key_length": {
+          "name": "webhook_deliveries_event_key_length",
+          "value": "char_length(\"webhook_deliveries\".\"event_key\") between 1 and 200"
+        },
+        "webhook_deliveries_attempts_bounded": {
+          "name": "webhook_deliveries_attempts_bounded",
+          "value": "\"webhook_deliveries\".\"attempts\" between 0 and 20"
+        },
+        "webhook_deliveries_pending_has_next_attempt": {
+          "name": "webhook_deliveries_pending_has_next_attempt",
+          "value": "(\"webhook_deliveries\".\"status\" = 'pending') = (\"webhook_deliveries\".\"next_attempt_at\" is not null)"
+        },
+        "webhook_deliveries_delivered_consistent": {
+          "name": "webhook_deliveries_delivered_consistent",
+          "value": "(\"webhook_deliveries\".\"status\" = 'delivered') = (\"webhook_deliveries\".\"delivered_at\" is not null)"
+        },
+        "webhook_deliveries_status_code_range": {
+          "name": "webhook_deliveries_status_code_range",
+          "value": "\"webhook_deliveries\".\"last_status_code\" is null or \"webhook_deliveries\".\"last_status_code\" between 100 and 599"
+        },
+        "webhook_deliveries_error_short": {
+          "name": "webhook_deliveries_error_short",
+          "value": "\"webhook_deliveries\".\"last_error\" is null or char_length(\"webhook_deliveries\".\"last_error\") <= 60"
+        },
+        "webhook_deliveries_excerpt_short": {
+          "name": "webhook_deliveries_excerpt_short",
+          "value": "\"webhook_deliveries\".\"last_response_excerpt\" is null or char_length(\"webhook_deliveries\".\"last_response_excerpt\") <= 200"
+        },
+        "webhook_deliveries_data_is_object": {
+          "name": "webhook_deliveries_data_is_object",
+          "value": "jsonb_typeof(\"webhook_deliveries\".\"data\") = 'object'"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.webhook_endpoints": {
+      "name": "webhook_endpoints",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "nullif(current_setting('app.user_id', true), '')::uuid"
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "events": {
+          "name": "events",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "secret_ciphertext": {
+          "name": "secret_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "secret_rotated_at": {
+          "name": "secret_rotated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "webhook_endpoints_workspace_id_workspaces_id_fk": {
+          "name": "webhook_endpoints_workspace_id_workspaces_id_fk",
+          "tableFrom": "webhook_endpoints",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "webhook_endpoints_created_by_users_id_fk": {
+          "name": "webhook_endpoints_created_by_users_id_fk",
+          "tableFrom": "webhook_endpoints",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "webhook_endpoints_id_workspace_unique": {
+          "name": "webhook_endpoints_id_workspace_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "workspace_id"
+          ]
+        },
+        "webhook_endpoints_workspace_url_unique": {
+          "name": "webhook_endpoints_workspace_url_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "workspace_id",
+            "url"
+          ]
+        }
+      },
+      "policies": {
+        "webhook_endpoints_select": {
+          "name": "webhook_endpoints_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"webhook_endpoints\".\"workspace_id\") in ('owner', 'admin')"
+        },
+        "webhook_endpoints_insert": {
+          "name": "webhook_endpoints_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "delegate_app"
+          ],
+          "withCheck": "app_workspace_role(\"webhook_endpoints\".\"workspace_id\") in ('owner', 'admin') and \"webhook_endpoints\".\"created_by\" = nullif(current_setting('app.user_id', true), '')::uuid"
+        },
+        "webhook_endpoints_update": {
+          "name": "webhook_endpoints_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"webhook_endpoints\".\"workspace_id\") in ('owner', 'admin')",
+          "withCheck": "app_workspace_role(\"webhook_endpoints\".\"workspace_id\") in ('owner', 'admin')"
+        },
+        "webhook_endpoints_delete": {
+          "name": "webhook_endpoints_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_app"
+          ],
+          "using": "app_workspace_role(\"webhook_endpoints\".\"workspace_id\") in ('owner', 'admin')"
+        },
+        "webhook_endpoints_definer_select": {
+          "name": "webhook_endpoints_definer_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
+        }
+      },
+      "checkConstraints": {
+        "webhook_endpoints_url_https": {
+          "name": "webhook_endpoints_url_https",
+          "value": "\"webhook_endpoints\".\"url\" ~ '^https://' and char_length(\"webhook_endpoints\".\"url\") <= 2048"
+        },
+        "webhook_endpoints_origin_format": {
+          "name": "webhook_endpoints_origin_format",
+          "value": "\"webhook_endpoints\".\"origin\" ~ '^https?://[^/]+$' and char_length(\"webhook_endpoints\".\"origin\") <= 300"
+        },
+        "webhook_endpoints_description_length": {
+          "name": "webhook_endpoints_description_length",
+          "value": "char_length(\"webhook_endpoints\".\"description\") <= 120"
+        },
+        "webhook_endpoints_events_known": {
+          "name": "webhook_endpoints_events_known",
+          "value": "cardinality(\"webhook_endpoints\".\"events\") between 1 and 4 and \"webhook_endpoints\".\"events\" <@ array['run.completed', 'run.failed', 'run.cancelled', 'approval.requested']::text[]"
         }
       },
       "isRLSEnabled": true
