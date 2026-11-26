@@ -1,8 +1,8 @@
-"use client";
-
+import { buildOpenApiDocument } from "@delegate/sdk/contract";
 import Link from "next/link";
-import { type ReactNode, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
+import { parseMarkdown } from "@/lib/docs/markdown";
 import {
   type ApiContent,
   type ApiOperation,
@@ -12,37 +12,50 @@ import {
   parseOpenApi,
   schemaId,
 } from "@/lib/docs/openapi";
+import type { DocsRegistry } from "@/lib/docs/registry";
 import { cn } from "@/lib/utils";
 
+import { Markdown } from "./markdown";
 import { HEADING_SCROLL_MARGIN, LINK_CLASS } from "./styles";
 
 export type ApiReferenceState =
-  | { status: "loading" }
-  | { status: "unavailable"; detail: string }
-  | { status: "ready"; model: ApiReferenceModel };
+  { status: "unavailable"; detail: string } | { status: "ready"; model: ApiReferenceModel };
 
-export async function loadApiReference(fetcher: typeof fetch = fetch): Promise<ApiReferenceState> {
-  let response: Response;
-  try {
-    response = await fetcher(OPENAPI_PATH, { headers: { accept: "application/json" } });
-  } catch {
-    return { status: "unavailable", detail: `The request to ${OPENAPI_PATH} did not complete.` };
-  }
-  if (!response.ok)
-    return {
-      status: "unavailable",
-      detail: `${OPENAPI_PATH} answered ${response.status} on this deployment.`,
-    };
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    return { status: "unavailable", detail: `${OPENAPI_PATH} did not return JSON.` };
-  }
-  const model = parseOpenApi(body);
+export function apiReferenceState(document: unknown): ApiReferenceState {
+  const model = parseOpenApi(document);
   return model === null
-    ? { status: "unavailable", detail: `${OPENAPI_PATH} did not return an OpenAPI 3 document.` }
+    ? {
+        status: "unavailable",
+        detail: `The document served at ${OPENAPI_PATH} is not an OpenAPI 3 document.`,
+      }
     : { status: "ready", model };
+}
+
+interface ProseContext {
+  registry: DocsRegistry;
+  source: string;
+}
+
+function Prose({
+  text,
+  context,
+  inline = false,
+  className,
+}: {
+  text: string;
+  context: ProseContext;
+  inline?: boolean;
+  className?: string;
+}) {
+  return (
+    <Markdown
+      markdown={parseMarkdown(text)}
+      source={context.source}
+      registry={context.registry}
+      inline={inline}
+      className={className}
+    />
+  );
 }
 
 const METHOD_TONES: Readonly<Record<string, string>> = {
@@ -52,22 +65,6 @@ const METHOD_TONES: Readonly<Record<string, string>> = {
   PATCH: "bg-warning-soft text-warning",
   DELETE: "bg-danger-soft text-danger",
 };
-
-function Paragraphs({ text, className }: { text: string; className?: string }) {
-  return (
-    <>
-      {text
-        .split(/\n{2,}/)
-        .map((paragraph) => paragraph.trim())
-        .filter((paragraph) => paragraph !== "")
-        .map((paragraph, index) => (
-          <p key={index} className={cn("whitespace-pre-line", className)}>
-            {paragraph}
-          </p>
-        ))}
-    </>
-  );
-}
 
 function TypeLabel({ type, known }: { type: string; known: ReadonlySet<string> }) {
   const parts = type.split(/([A-Za-z_][\w.-]*)/);
@@ -90,10 +87,12 @@ function PropertyTable({
   caption,
   rows,
   known,
+  prose,
 }: {
   caption: string;
   rows: readonly (ApiProperty & { in?: string })[];
   known: ReadonlySet<string>;
+  prose: ProseContext;
 }) {
   const located = rows.some((row) => row.in !== undefined);
   return (
@@ -139,7 +138,9 @@ function PropertyTable({
                 <TypeLabel type={row.type} known={known} />
               </td>
               <td className="min-w-40 px-3.5 py-2 align-top text-text-muted">
-                {row.description ?? ""}
+                {row.description === null ? null : (
+                  <Prose text={row.description} context={prose} inline className="text-sm" />
+                )}
               </td>
             </tr>
           ))}
@@ -153,10 +154,12 @@ function Contents({
   label,
   contents,
   known,
+  prose,
 }: {
   label: string;
   contents: readonly ApiContent[];
   known: ReadonlySet<string>;
+  prose: ProseContext;
 }) {
   return (
     <>
@@ -176,6 +179,7 @@ function Contents({
               caption={`${label}, ${content.mediaType}`}
               rows={content.schema.properties}
               known={known}
+              prose={prose}
             />
           )}
         </div>
@@ -190,7 +194,15 @@ function Label({ children }: { children: ReactNode }) {
   );
 }
 
-function Operation({ operation, known }: { operation: ApiOperation; known: ReadonlySet<string> }) {
+function Operation({
+  operation,
+  known,
+  prose,
+}: {
+  operation: ApiOperation;
+  known: ReadonlySet<string>;
+  prose: ProseContext;
+}) {
   return (
     <article
       id={operation.id}
@@ -217,7 +229,7 @@ function Operation({ operation, known }: { operation: ApiOperation; known: Reado
         <p className="text-base font-medium text-text">{operation.summary}</p>
       )}
       {operation.description === null ? null : (
-        <Paragraphs text={operation.description} className="text-sm text-text-muted" />
+        <Prose text={operation.description} context={prose} className="text-sm text-text-muted" />
       )}
       {operation.security === null ? null : (
         <p className="text-sm text-text-muted">
@@ -238,6 +250,7 @@ function Operation({ operation, known }: { operation: ApiOperation; known: Reado
             caption={`Parameters of ${operation.method} ${operation.path}`}
             rows={operation.parameters}
             known={known}
+            prose={prose}
           />
         </div>
       )}
@@ -245,8 +258,9 @@ function Operation({ operation, known }: { operation: ApiOperation; known: Reado
         <div className="flex flex-col gap-2">
           <Label>Request body{operation.requestBody.required ? " (required)" : ""}</Label>
           {operation.requestBody.description === null ? null : (
-            <Paragraphs
+            <Prose
               text={operation.requestBody.description}
+              context={prose}
               className="text-sm text-text-muted"
             />
           )}
@@ -254,6 +268,7 @@ function Operation({ operation, known }: { operation: ApiOperation; known: Reado
             label={`Request body of ${operation.method} ${operation.path}`}
             contents={operation.requestBody.contents}
             known={known}
+            prose={prose}
           />
         </div>
       )}
@@ -265,13 +280,17 @@ function Operation({ operation, known }: { operation: ApiOperation; known: Reado
               <p className="text-sm text-text">
                 <span className="font-mono text-xs font-medium">{response.status}</span>
                 {response.description === null ? null : (
-                  <span className="text-text-muted"> · {response.description}</span>
+                  <span className="text-text-muted">
+                    {" · "}
+                    <Prose text={response.description} context={prose} inline />
+                  </span>
                 )}
               </p>
               <Contents
                 label={`Response ${response.status} of ${operation.method} ${operation.path}`}
                 contents={response.contents}
                 known={known}
+                prose={prose}
               />
             </div>
           ))}
@@ -281,13 +300,15 @@ function Operation({ operation, known }: { operation: ApiOperation; known: Reado
   );
 }
 
-export function ApiReferenceView({ state }: { state: ApiReferenceState }) {
-  if (state.status === "loading")
-    return (
-      <p role="status" className="mt-5 text-sm text-text-muted">
-        Loading the reference from <span className="font-mono text-xs">{OPENAPI_PATH}</span>…
-      </p>
-    );
+export function ApiReferenceView({
+  state,
+  registry,
+  source,
+}: {
+  state: ApiReferenceState;
+  registry: DocsRegistry;
+  source: string;
+}) {
   if (state.status === "unavailable")
     return (
       <div
@@ -310,6 +331,7 @@ export function ApiReferenceView({ state }: { state: ApiReferenceState }) {
 
   const { model } = state;
   const known = new Set(model.schemas.map((schema) => schema.name));
+  const prose: ProseContext = { registry, source };
   return (
     <div className="mt-6 flex flex-col gap-10">
       <header className="flex flex-col gap-3">
@@ -320,7 +342,7 @@ export function ApiReferenceView({ state }: { state: ApiReferenceState }) {
           </span>
         </p>
         {model.description === null ? null : (
-          <Paragraphs text={model.description} className="text-sm text-text-muted" />
+          <Prose text={model.description} context={prose} className="text-sm text-text-muted" />
         )}
         {model.servers.length === 0 ? null : (
           <p className="text-sm text-text-muted">
@@ -341,7 +363,12 @@ export function ApiReferenceView({ state }: { state: ApiReferenceState }) {
                 <span className="font-mono text-xs text-text">{scheme.name}</span>
                 {" · "}
                 <span className="font-mono text-xs">{scheme.summary}</span>
-                {scheme.description === null ? "" : ` · ${scheme.description}`}
+                {scheme.description === null ? null : (
+                  <>
+                    {" · "}
+                    <Prose text={scheme.description} context={prose} inline />
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -352,11 +379,11 @@ export function ApiReferenceView({ state }: { state: ApiReferenceState }) {
           <div className="flex flex-col gap-1">
             <h3 className="text-md font-semibold text-text">{group.name}</h3>
             {group.description === null ? null : (
-              <p className="text-sm text-text-muted">{group.description}</p>
+              <Prose text={group.description} context={prose} className="text-sm text-text-muted" />
             )}
           </div>
           {group.operations.map((operation) => (
-            <Operation key={operation.id} operation={operation} known={known} />
+            <Operation key={operation.id} operation={operation} known={known} prose={prose} />
           ))}
         </section>
       ))}
@@ -377,13 +404,18 @@ export function ApiReferenceView({ state }: { state: ApiReferenceState }) {
                 <span className="font-mono text-2xs text-text-subtle">{schema.view.type}</span>
               </h4>
               {schema.view.description === null ? null : (
-                <Paragraphs text={schema.view.description} className="text-sm text-text-muted" />
+                <Prose
+                  text={schema.view.description}
+                  context={prose}
+                  className="text-sm text-text-muted"
+                />
               )}
               {schema.view.properties.length === 0 ? null : (
                 <PropertyTable
                   caption={`Properties of ${schema.name}`}
                   rows={schema.view.properties}
                   known={known}
+                  prose={prose}
                 />
               )}
             </div>
@@ -394,20 +426,12 @@ export function ApiReferenceView({ state }: { state: ApiReferenceState }) {
   );
 }
 
-export function ApiReference() {
-  const [state, setState] = useState<ApiReferenceState>({ status: "loading" });
-  useEffect(() => {
-    let cancelled = false;
-    void loadApiReference().then((next) => {
-      if (!cancelled) setState(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+export function ApiReference({ registry, source }: { registry: DocsRegistry; source: string }) {
   return (
-    <div aria-live="polite" aria-busy={state.status === "loading"}>
-      <ApiReferenceView state={state} />
-    </div>
+    <ApiReferenceView
+      state={apiReferenceState(buildOpenApiDocument())}
+      registry={registry}
+      source={source}
+    />
   );
 }

@@ -1,6 +1,6 @@
 # REST reference
 
-This page renders the OpenAPI document that this deployment serves at `/api/v1/openapi.json`. The reference below is fetched by your browser when the page loads, so it always describes the API of the deployment you are looking at. Nothing in it is written by hand.
+This page renders the OpenAPI document that this deployment serves at `/api/v1/openapi.json`. The reference below is built from the same contract as that document when the site is built, so it describes the API of the deployment you are looking at. Nothing in it is written by hand.
 
 ## Reference
 

@@ -55,7 +55,6 @@ describe("docs client components", () => {
 
   it("finds the interactive parts of the shell", () => {
     expect(clientFiles.map((file) => file.slice(COMPONENTS.length + 1))).toEqual([
-      "api-reference.tsx",
       "copy-button.tsx",
       "docs-frame.tsx",
       "docs-nav.tsx",
