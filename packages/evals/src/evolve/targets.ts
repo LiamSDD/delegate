@@ -108,6 +108,7 @@ export const MISSION_TARGETS: Record<EvalMission, MissionTargets> = {
       "goalConnectors",
       "critic",
       "editor",
+      "goalCoverage",
     ],
     prompts: ["goalSynthesis"],
     playbooks: "goal-category",

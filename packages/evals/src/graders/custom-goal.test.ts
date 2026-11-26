@@ -63,6 +63,11 @@ const brief: GoalBrief = {
   rankFormula: "score = impact ÷ effort",
   generatedAt: AT,
   promptVersions: [],
+  verification: {
+    citationAccuracy: 1,
+    specificity: { score: 1, specific: 1, generic: 0, movedToContext: 0, dropped: 0 },
+    goalCoverage: { verdict: "answered", missing: [], reason: "", prompt: "goal-coverage@1" },
+  },
 };
 
 function log(drafts: Omit<RunEventDraft, "runId">[]): RunEvent[] {
@@ -150,5 +155,36 @@ describe("gradeCustomGoal", () => {
       pass: false,
     });
     expect(gradeCustomGoal(caseById("vague-ai"), runLog({ nope: true })).passedHard).toBe(false);
+  });
+
+  it("grades goal relevance as a soft check, so 100% citation accuracy cannot hide an off-topic brief", () => {
+    const offTopic: GoalBrief = {
+      ...brief,
+      verification: {
+        citationAccuracy: 1,
+        specificity: { score: 1, specific: 1, generic: 0, movedToContext: 0, dropped: 0 },
+        goalCoverage: {
+          verdict: "not_answered",
+          missing: ["marketing channels", "agentic workflows"],
+          reason: "The brief lists product facts only.",
+          prompt: "goal-coverage@1",
+        },
+      },
+    };
+    const grade = gradeCustomGoal(caseById("brand-only-lowercase"), runLog(offTopic));
+    expect(grade.checks.find((check) => check.check === "goal_answered")).toEqual({
+      check: "goal_answered",
+      pass: false,
+      detail: "not answered (goal-coverage@1); missing: marketing channels; agentic workflows",
+    });
+    expect(grade.passedHard).toBe(true);
+    expect(grade.score).toBeLessThan(1);
+
+    const { verification: _verification, ...ungraded } = brief;
+    expect(
+      gradeCustomGoal(caseById("brand-only-lowercase"), runLog(ungraded)).checks.find(
+        (check) => check.check === "goal_answered",
+      ),
+    ).toMatchObject({ pass: false, detail: "Goal coverage was not graded in this run" });
   });
 });

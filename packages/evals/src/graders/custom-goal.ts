@@ -18,6 +18,7 @@ export const CUSTOM_GOAL_CHECKS = [
   "claims_cited",
   "action_plan_present",
   "target_resolved",
+  "goal_answered",
 ] as const;
 export type CustomGoalCheck = (typeof CUSTOM_GOAL_CHECKS)[number];
 
@@ -153,6 +154,18 @@ export function gradeTarget(brief: GoalBrief, expected: ExpectedTarget): GoalChe
   }
 }
 
+export function gradeGoalCoverage(brief: GoalBrief): GoalCheckResult {
+  const coverage = brief.verification?.goalCoverage;
+  if (coverage === undefined)
+    return result("goal_answered", false, "Goal coverage was not graded in this run");
+  const missing = coverage.missing.length === 0 ? "" : `; missing: ${coverage.missing.join("; ")}`;
+  return result(
+    "goal_answered",
+    coverage.verdict === "answered",
+    `${coverage.verdict.replace("_", " ")} (${coverage.prompt})${missing}`,
+  );
+}
+
 export function targetParseMatches(evalCase: CustomGoalCase): boolean {
   const target = analyseGoal(evalCase.input.goal);
   const expected = evalCase.expected.target;
@@ -181,13 +194,19 @@ export function gradeCustomGoal(
   const parsed = GoalBriefSchema.safeParse(finalGoalBrief(events));
   if (!parsed.success) {
     checks.push(result("schema_valid", false, "No complete goal brief in the log"));
-    for (const check of ["claims_cited", "action_plan_present", "target_resolved"] as const)
+    for (const check of [
+      "claims_cited",
+      "action_plan_present",
+      "target_resolved",
+      "goal_answered",
+    ] as const)
       checks.push(result(check, false, "No brief to grade"));
   } else {
     checks.push(result("schema_valid", true, "Complete goal brief"));
     checks.push(gradeCitations(parsed.data));
     checks.push(gradeActions(parsed.data, evalCase.expected.minActions));
     checks.push(gradeTarget(parsed.data, evalCase.expected.target));
+    checks.push(gradeGoalCoverage(parsed.data));
   }
   const passedHard = checks
     .filter((check) => CUSTOM_GOAL_HARD_CHECKS.includes(check.check))
