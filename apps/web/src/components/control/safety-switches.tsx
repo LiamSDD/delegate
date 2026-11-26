@@ -225,7 +225,7 @@ export function SafetySwitches({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid rounded-xl border border-border bg-surface shadow-sm md:grid-cols-2">
+      <div className="grid grid-cols-1 rounded-xl border border-border bg-surface shadow-sm md:grid-cols-2">
         <PauseSwitch pausedAt={pausedAt} hasWorkspace={hasWorkspace} />
         <div className="min-w-0 border-t border-border md:border-t-0 md:border-l">
           <StopAll activeRuns={activeRuns} />

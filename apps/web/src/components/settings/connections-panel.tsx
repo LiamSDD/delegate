@@ -396,7 +396,7 @@ export function ConnectionsPanel({
             cannot be added. Servers without credentials still work.
           </p>
         )}
-        <form onSubmit={addConnector} className="grid max-w-3xl gap-3 md:grid-cols-2">
+        <form onSubmit={addConnector} className="grid grid-cols-1 max-w-3xl gap-3 md:grid-cols-2">
           <label className="flex flex-col gap-1.5 text-sm text-text-muted">
             Name
             <input

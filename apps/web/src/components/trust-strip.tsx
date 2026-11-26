@@ -67,7 +67,7 @@ function docLabel(path: string): string {
 
 export function TrustStrip() {
   return (
-    <ol className="grid border-b border-border sm:grid-cols-2 lg:grid-cols-4">
+    <ol className="grid grid-cols-1 border-b border-border sm:grid-cols-2 lg:grid-cols-4">
       {CLAIMS.map((item, index) => {
         const href = `${repoFileUrl(item.doc.path)}${item.doc.anchor === undefined ? "" : `#${item.doc.anchor}`}`;
         return (

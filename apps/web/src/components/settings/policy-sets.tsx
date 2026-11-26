@@ -179,7 +179,7 @@ export function PolicySets({
               {entry.policy.rules.map((rule, index) => (
                 <li
                   key={rule.id ?? `${rule.kind}-${String(index)}`}
-                  className="grid min-w-0 gap-2 border-b border-border px-3 py-3 last:border-b-0 md:grid-cols-[14rem_minmax(0,1fr)] md:gap-6"
+                  className="grid grid-cols-1 min-w-0 gap-2 border-b border-border px-3 py-3 last:border-b-0 md:grid-cols-[14rem_minmax(0,1fr)] md:gap-6"
                 >
                   <div className="flex min-w-0 flex-col gap-0.5">
                     <span className="text-sm font-medium text-text">{RULE_KIND[rule.kind]}</span>

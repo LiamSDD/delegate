@@ -101,7 +101,7 @@ function PlanRow({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <p
           className={cn(
-            "text-sm leading-5",
+            "text-sm leading-5 break-words",
             removed && "text-text-subtle line-through",
             !removed && status === "pending" ? "text-text-muted" : "text-text",
           )}
@@ -141,7 +141,7 @@ function PlanRow({
           </p>
         )}
         {view?.summary === null || view?.summary === undefined ? null : (
-          <p className="text-xs text-text-muted">{view.summary}</p>
+          <p className="text-xs break-words text-text-muted">{view.summary}</p>
         )}
       </div>
     </li>

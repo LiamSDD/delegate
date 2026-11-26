@@ -322,7 +322,7 @@ function Deliverable({ xray, ship }: { xray: RepoXray; ship: ShipContext }) {
             {responsibilities.map((module) => (
               <div
                 key={module.path}
-                className="grid gap-0.5 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)] sm:gap-3"
+                className="grid grid-cols-1 gap-0.5 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)] sm:gap-3"
               >
                 <dt className="truncate font-mono text-xs text-text" title={module.path}>
                   {module.path}
@@ -463,7 +463,7 @@ function Deliverable({ xray, ship }: { xray: RepoXray; ship: ShipContext }) {
                 )
                 .join(" · ")}
             </summary>
-            <ul className="mt-2 grid gap-x-4 gap-y-0.5 font-mono text-2xs sm:grid-cols-2">
+            <ul className="mt-2 grid grid-cols-1 gap-x-4 gap-y-0.5 font-mono text-2xs sm:grid-cols-2">
               {xray.dependencies.items.map((item) => (
                 <li
                   key={`${item.ecosystem}:${item.name}:${item.scope}:${citationLabel(item.citation)}`}

@@ -144,7 +144,7 @@ export function DocPage({ doc, registry }: { doc: LoadedDoc; registry: DocsRegis
             <nav
               aria-label="Previous and next page"
               data-print="hide"
-              className="grid gap-3 sm:grid-cols-2"
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2"
             >
               {previous === null ? null : <PagerLink entry={previous} direction="previous" />}
               {next === null ? null : <PagerLink entry={next} direction="next" />}

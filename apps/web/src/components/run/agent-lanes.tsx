@@ -65,7 +65,7 @@ function LaneCard({
         <span className="text-sm font-medium text-text">
           {lane.id === RUN_LANE ? "Orchestrator" : (lane.role ?? "agent")}
         </span>
-        <span className="truncate font-mono text-2xs text-text-subtle">
+        <span className="min-w-0 truncate font-mono text-2xs text-text-subtle">
           {lane.id === RUN_LANE ? "run" : lane.id}
         </span>
         <span className="ml-auto flex flex-wrap items-center gap-1.5">

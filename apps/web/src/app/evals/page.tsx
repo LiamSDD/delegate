@@ -525,7 +525,7 @@ function Redteam({ state }: { state: RedteamState }) {
   const { report } = state;
   const asr = report.attacks === 0 ? null : wilsonInterval(report.successes, report.attacks);
   return (
-    <div className="grid gap-6 rounded-xl border border-border bg-surface p-5 shadow-sm md:grid-cols-[16rem_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 gap-6 rounded-xl border border-border bg-surface p-5 shadow-sm md:grid-cols-[16rem_minmax(0,1fr)]">
       <div className="flex flex-col gap-2">
         <p className="font-mono text-2xs tracking-label text-text-subtle uppercase">
           Attack success rate

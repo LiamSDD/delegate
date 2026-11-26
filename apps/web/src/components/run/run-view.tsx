@@ -384,7 +384,7 @@ export function RunView({
           ))}
         </div>
 
-        <div className="grid gap-6 md:grid-cols-[15rem_minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)_minmax(0,1.15fr)] xl:grid-cols-[18rem_minmax(0,1fr)_minmax(0,1.25fr)] xl:gap-8">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-[15rem_minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)_minmax(0,1.15fr)] xl:grid-cols-[18rem_minmax(0,1fr)_minmax(0,1.25fr)] xl:gap-8">
           {pendingPlan === null ? null : (
             <div
               data-print="hide"

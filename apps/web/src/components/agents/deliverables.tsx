@@ -79,7 +79,7 @@ export function AssistantCard({
         <Stat label="retrieval" value={assistant.retrieval.mode} />
         <Stat label="eval pass rate" value={passRateLabel(passRate ?? assistant.passRate)} />
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <Eyebrow>Covers</Eyebrow>
           <ul className="flex list-disc flex-col gap-1 pl-4 text-sm text-text marker:text-accent">

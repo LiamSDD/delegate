@@ -124,7 +124,7 @@ export function UsagePanel({ usage }: { usage: WorkspaceUsage }) {
   );
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border shadow-sm md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border shadow-sm md:grid-cols-2">
         <Tile label="Runs against the guest quota" window="Last 60 minutes, and today (UTC)">
           <Figure
             value={`${formatCount(quota.lastHour)} of ${formatCount(quota.limitPerHour)}`}
