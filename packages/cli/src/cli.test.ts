@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { IDEMPOTENCY_KEY_HEADER, type Run } from "@delegate/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { HELP, runCli } from "./cli";
+import { HELP, OPTIONS, runCli } from "./cli";
 import { configPath, CONFIG_ENV, TOKEN_ENV, URL_ENV } from "./config";
 import { EXIT, EXIT_MEANINGS } from "./exit-codes";
 import { nodeFiles } from "./node-io";
@@ -87,6 +87,12 @@ function playRepoXray(api: FakeApi, run: Run, outcome: "completed" | "failed" | 
 }
 
 describe("delegate: usage", () => {
+  it("lists every parsed long option in the help text", () => {
+    for (const option of Object.keys(OPTIONS)) {
+      expect(HELP).toContain(`--${option}`);
+    }
+  });
+
   it("prints help and the version", async () => {
     const io = createTestIo();
     expect(await runCli(["--help"], io)).toBe(EXIT.ok);
