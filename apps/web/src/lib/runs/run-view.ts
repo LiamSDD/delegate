@@ -17,6 +17,7 @@ import {
   type PlanStep,
   type FallbackReason,
   foldRun,
+  type GoalCoverage,
   type ModelRole,
   type PolicyDecisionKind,
   type RunEvent,
@@ -182,6 +183,7 @@ export type RunView =
       planApproval: PlanApprovalView | null;
       lanes: Lane[];
       citation: CitationMetric | null;
+      goalCoverage?: GoalCoverage;
     }
   | { ok: false; error: string };
 
@@ -426,6 +428,16 @@ export function reportedCitationAccuracy(events: readonly RunEvent[]): CitationM
   return null;
 }
 
+export function reportedGoalCoverage(events: readonly RunEvent[]): GoalCoverage | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type !== "step.completed") continue;
+    const coverage = event.payload.critic?.goalCoverage;
+    if (coverage !== undefined) return coverage;
+  }
+  return undefined;
+}
+
 export function citationMetric(
   brief: BriefArtifact | null,
   audit: BriefArtifact | null,
@@ -589,5 +601,11 @@ export function buildRunView(events: readonly RunEvent[]): RunView {
     planApproval: planApprovalOf(events),
     lanes: buildLanes(events),
     citation: citationMetric(brief, audit, events),
+    ...goalCoverageField(events),
   };
+}
+
+function goalCoverageField(events: readonly RunEvent[]): { goalCoverage?: GoalCoverage } {
+  const coverage = reportedGoalCoverage(events);
+  return coverage === undefined ? {} : { goalCoverage: coverage };
 }
