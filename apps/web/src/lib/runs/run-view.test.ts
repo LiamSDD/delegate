@@ -10,6 +10,7 @@ import {
   formatDuration,
   hostFromSummary,
   modelMix,
+  reportedGoalCoverage,
 } from "./run-view";
 
 const runId = "run-1";
@@ -273,5 +274,47 @@ describe("selectors", () => {
     expect(hostFromSummary("GET https://www.acme.com/a?b")).toBe("acme.com");
     expect(hostFromSummary("acme.com/sitemap.xml")).toBe("acme.com");
     expect(hostFromSummary("query: pricing")).toBeNull();
+  });
+});
+
+describe("reportedGoalCoverage", () => {
+  const report = {
+    claimsChecked: 3,
+    supported: 3,
+    fixed: 0,
+    removed: 0,
+    unverified: 0,
+    fixLoops: 0,
+    citationAccuracy: 1,
+    draftCitationAccuracy: 1,
+  };
+
+  it("reads the latest critic's goal coverage so the top bar shows it beside citation accuracy", () => {
+    seq = 0;
+    const coverage = {
+      verdict: "not_answered" as const,
+      missing: ["reasons for the choice"],
+      reason: "Off topic.",
+      prompt: "goal-coverage@1",
+    };
+    const events = [
+      ev(
+        "step.completed",
+        { outcome: "succeeded", summary: "ok", artifactIds: [], critic: report },
+        { stepId: "critic" },
+      ),
+      ev(
+        "step.completed",
+        {
+          outcome: "succeeded",
+          summary: "ok",
+          artifactIds: [],
+          critic: { ...report, goalCoverage: coverage },
+        },
+        { stepId: "critic" },
+      ),
+    ];
+    expect(reportedGoalCoverage(events)).toEqual(coverage);
+    expect(reportedGoalCoverage(events.slice(0, 1))).toBeUndefined();
   });
 });

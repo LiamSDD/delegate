@@ -1,6 +1,6 @@
 import { type RepoAnalysis } from "./analysis";
 import { headCitation, lineCitation } from "./evidence";
-import { isTestFile, type RiskyKind } from "./scan";
+import { type RiskyKind } from "./scan";
 import { type Hotspot } from "./schema";
 import { type RepoSnapshot } from "./snapshot";
 
@@ -80,22 +80,21 @@ export function buildHotspots(snapshot: RepoSnapshot, analysis: RepoAnalysis): H
     });
   }
   const secretsByFile = new Map<string, typeof snapshot.secrets>();
+  const fixtureSecrets = snapshot.secrets.filter((secret) => secret.confidence === "low");
   for (const secret of snapshot.secrets)
-    secretsByFile.set(secret.path, [...(secretsByFile.get(secret.path) ?? []), secret]);
+    if (secret.confidence === "high")
+      secretsByFile.set(secret.path, [...(secretsByFile.get(secret.path) ?? []), secret]);
   for (const [path, secrets] of [...secretsByFile.entries()].slice(0, HOTSPOT_LIMITS.secrets)) {
     hotspots.push({
       id: `secret:${path}`.slice(0, 60),
       kind: "secret-like",
-      severity: isTestFile(path)
-        ? "low"
-        : secrets.some((secret) => secret.kind !== "generic-assignment")
-          ? "high"
-          : "medium",
+      severity: secrets.some((secret) => secret.kind !== "generic-assignment") ? "high" : "medium",
       title: `Secret-like value committed in ${path}`,
       detail: `${secrets.length} value${secrets.length === 1 ? "" : "s"} matching ${[...new Set(secrets.map((secret) => secret.kind))].join(", ")} patterns. Values are redacted here; if real, rotate them and move them to environment configuration.`,
       citations: secrets.slice(0, 3).map((secret) => lineCitation(path, secret.line)),
     });
   }
+  const fixtureHotspot = fixtureTokensHotspot(fixtureSecrets);
   for (const risk of analysis.dependencyRisks.slice(0, HOTSPOT_LIMITS.dependencies))
     hotspots.push({
       id: `dep:${risk.dependency.ecosystem}:${risk.dependency.name}`.slice(0, 60),
@@ -141,7 +140,33 @@ export function buildHotspots(snapshot: RepoSnapshot, analysis: RepoAnalysis): H
       citations: hits.slice(0, 3).map((hit) => lineCitation(hit.path, hit.line)),
     });
   const order = { high: 0, medium: 1, low: 2 };
-  return hotspots
+  const ranked = hotspots
     .sort((a, b) => order[a.severity] - order[b.severity])
-    .slice(0, HOTSPOT_LIMITS.total);
+    .slice(0, HOTSPOT_LIMITS.total - (fixtureHotspot === null ? 0 : 1));
+  return fixtureHotspot === null ? ranked : [...ranked, fixtureHotspot];
+}
+
+export const FIXTURE_TOKENS_HOTSPOT_ID = "secret:fixture-tokens";
+
+function fixtureTokensHotspot(secrets: RepoSnapshot["secrets"]): Hotspot | null {
+  const first = secrets[0];
+  if (first === undefined) return null;
+  const files = new Set(secrets.map((secret) => secret.path));
+  const perFile = new Map<string, (typeof secrets)[number]>();
+  for (const secret of secrets) if (!perFile.has(secret.path)) perFile.set(secret.path, secret);
+  return {
+    id: FIXTURE_TOKENS_HOTSPOT_ID,
+    kind: "secret-like",
+    severity: "low",
+    title: `Test fixture tokens, verify not real (${secrets.length} value${secrets.length === 1 ? "" : "s"} in ${files.size} file${files.size === 1 ? "" : "s"})`,
+    detail:
+      "Secret-like values in test, fixture, example or mock paths, or with placeholder text (words such as test, fake or example, or dictionary words plus digits). They were redacted and are not ranked as improvements; check that none is a real credential.",
+    citations: [...perFile.values()]
+      .slice(0, 6)
+      .map((secret) => lineCitation(secret.path, secret.line)),
+  };
+}
+
+export function rankableHotspots(hotspots: readonly Hotspot[]): Hotspot[] {
+  return hotspots.filter((hotspot) => hotspot.id !== FIXTURE_TOKENS_HOTSPOT_ID);
 }

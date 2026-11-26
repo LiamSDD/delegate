@@ -4,6 +4,7 @@ import { detectInjection } from "../../quarantine/reader";
 import { isSafePath } from "./analysis";
 import { resolveCitations, type Evidence } from "./evidence";
 import { IMPROVEMENT_EFFORTS, IMPROVEMENT_KINDS, type RepoImprovement } from "./schema";
+import { isFixturePath } from "./secrets";
 import { type RepoSnapshot } from "./snapshot";
 
 const DraftClaimSchema = z.object({
@@ -99,6 +100,7 @@ export interface DraftIssues {
   unresolved: string[];
   instructionLike: string[];
   unknownFiles: string[];
+  fixtureSecrets: string[];
 }
 
 export function emptyIssues(): DraftIssues {
@@ -109,6 +111,7 @@ export function emptyIssues(): DraftIssues {
     unresolved: [],
     instructionLike: [],
     unknownFiles: [],
+    fixtureSecrets: [],
   };
 }
 
@@ -218,6 +221,20 @@ export function pathHints(snapshot: RepoSnapshot, maxFiles: number): PathHints {
   };
 }
 
+const SECRET_WORDS =
+  /\b(secrets?|tokens?|credentials?|api[ _-]?keys?|access[ _-]?keys?|passwords?)\b|secret-like/i;
+
+function rotatesFixtureSecret(
+  draft: { kind: string; title: string; rationale: string },
+  files: readonly string[],
+): boolean {
+  return (
+    draft.kind === "security" &&
+    SECRET_WORDS.test(`${draft.title} ${draft.rationale}`) &&
+    files.every(isFixturePath)
+  );
+}
+
 export function normaliseImprovements(
   output: z.infer<typeof ImprovementsDraftOutputSchema>,
   evidence: ReadonlyMap<string, Evidence>,
@@ -256,6 +273,10 @@ export function normaliseImprovements(
       return ok;
     });
     if (files.length === 0) continue;
+    if (rotatesFixtureSecret(draft, files)) {
+      issues.fixtureSecrets.push(draft.title);
+      continue;
+    }
     improvements.push({
       title: draft.title,
       rationale: draft.rationale,
@@ -297,6 +318,10 @@ export function improvementFeedback(
     ...issues.instructionLike.map(
       (text) =>
         `- Discarded text with a URL or download command: ${JSON.stringify(text.slice(0, 80))}`,
+    ),
+    ...issues.fixtureSecrets.map(
+      (title) =>
+        `- Discarded ${JSON.stringify(title.slice(0, 80))}: secret-like values only in test, fixture or example files are fixtures, reported as a minor hotspot; propose other work`,
     ),
   ];
   const directories = pathHints(snapshot, 0).testDirectories;

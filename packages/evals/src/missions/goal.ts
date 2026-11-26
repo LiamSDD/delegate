@@ -1,4 +1,4 @@
-import { GoalBriefSchema, type RunEvent } from "@delegate/runtime";
+import { GoalBriefSchema, type GoalBrief, type RunEvent } from "@delegate/runtime";
 
 import {
   CUSTOM_GOAL_DATASET,
@@ -17,6 +17,13 @@ import {
 } from "../graders/run-metrics";
 import { rubricVerdictSchema } from "../judge/rubric-judge";
 import { linkCheck, type MissionAdapter } from "./adapter";
+
+const GOAL_COVERAGE_SCORE = { answered: 1, partly: 0.5, not_answered: 0 } as const;
+
+function goalCoverageMetric(brief: GoalBrief): { goalCoverage?: number } {
+  const coverage = brief.verification?.goalCoverage;
+  return coverage === undefined ? {} : { goalCoverage: GOAL_COVERAGE_SCORE[coverage.verdict] };
+}
 
 export const GOAL_JUDGE_CRITERIA = [
   "relevance",
@@ -96,6 +103,7 @@ export const goalMission: MissionAdapter<CustomGoalCase, undefined> = {
     "goalConnectors",
     "critic",
     "editor",
+    "goalCoverage",
   ],
   defaultTargets: { maxLatencyMs: 240_000, maxCostMicroUsd: 0, maxTokens: 300_000 },
   hardDeadlineMs: 600_000,
@@ -130,6 +138,7 @@ export const goalMission: MissionAdapter<CustomGoalCase, undefined> = {
             sources: brief.data.sources.length,
             targetResolved:
               checks.find((c) => c.kind === "target_resolved")?.passed === true ? 1 : 0,
+            ...goalCoverageMetric(brief.data),
           }
         : {},
       serving: servingFrom(events),

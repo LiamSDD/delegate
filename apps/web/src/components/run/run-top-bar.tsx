@@ -4,6 +4,8 @@ import { Activity, RefreshCw, Square } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import type { GoalCoverage } from "@delegate/runtime";
+
 import { missionLabel } from "@/lib/m2-contract";
 import {
   type CitationMetric,
@@ -83,6 +85,27 @@ function CitationBadge({ metric }: { metric: CitationMetric | null }) {
       <Chip tone={all ? "success" : "warning"}>
         {metric.resolved}/{metric.total} resolved
       </Chip>
+    </span>
+  );
+}
+
+const COVERAGE_BADGE: Record<GoalCoverage["verdict"], { label: string; tone: Tone }> = {
+  answered: { label: "answered", tone: "success" },
+  partly: { label: "partly", tone: "warning" },
+  not_answered: { label: "not answered", tone: "danger" },
+};
+
+function GoalCoverageBadge({ coverage }: { coverage: GoalCoverage }) {
+  const badge = COVERAGE_BADGE[coverage.verdict];
+  return (
+    <span
+      title={
+        coverage.missing.length === 0
+          ? "Whether the deliverable answers the goal, graded separately from citation accuracy"
+          : `Missing: ${coverage.missing.join("; ")}`
+      }
+    >
+      <Chip tone={badge.tone}>{badge.label}</Chip>
     </span>
   );
 }
@@ -228,6 +251,11 @@ export function RunTopBar({
           <Metric label="Citation accuracy">
             <CitationBadge metric={view.citation} />
           </Metric>
+          {view.goalCoverage === undefined ? null : (
+            <Metric label="Goal coverage">
+              <GoalCoverageBadge coverage={view.goalCoverage} />
+            </Metric>
+          )}
           <Metric label="Models" className="col-span-2 sm:col-span-3 lg:col-span-1">
             {view.modelMix.length === 0 ? (
               <span className="text-text-muted">none yet</span>

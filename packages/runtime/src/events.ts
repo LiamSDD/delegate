@@ -213,6 +213,19 @@ export const SpecificityReportSchema = z.object({
 });
 export type SpecificityReport = z.infer<typeof SpecificityReportSchema>;
 
+export const GOAL_COVERAGE_VERDICTS = ["answered", "partly", "not_answered"] as const;
+export const GoalCoverageVerdictSchema = z.enum(GOAL_COVERAGE_VERDICTS);
+export type GoalCoverageVerdict = z.infer<typeof GoalCoverageVerdictSchema>;
+
+export const GoalCoverageSchema = z.object({
+  verdict: GoalCoverageVerdictSchema,
+  missing: z.array(z.string().min(1).max(160)).max(6),
+  reason: z.string().max(400),
+  prompt: z.string().min(1).max(80),
+  researched: z.boolean().optional(),
+});
+export type GoalCoverage = z.infer<typeof GoalCoverageSchema>;
+
 export const CriticReportSchema = z.object({
   claimsChecked: tokenCount,
   supported: tokenCount,
@@ -227,6 +240,7 @@ export const CriticReportSchema = z.object({
   split: tokenCount.optional(),
   genericRemoved: tokenCount.optional(),
   specificity: SpecificityReportSchema.optional(),
+  goalCoverage: GoalCoverageSchema.optional(),
 });
 export type CriticReport = z.infer<typeof CriticReportSchema>;
 
@@ -264,6 +278,7 @@ export const DeliverableVerificationSchema = z.object({
   publishedAccuracy: z.number().min(0).max(1).nullable().optional(),
   specificity: SpecificityReportSchema,
   research: ResearchReportSchema.optional(),
+  goalCoverage: GoalCoverageSchema.optional(),
 });
 export type DeliverableVerification = z.infer<typeof DeliverableVerificationSchema>;
 

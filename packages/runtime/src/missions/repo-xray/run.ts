@@ -65,7 +65,7 @@ import {
   type DocFact,
   type Evidence,
 } from "./evidence";
-import { buildHotspots } from "./hotspots";
+import { buildHotspots, rankableHotspots } from "./hotspots";
 import { type RepoXrayInput } from "./input";
 import { REPO_PLAN, REPO_PLANNING_HINTS, REPO_STEP_IDS } from "./plan";
 import {
@@ -375,6 +375,15 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
         "warn",
         "injection_suspected",
       );
+    if (issues.fixtureSecrets.length > 0)
+      await flag(
+        stepId,
+        `fixture-secrets:${source}`,
+        issues.fixtureSecrets.slice(0, 4).join(" | "),
+        "Removed: rotating secret-like values that live only in test, fixture or example files is not ranked; they are listed as test fixture tokens to verify",
+        "info",
+        "claim",
+      );
     if (issues.unknownFiles.length > 0)
       await flag(
         stepId,
@@ -398,7 +407,7 @@ export function createRepoXrayMission(deps: RepoXrayDependencies): PlannedMissio
     state.evidence ??= buildEvidence(
       snapshot,
       analysis,
-      state.hotspots.flatMap((hotspot) => {
+      rankableHotspots(state.hotspots).flatMap((hotspot) => {
         const citation = hotspot.citations[0];
         return citation === undefined
           ? []

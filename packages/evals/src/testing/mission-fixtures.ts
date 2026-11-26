@@ -181,6 +181,16 @@ export function fixtureGoalBrief(evalCase: CustomGoalCase): GoalBrief {
     rankFormula: "score = impact ÷ effort",
     generatedAt: FIXTURE_AT,
     promptVersions: [],
+    verification: {
+      citationAccuracy: 1,
+      specificity: { score: 1, specific: 1, generic: 0, movedToContext: 0, dropped: 0 },
+      goalCoverage: {
+        verdict: "answered",
+        missing: [],
+        reason: "The fixture brief addresses the goal.",
+        prompt: "goal-coverage@1",
+      },
+    },
   };
 }
 

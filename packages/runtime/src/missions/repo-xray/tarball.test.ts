@@ -184,8 +184,8 @@ describe("snapshotFromTarball", () => {
     expect(text).not.toContain(token);
     expect(text).toContain("[redacted:secret]");
     expect(snapshot.secrets).toEqual([
-      { kind: "aws-access-key", path: "config.js", line: 2 },
-      { kind: "github-token", path: "config.js", line: 3 },
+      { kind: "aws-access-key", path: "config.js", line: 2, confidence: "high" },
+      { kind: "github-token", path: "config.js", line: 3, confidence: "high" },
     ]);
   });
 });

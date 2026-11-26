@@ -1,5 +1,5 @@
 import { normaliseEntryPath, readTarGz, type TarDecision, type TarEntry } from "./tarball";
-import { redactSecrets, type SecretKind } from "./secrets";
+import { assessSecret, redactSecrets, type SecretAssessment, type SecretKind } from "./secrets";
 
 export const SNAPSHOT_LIMITS = {
   maxCompressedBytes: 25 * 1024 * 1024,
@@ -146,11 +146,11 @@ export interface SkippedFile {
   bytes: number;
 }
 
-export interface SecretFinding {
+export type SecretFinding = {
   kind: SecretKind;
   path: string;
   line: number;
-}
+} & SecretAssessment;
 
 export interface RepoCoordinates {
   owner: string;
@@ -267,7 +267,8 @@ export async function snapshotFromTarball(
       continue;
     }
     const redacted = redactSecrets(text);
-    for (const hit of redacted.hits) secrets.push({ kind: hit.kind, path, line: hit.line });
+    for (const hit of redacted.hits)
+      secrets.push({ kind: hit.kind, path, line: hit.line, ...assessSecret(path, hit) });
     files.set(path, {
       path,
       text: redacted.text,

@@ -3,7 +3,7 @@
 import { Check, Copy, FileWarning } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { missionLabel } from "@/lib/m2-contract";
+import { missionLabel, type GoalBriefDraft } from "@/lib/m2-contract";
 import { type CitationTarget } from "@/lib/runs/brief";
 import {
   goalBriefToMarkdown,
@@ -14,7 +14,7 @@ import {
 import type { BriefArtifact } from "@/lib/runs/run-view";
 
 import { CitationMarker } from "./brief-panel";
-import { actionButton, Chip, Eyebrow } from "./primitives";
+import { actionButton, Chip, Eyebrow, type Tone } from "./primitives";
 import { PartialNotice } from "./partial-notice";
 
 function Cites({
@@ -28,6 +28,33 @@ function Cites({
     const target = index.get(sourceId);
     return target === undefined ? null : <CitationMarker key={sourceId} target={target} />;
   });
+}
+
+type GoalCoverage = NonNullable<NonNullable<GoalBriefDraft["verification"]>["goalCoverage"]>;
+
+const COVERAGE_TEXT: Record<GoalCoverage["verdict"], { label: string; tone: Tone }> = {
+  answered: { label: "goal answered", tone: "success" },
+  partly: { label: "goal partly answered", tone: "warning" },
+  not_answered: { label: "goal not answered", tone: "danger" },
+};
+
+function GoalCoverageLine({ coverage }: { coverage: GoalCoverage }) {
+  const text = COVERAGE_TEXT[coverage.verdict];
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="flex flex-wrap items-center gap-1.5 font-mono text-2xs text-text-subtle">
+        <span>Goal coverage</span>
+        <Chip tone={text.tone}>{text.label}</Chip>
+        {coverage.researched === true ? <span>after a targeted research round</span> : null}
+      </p>
+      {coverage.verdict === "answered" ? null : (
+        <p className="text-xs text-text-muted">
+          {coverage.reason === "" ? null : `${coverage.reason} `}
+          {coverage.missing.length === 0 ? null : `Missing: ${coverage.missing.join("; ")}.`}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function Heading({ id, children }: { id: string; children: string }) {
@@ -167,6 +194,9 @@ export function GoalBriefPanel({
                   ? ""
                   : ` · ${String(brief.verification.research.rounds.length)} research round${brief.verification.research.rounds.length === 1 ? "" : "s"}`}
               </p>
+            )}
+            {brief.verification?.goalCoverage === undefined ? null : (
+              <GoalCoverageLine coverage={brief.verification.goalCoverage} />
             )}
           </div>
 
