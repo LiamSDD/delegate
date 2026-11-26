@@ -4,6 +4,10 @@
 
 Paste a company URL, a GitHub repo or a goal. Delegate plans the work, runs specialist agents in parallel, verifies every claim against its source, asks before anything risky happens, and records every step so the run can be replayed, forked and evaluated.
 
+<a href="https://github.com/LiamSDD/LiamSDD/blob/main/assets/demos/delegate-demo-1080p60.mp4"><img src="docs/images/demo-loop.gif" alt="Delegate demo: a goal goes in, the plan is approved, agents work in parallel and every claim comes back cited" width="100%"></a>
+
+**[Watch the 60-second demo](https://github.com/LiamSDD/LiamSDD/blob/main/assets/demos/delegate-demo-1080p60.mp4)**: real live runs on the free model chain, with only the waiting sped up.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/home-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/images/home-light.png">
