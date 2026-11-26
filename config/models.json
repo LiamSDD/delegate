@@ -213,7 +213,7 @@
         "model": "gpt-oss:20b",
         "contextWindow": 32768,
         "supportsTools": true,
-        "quirks": ["num-ctx-must-be-set"],
+        "quirks": ["num-ctx-must-be-set", "json-object"],
         "unverified": true
       },
       {
@@ -305,7 +305,7 @@
         "model": "gpt-oss:20b",
         "contextWindow": 32768,
         "supportsTools": true,
-        "quirks": ["num-ctx-must-be-set"],
+        "quirks": ["num-ctx-must-be-set", "json-object"],
         "unverified": true
       },
       {
@@ -413,7 +413,7 @@
         "model": "qwen3:8b",
         "contextWindow": 32768,
         "supportsTools": true,
-        "quirks": ["num-ctx-must-be-set"],
+        "quirks": ["num-ctx-must-be-set", "json-object"],
         "unverified": true
       },
       {

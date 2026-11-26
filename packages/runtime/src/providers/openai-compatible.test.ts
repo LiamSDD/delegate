@@ -390,6 +390,70 @@ describe("OpenAI-compatible adapter", () => {
     expect("chat_template_kwargs" in (captured[1]?.body ?? {})).toBe(false);
   });
 
+  it("sends JSON mode only when the request asks for a JSON object", async () => {
+    const captured: Captured[] = [];
+    const provider = createOpenAICompatibleProvider({
+      id: "ollama",
+      baseUrl: "http://localhost:11434/v1",
+      fetch: fakeFetch(() => sseResponse(fixture("text.sse")), captured),
+    });
+    await collect(provider.stream({ ...request, responseFormat: { type: "json_object" } }));
+    await collect(provider.stream(request));
+    expect(captured[0]?.body.response_format).toEqual({ type: "json_object" });
+    expect("response_format" in (captured[1]?.body ?? {})).toBe(false);
+  });
+
+  it.each([400, 422])(
+    "retries once without JSON mode when the provider rejects it with %i and remembers that per model",
+    async (status) => {
+      const captured: Captured[] = [];
+      const provider = createOpenAICompatibleProvider({
+        id: "p",
+        baseUrl: "https://p.test/v1",
+        fetch: (input, init) => {
+          const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<
+            string,
+            unknown
+          >;
+          const url = input instanceof Request ? input.url : String(input);
+          captured.push({ url, headers: new Headers(init?.headers), body });
+          return Promise.resolve(
+            "response_format" in body
+              ? new Response('{"error":{"message":"response_format is not supported"}}', { status })
+              : sseResponse(fixture("text.sse")),
+          );
+        },
+      });
+      const json = { ...request, responseFormat: { type: "json_object" as const } };
+      const first = await collect(provider.stream(json));
+      expect(first.at(-1)).toMatchObject({ type: "stop", reason: "end" });
+      await collect(provider.stream(json));
+      await collect(provider.stream({ ...json, model: "another-model" }));
+      expect(captured.map((call) => "response_format" in call.body)).toEqual([
+        true,
+        false,
+        false,
+        true,
+        false,
+      ]);
+    },
+  );
+
+  it("does not retry a 400 that is not about JSON mode", async () => {
+    const captured: Captured[] = [];
+    const provider = createOpenAICompatibleProvider({
+      id: "p",
+      baseUrl: "https://p.test/v1",
+      fetch: fakeFetch(() => new Response("messages: field required", { status: 400 }), captured),
+    });
+    const error = await collect(
+      provider.stream({ ...request, responseFormat: { type: "json_object" } }),
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProviderHttpError);
+    expect(error).toMatchObject({ status: 400 });
+    expect(captured).toHaveLength(1);
+  });
+
   it("assembles multiple interleaved tool calls and reasoning", async () => {
     const provider = createOpenAICompatibleProvider({
       id: "nvidia",

@@ -1,0 +1,1 @@
+{"name": "Acme Helper", "tone": "friendly", "maxAnswerSentences": 12, "topics": ["pricing", "leasing"], "escalate": true}

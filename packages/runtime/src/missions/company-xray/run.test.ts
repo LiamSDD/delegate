@@ -5,9 +5,10 @@ import { describe, expect, it } from "vitest";
 import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
 import { createMemoryPlaybookStore, type PlaybookStore } from "../../learning/store";
 import { type AwaitPlanApproval } from "../../plan-approval";
-import { runMission } from "../../server";
+import { runMission, type RunMissionOptions } from "../../server";
 import { NextActionsSchema } from "../next-actions";
 import { FIXTURE_ORIGIN, fixtureDns, fixtureFetch } from "../../testing/fixture-site";
+import { maxQualityNotes, maxQualityRun, stepsServedOffline } from "../../testing/max-quality";
 import { CompanyXrayBriefSchema, SECTION_KEYS, type CompanyXrayBrief } from "./brief";
 
 const POLLINATIONS = "https://text.pollinations.ai/openai";
@@ -233,6 +234,7 @@ async function runFixture(
     awaitPlanApproval?: AwaitPlanApproval;
     playbooks?: PlaybookStore;
     runId?: string;
+    mission?: Partial<RunMissionOptions>;
   } = {},
 ): Promise<Harness & { status: string }> {
   const providerBodies: WireBody[] = [];
@@ -293,6 +295,7 @@ async function runFixture(
       ? {}
       : { awaitPlanApproval: options.awaitPlanApproval }),
     ...(options.playbooks === undefined ? {} : { playbooks: options.playbooks }),
+    ...options.mission,
   });
   return { status: result.status, events, requested: site.requested, providerBodies };
 }
@@ -411,6 +414,13 @@ describe("runMission company-xray end to end (fixture site, fake provider over H
       SECTION_KEYS.length + 1,
     );
     expect(events.at(-1)?.type).toBe("run.completed");
+  });
+
+  it("routes only the synthesis step to the offline entry in max quality", async () => {
+    const { status, events } = await runFixture({ mission: maxQualityRun(unthrottledConfig) });
+    expect(status).toBe("completed");
+    expect(stepsServedOffline(events)).toEqual(["synthesise"]);
+    expect(maxQualityNotes(events)).toEqual(["synthesise"]);
   });
 
   it("flags the hidden injection, denies the metadata fetch it asked for and never contacts that host", async () => {

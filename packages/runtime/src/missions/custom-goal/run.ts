@@ -22,6 +22,7 @@ import {
   type SubAgentTask,
 } from "../../agent/subagent";
 import { callStructuredReviewed } from "../../agent/structured";
+import { type TeamHandle } from "../../agent/team";
 import {
   mentionsTarget,
   specificityScore,
@@ -89,7 +90,7 @@ import {
 } from "./schema";
 import { analyseGoal } from "./target";
 import { goalReaderTask } from "./task";
-import { createCompanyResolver, createReferenceSearch } from "./tools";
+import { GOAL_TOOL_LIMITS, createCompanyResolver, createReferenceSearch } from "./tools";
 
 export interface CustomGoalPrompts {
   reader: PromptFile;
@@ -127,7 +128,15 @@ export const GOAL_LIMITS = {
   deepRounds: 2,
   deepTargetsPerRound: 4,
   criticReserveMs: 45_000,
+  topicTeamSize: 3,
+  topicMemberTokens: 20_000,
+  topicMemberMs: 60_000,
 } as const;
+
+export function referenceShare(members: number, index: number): number {
+  const total = GOAL_TOOL_LIMITS.referenceSources;
+  return Math.floor(total / members) + (index < total % members ? 1 : 0);
+}
 
 const ConnectorOutputSchema = z.object({
   host: z.string().min(1),
@@ -370,10 +379,14 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       caller(),
     );
 
-  const read = (stepId: string, documents: readonly SourceDocument[]) => {
+  const read = (
+    stepId: string,
+    documents: readonly SourceDocument[],
+    runCtx: RunContext = researchCtx,
+  ) => {
     const entry = chainHead(ctx, "fast");
     if (entry === undefined) throw new NoModelAvailableError("fast", []);
-    return readUntrusted(researchCtx, {
+    return readUntrusted(runCtx, {
       stepId,
       task: readerTask(),
       systemPrompt: prompts.reader.body,
@@ -567,19 +580,99 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     run: (task) => delegate(task, GOAL_STEP_IDS.read),
   };
 
+  const researchTopicsAsTeam = async (
+    task: SubAgentTask,
+    team: TeamHandle,
+  ): Promise<SubAgentResult | undefined> => {
+    const queries = target.queries.slice(0, team.declared.size);
+    const about = company?.name;
+    const outcome = await team.run({
+      ctx: researchCtx,
+      role: "researcher",
+      modelRole: "fast",
+      assignments: queries.map((query, index) => ({
+        id: `topic_${index + 1}`,
+        objective:
+          about === undefined
+            ? `Research "${query}" in public reference sources`
+            : `Research ${about} and "${query}" in public reference sources`,
+      })),
+      member: async (member) => {
+        const query = queries[member.index] ?? "";
+        const search = createReferenceSearch(deps.fetcher, store, member.ctx.signal);
+        const searched = await executeToolCall(
+          member.ctx,
+          member.grant,
+          [search.tool],
+          {
+            name: search.tool.name,
+            argumentsJson: JSON.stringify(
+              about === undefined ? { queries: [query] } : { queries: [query], target: about },
+            ),
+          },
+          caller(),
+        );
+        const documents = search.created().slice(0, referenceShare(queries.length, member.index));
+        if (documents.length === 0) {
+          await member.agent.say(`No reference article matched "${query}".`);
+          return {
+            ...skipped("No reference sources found", 0.4),
+            artifacts: artifactsOf([searched]),
+          };
+        }
+        const readings = await read(task.step.id, documents, member.ctx);
+        const facts = readings.flatMap((reading) => reading.facts);
+        await member.agent.say(
+          `Read ${plural(documents.length, "reference article")} for "${query}" in quarantine: kept ${plural(facts.length, "fact")} with verbatim quotes.`,
+        );
+        return {
+          summary: `${plural(documents.length, "reference source")}, ${plural(facts.length, "fact")}`,
+          findings: facts.map(factToFinding),
+          sources: documents.map((document) => document.record),
+          confidence: facts.length > 0 ? 0.8 : 0.4,
+          artifacts: artifactsOf([searched]),
+        };
+      },
+    });
+    const merged = outcome.result;
+    const finished = outcome.members.filter((member) => member.status === "finished").length;
+    if (merged.sources.length === 0) {
+      if (about !== undefined) return undefined;
+      await task.agent.say(`No reference articles matched ${queries.join("; ")}.`);
+      return { ...skipped("No reference sources found", 0.4), artifacts: merged.artifacts };
+    }
+    await task.agent.say(
+      `A team of ${queries.length} researched ${queries.map((query) => `"${query}"`).join(", ")}${about === undefined ? "" : ` for ${about}`}: ${finished} finished, ${plural(merged.sources.length, "reference article")} read in quarantine, ${plural(merged.findings.length, "fact")} kept.`,
+    );
+    return {
+      ...merged,
+      summary: `${plural(merged.sources.length, "reference source")}, ${plural(merged.findings.length, "fact")} from a team of ${queries.length}`,
+      confidence: merged.findings.length > 0 ? 0.8 : 0.4,
+    };
+  };
+
   const topic: StepExecutor = {
     id: GOAL_STEP_IDS.topic,
     role: "researcher",
     modelRole: "fast",
     capabilities: [CAPABILITIES.webFetch],
     required: true,
+    team: { maxMembers: GOAL_LIMITS.topicTeamSize, reducers: ["merge_findings"] },
     description:
       "Search English Wikipedia for the goal's topics (keyless) and read the best matches through the quarantined reader.",
     run: async (task) => {
       if (target.queries.length === 0)
         return skipped("The goal has no searchable topic words.", 0.4);
       const outcomes: ToolCallOutcome[] = [];
-      if (company !== null) {
+      const team = target.queries.length >= 2 ? task.team : undefined;
+      if (team !== undefined) {
+        const result = await researchTopicsAsTeam(task, team);
+        if (result !== undefined) return result;
+        await task.agent.say(
+          `No reference article about ${company?.name ?? "the company"} and ${target.queries.join("; ")} was found; general topic articles are used as background only.`,
+        );
+      }
+      if (company !== null && team === undefined) {
         outcomes.push(
           await runTool(
             task,
@@ -1133,6 +1226,19 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
   const defaultPlan = defaultGoalPlan(
     target.domain !== null || target.brands.length > 0,
     hasConnectors,
+  ).map((step) =>
+    step.id !== GOAL_STEP_IDS.topic || target.queries.length < 2
+      ? step
+      : {
+          ...step,
+          team: {
+            size: Math.min(GOAL_LIMITS.topicTeamSize, target.queries.length),
+            from: GOAL_STEP_IDS.resolve,
+            reducer: "merge_findings" as const,
+            memberTokens: GOAL_LIMITS.topicMemberTokens,
+            memberMs: GOAL_LIMITS.topicMemberMs,
+          },
+        },
   );
   return {
     planner: {

@@ -1,0 +1,2 @@
+Following the shape {picks: [...], reason: ...} my answer is:
+{"picks": ["C1", "C4", "C7"], "reason": "C1 and C4 cite the pricing page; C7 is the only candidate about returns."}

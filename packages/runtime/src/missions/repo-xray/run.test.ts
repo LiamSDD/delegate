@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../../events";
-import { resumeMission, runMission } from "../../server";
+import { resumeMission, runMission, type RunMissionOptions } from "../../server";
+import { maxQualityNotes, maxQualityRun, stepsServedOffline } from "../../testing/max-quality";
 import { repoTarGz } from "../../testing/tarball";
 import { NextActionsSchema } from "../next-actions";
 import { archiveUrl } from "./archive";
@@ -241,7 +242,11 @@ function criticReply(user: string): Response {
 
 async function runRepo(
   files: Record<string, string>,
-  options: { hardDeadlineMs?: number; killAt?: string } = {},
+  options: {
+    hardDeadlineMs?: number;
+    killAt?: string;
+    mission?: Partial<RunMissionOptions>;
+  } = {},
 ) {
   const bodies: WireBody[] = [];
   const requested: string[] = [];
@@ -281,6 +286,7 @@ async function runRepo(
     sleep: () => Promise.resolve(),
     modelsConfig: unthrottledConfig,
     ...(options.hardDeadlineMs === undefined ? {} : { hardDeadlineMs: options.hardDeadlineMs }),
+    ...options.mission,
   };
   append({
     runId: "run_repo",
@@ -481,6 +487,15 @@ describe("Repo X-ray end to end with a scripted model", () => {
     expect(actions.actions).toEqual([
       expect.objectContaining({ id: "ship-a-pr", missionId: "ship-a-pr", available: false }),
     ]);
+  });
+});
+
+describe("Repo X-ray in max quality", () => {
+  it("routes only the design and ranking steps to the offline entry, whatever role they ask for", async () => {
+    const run = await runRepo(FILES, { mission: maxQualityRun(unthrottledConfig) });
+    expect(run.status).toBe("completed");
+    expect(stepsServedOffline(run.events)).toEqual(["architect", "improve"]);
+    expect(maxQualityNotes(run.events).sort()).toEqual(["architect", "improve"]);
   });
 });
 

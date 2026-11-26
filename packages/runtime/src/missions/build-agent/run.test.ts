@@ -7,6 +7,7 @@ import { foldRun, parseRunEvent, type RunEvent, type RunEventDraft } from "../..
 import { createMemoryKnowledgeStore, createMemoryMemoryStore } from "../../knowledge/memory-store";
 import { answerQuestion, resumeMission, runMission } from "../../server";
 import { FIXTURE_ORIGIN, fixtureDns, fixtureFetch } from "../../testing/fixture-site";
+import { maxQualityNotes, maxQualityRun, stepsServedOffline } from "../../testing/max-quality";
 import { type AnswerEvent } from "./answer";
 import {
   AssistantArtifactSchema,
@@ -307,6 +308,29 @@ describe("build-agent mission", () => {
       reason: "rate_limited",
       retryAfterMs: 5_000,
     });
+  });
+
+  it("routes only the design step to the offline entry in max quality", async () => {
+    const { site } = modelFetch();
+    const stores = {
+      knowledge: createMemoryKnowledgeStore(),
+      assistants: createMemoryAssistantStore(),
+    };
+    const { events, append } = eventLog("run_build_max");
+    const result = await runMission({
+      ...common(stores, site.fetchImpl),
+      ...maxQualityRun(unthrottledConfig),
+      runId: "run_build_max",
+      missionId: "build-agent",
+      input: INPUT,
+      emit: (draft) => {
+        append(draft);
+        return Promise.resolve();
+      },
+    });
+    expect(result.status).toBe("completed");
+    expect(stepsServedOffline(events)).toEqual(["design"]);
+    expect(maxQualityNotes(events)).toEqual(["design"]);
   });
 
   it("resumes after a crash without redoing finished steps, and only one worker holds the lease", async () => {

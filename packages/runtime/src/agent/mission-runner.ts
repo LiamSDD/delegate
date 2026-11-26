@@ -68,6 +68,7 @@ export interface PlannedRunOptions {
   concurrency?: number;
   resume?: ResumePoint;
   playbook?: PlaybookApplied;
+  selfCheckPrompt?: PromptFile;
 }
 
 export function classifyFailure(error: unknown): MissionFailureInfo {
@@ -319,6 +320,9 @@ export async function runPlannedMission(
       ...(resume === undefined
         ? {}
         : { resume: { completed: resume.completed, failed: resume.failed } }),
+      ...(options.selfCheckPrompt === undefined
+        ? {}
+        : { selfCheck: { prompt: options.selfCheckPrompt, fits: mission.clock.fits } }),
       replan: async (state) => {
         if (mission.fixedPlan !== undefined) return null;
         if (!plannerUsable(ctx).usable || !mission.clock.fits(["planner"])) return null;

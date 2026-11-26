@@ -1,0 +1,1 @@
+{"picks": ["C2"], "reason": "C2 is the only candidate with a number:\n12 hours per week."}

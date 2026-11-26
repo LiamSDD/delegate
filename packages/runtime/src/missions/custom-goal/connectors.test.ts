@@ -4,6 +4,7 @@ import { defaultPolicy, withConnectorAccess } from "@delegate/policy";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { buildBlackboard } from "../../agent/blackboard";
 import { checkPlanSteps } from "../../agent/planner";
 import { type SubAgentTask } from "../../agent/subagent";
 import { connectWithTransport, type OpenConnection } from "../../connectors/client";
@@ -118,6 +119,7 @@ function task(step: ReturnType<typeof stepFrom>): SubAgentTask {
   const said: string[] = [];
   return {
     step,
+    blackboard: () => buildBlackboard([]),
     grant: { id: step.id, capabilities: step.capabilities },
     agent: {
       agentId: "agent_1",

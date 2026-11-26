@@ -61,6 +61,19 @@ export type Actor = z.infer<typeof ActorSchema>;
 
 export const PhaseIdSchema = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
 
+export const TEAM_REDUCERS = ["merge_findings"] as const;
+export const TeamReducerSchema = z.enum(TEAM_REDUCERS);
+export type TeamReducer = z.infer<typeof TeamReducerSchema>;
+
+export const PlanTeamSchema = z.object({
+  size: z.number().int().positive(),
+  from: id,
+  reducer: TeamReducerSchema,
+  memberTokens: z.number().int().positive(),
+  memberMs: z.number().int().positive(),
+});
+export type PlanTeam = z.infer<typeof PlanTeamSchema>;
+
 export const PlanStepSchema = z.object({
   id,
   role: AgentRoleSchema,
@@ -70,6 +83,7 @@ export const PlanStepSchema = z.object({
   acceptance: z.array(z.string().min(1)),
   budgetShare: z.number().min(0).max(1),
   phase: PhaseIdSchema.optional(),
+  team: PlanTeamSchema.optional(),
 });
 export type PlanStep = z.infer<typeof PlanStepSchema>;
 
@@ -109,6 +123,10 @@ export const PlanStepsSchema = z.array(PlanStepSchema).superRefine((steps, ctx) 
   }
 });
 
+export const ROUTING_ORDERINGS = ["configured", "learned"] as const;
+export const RoutingOrderingSchema = z.enum(ROUTING_ORDERINGS);
+export type RoutingOrdering = z.infer<typeof RoutingOrderingSchema>;
+
 export const UsageSchema = z.object({
   inputTokens: tokenCount,
   outputTokens: tokenCount,
@@ -118,6 +136,8 @@ export const UsageSchema = z.object({
   provider: id,
   model: id,
   estimated: z.boolean().optional(),
+  role: ModelRoleSchema.optional(),
+  ordering: RoutingOrderingSchema.optional(),
 });
 export type Usage = z.infer<typeof UsageSchema>;
 
@@ -152,6 +172,7 @@ export const ModelFallbackPayloadSchema = z.object({
   to: ServingModelSchema.nullable(),
   reason: FallbackReasonSchema,
   retryAfterMs: z.number().int().nonnegative().optional(),
+  ordering: RoutingOrderingSchema.optional(),
 });
 export type ModelFallbackPayload = z.infer<typeof ModelFallbackPayloadSchema>;
 

@@ -16,6 +16,7 @@ import { type RunContext } from "./context";
 import { ModelStreamError } from "./model-call";
 import { StructuredOutputError, callStructured } from "./structured";
 import { type StepExecutor, type SubAgentResult } from "./subagent";
+import { validateTeams } from "./team";
 
 export const PLANNER_LIMITS = {
   maxSteps: 12,
@@ -156,7 +157,14 @@ export function validatePlan(
   mission: PlannerMission,
   phases?: readonly PlanPhase[],
 ): string[] {
-  const issues: string[] = [...validatePhases(steps, phases)];
+  const issues: string[] = [
+    ...validatePhases(steps, phases),
+    ...validateTeams(
+      steps,
+      (stepId) => executorFor(mission.executors, stepId)?.team,
+      (stepId) => ancestorsOf(steps, stepId),
+    ),
+  ];
   if (steps.length === 0) issues.push("The plan has no steps");
   if (steps.length > PLANNER_LIMITS.maxSteps)
     issues.push(
@@ -314,6 +322,9 @@ function library(mission: PlannerMission): string {
         required: executor.required === true,
         repeatable: executor.repeatable === true,
         description: executor.description,
+        ...(executor.team === undefined
+          ? {}
+          : { team: { maxMembers: executor.team.maxMembers, reducers: executor.team.reducers } }),
       }),
     )
     .join("\n");

@@ -1,4 +1,9 @@
-import { type FallbackReason, type ModelFallbackPayload, type ModelRole } from "./events";
+import {
+  type FallbackReason,
+  type ModelFallbackPayload,
+  type ModelRole,
+  type RoutingOrdering,
+} from "./events";
 import {
   resolveChain,
   type ChainContext,
@@ -11,6 +16,7 @@ import {
   ProviderHttpError,
   ProviderNetworkError,
   ProviderTimeoutError,
+  QUIRK_JSON_OBJECT,
   RateLimitedError,
   toJsonSchema,
   type CallTimeouts,
@@ -19,6 +25,13 @@ import {
   type ModelStreamEvent,
   type StreamOptions,
 } from "./providers/types";
+import {
+  applyLearnedOrder,
+  leadWithOfflineEntry,
+  learnedEntryFor,
+  type LearnedRouting,
+  type OrderedChain,
+} from "./routing/learned";
 
 export type RouterRequest = Omit<ModelRequest, "model" | "quirks" | "reasoningEffort">;
 
@@ -27,15 +40,21 @@ export interface RouterOptions {
   context: ChainContext;
   createProvider: (entry: ChainEntry) => ModelProvider;
   emitFallback: (payload: ModelFallbackPayload) => void;
+  mission?: string;
+  learned?: LearnedRouting;
   now?: () => number;
   failureThreshold?: number;
   cooldownMs?: number;
 }
 
-export interface OpenOptions extends Omit<StreamOptions, "timeouts"> {
-  estimatedPromptTokens?: number;
+export interface ChainOptions {
   classification?: DataClassification;
   latency?: LatencyMode;
+  leadWithOffline?: boolean;
+}
+
+export interface OpenOptions extends Omit<StreamOptions, "timeouts">, ChainOptions {
+  estimatedPromptTokens?: number;
   offlineTimeouts?: CallTimeouts;
   onAttempt?: (entry: ChainEntry) => void;
 }
@@ -44,8 +63,11 @@ export interface RoutedStream {
   provider: string;
   model: string;
   entry: ChainEntry;
+  ordering: RoutingOrdering;
   events: AsyncIterable<ModelStreamEvent>;
 }
+
+type AttemptedStream = Omit<RoutedStream, "ordering">;
 
 export interface RouteAttempt {
   provider: string;
@@ -340,23 +362,38 @@ export class ModelRouter {
     };
   }
 
+  ordered(role: ModelRole, options: ChainOptions = {}): OrderedChain {
+    const resolved = resolveChain(role, this.options.env, {
+      ...this.options.context,
+      classification: options.classification ?? this.options.context.classification,
+      ...(options.latency === undefined ? {} : { latency: options.latency }),
+    });
+    const learned = applyLearnedOrder(
+      resolved,
+      learnedEntryFor(this.options.learned, this.options.mission, role),
+    );
+    return options.leadWithOffline === true
+      ? { chain: leadWithOfflineEntry(learned.chain), ordering: learned.ordering }
+      : learned;
+  }
+
+  chain(role: ModelRole, options: ChainOptions = {}): ChainEntry[] {
+    return this.ordered(role, options).chain;
+  }
+
   async open(
     role: ModelRole,
     request: RouterRequest,
     options: OpenOptions = {},
   ): Promise<RoutedStream> {
-    const chain = resolveChain(role, this.options.env, {
-      ...this.options.context,
-      classification: options.classification ?? this.options.context.classification,
-      ...(options.latency === undefined ? {} : { latency: options.latency }),
-    });
+    const { chain, ordering } = this.ordered(role, options);
     const promptTokens = options.estimatedPromptTokens ?? estimatePromptTokens(request);
     const attempts: RouteAttempt[] = [];
 
     for (const [index, entry] of chain.entries()) {
       let rejection = this.precheck(entry, request, promptTokens);
       if (rejection === undefined) {
-        let outcome: RoutedStream | Rejection;
+        let outcome: AttemptedStream | Rejection;
         try {
           options.onAttempt?.(entry);
           outcome = await this.attempt(entry, request, options, promptTokens);
@@ -365,7 +402,7 @@ export class ModelRouter {
           if (classified === undefined) throw error;
           outcome = classified;
         }
-        if ("events" in outcome) return outcome;
+        if ("events" in outcome) return { ...outcome, ordering };
         rejection = outcome;
         this.recordFailure(entry, rejection);
       }
@@ -380,6 +417,7 @@ export class ModelRouter {
         from: { provider: entry.provider.id, model: entry.model },
         to: next === undefined ? null : { provider: next.provider.id, model: next.model },
         ...rejection,
+        ordering,
       });
     }
     throw new NoModelAvailableError(role, attempts);
@@ -454,7 +492,7 @@ export class ModelRouter {
     request: RouterRequest,
     options: OpenOptions,
     promptTokens: number,
-  ): Promise<RoutedStream | Rejection> {
+  ): Promise<AttemptedStream | Rejection> {
     const timeouts = entry.interactive ? undefined : options.offlineTimeouts;
     const deadline = timeouts === undefined ? undefined : new AbortController();
     const signal =
@@ -467,9 +505,13 @@ export class ModelRouter {
       ...(signal === undefined ? {} : { signal }),
       ...(timeouts === undefined ? {} : { timeouts }),
     };
+    const { responseFormat, ...rest } = request;
+    const jsonModeUnsupported =
+      responseFormat?.type === "json_object" && !entry.quirks.includes(QUIRK_JSON_OBJECT);
     const stream = this.provider(entry).stream(
       {
-        ...request,
+        ...rest,
+        ...(responseFormat === undefined || jsonModeUnsupported ? {} : { responseFormat }),
         maxTokens: Math.min(request.maxTokens, entry.maxOutputTokens ?? request.maxTokens),
         model: entry.model,
         quirks: entry.quirks,

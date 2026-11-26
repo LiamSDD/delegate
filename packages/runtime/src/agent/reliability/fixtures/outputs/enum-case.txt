@@ -1,0 +1,1 @@
+{"results": [{"id": "c1", "atoms": [{"text": "Acme leases robots", "verdict": "Supported"}]}, {"id": "c2", "atoms": [{"text": "Acme serves 40 warehouses", "verdict": "Supported"}, {"text": "all of them are in Belgium", "verdict": "Not enough info"}]}]}

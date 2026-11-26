@@ -23,8 +23,12 @@ export interface ToolDefinition {
   inputSchema: z.ZodType;
 }
 
+export const QUIRK_JSON_OBJECT = "json-object";
+
 export type ResponseFormat =
-  { type: "text" } | { type: "json_schema"; name: string; schema: z.ZodType };
+  | { type: "text" }
+  | { type: "json_object" }
+  | { type: "json_schema"; name: string; schema: z.ZodType };
 
 export interface ModelRequest {
   model: string;

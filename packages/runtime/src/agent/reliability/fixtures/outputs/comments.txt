@@ -1,0 +1,8 @@
+{
+  "name": "Acme Helper", // shown in the widget header
+  "tone": "friendly",
+  /* keep answers short */
+  "maxAnswerSentences": 4,
+  "topics": ["pricing", "leasing"],
+  "escalate": true
+}

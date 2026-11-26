@@ -9,6 +9,8 @@ import {
 } from "../events";
 import { SourceRecordSchema } from "../tools/sources";
 import { type StepGrant } from "../tools/registry";
+import { type Blackboard } from "./blackboard";
+import { type TeamHandle, type TeamSupport } from "./team";
 
 export const FindingSchema = z.object({
   text: z.string().trim().min(1).max(600),
@@ -42,7 +44,10 @@ export interface SubAgentTask {
   agent: AgentHandle;
   inputs: ReadonlyMap<string, SubAgentResult>;
   spawn: (role: AgentRole, modelRole: ModelRole) => Promise<AgentHandle>;
+  blackboard: () => Blackboard;
   guidance?: readonly string[];
+  team?: TeamHandle;
+  unmetAcceptance?: readonly string[];
 }
 
 export interface StepExecutor {
@@ -54,6 +59,8 @@ export interface StepExecutor {
   needs?: readonly string[];
   required?: boolean;
   repeatable?: boolean;
+  team?: TeamSupport;
+  selfCheck?: boolean;
   run: (task: SubAgentTask) => Promise<SubAgentResult>;
 }
 
