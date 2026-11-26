@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { detectMission } from "./detect-mission";
+import { awaitsRepo, detectMission } from "./detect-mission";
 
 describe("detectMission", () => {
   it("returns null for empty or whitespace input", () => {
@@ -40,14 +40,41 @@ describe("detectMission", () => {
   });
 
   it.each([
+    "github.co",
     "github.com",
-    "github.com/vercel",
-    "github.com/features/actions",
-    "github.com/-bad/repo",
-  ])("treats %s as GitHub the company, not a repo", (input) => {
-    expect(detectMission(input)?.kind).toBe("company");
-    expect(detectMission(input)?.target).toBe("github.com");
+    "https://github.com/",
+    "www.github.com",
+    "github.com/sindresorhus",
+    "github.com/sindresorhus/",
+    "https://github.com/vercel",
+  ])("waits for owner/repo on %s instead of offering a company audit", (input) => {
+    expect(detectMission(input)).toBeNull();
+    expect(awaitsRepo(input)).toBe(true);
   });
+
+  it("only waits for a repo on GitHub addresses", () => {
+    expect(awaitsRepo("")).toBe(false);
+    expect(awaitsRepo("stripe.com")).toBe(false);
+    expect(awaitsRepo("github.com/vercel/next.js")).toBe(false);
+    expect(awaitsRepo("github.com/features")).toBe(false);
+    expect(awaitsRepo("find repos on github.com")).toBe(false);
+  });
+
+  it("never offers the company audit while a repo address is typed", () => {
+    const typed = "github.com/sindresorhus/ky";
+    for (let length = "github.c".length; length <= typed.length; length += 1)
+      expect(detectMission(typed.slice(0, length))?.kind, typed.slice(0, length)).not.toBe(
+        "company",
+      );
+  });
+
+  it.each(["github.com/features", "github.com/features/actions", "github.com/-bad/repo"])(
+    "treats %s as GitHub the company, not a repo",
+    (input) => {
+      expect(detectMission(input)?.kind).toBe("company");
+      expect(detectMission(input)?.target).toBe("github.com");
+    },
+  );
 
   it.each([
     "Find the onboarding steps where trial users drop off",

@@ -8,7 +8,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { MISSION_INPUT_ID } from "@/components/command-palette";
 import { KindGlyph } from "@/components/kind-glyph";
-import { detectMission, MAX_INPUT_LENGTH } from "@/lib/detect-mission";
+import { awaitsRepo, detectMission, MAX_INPUT_LENGTH } from "@/lib/detect-mission";
 import { type CompanyMission, runLabelFor, runRequestFor } from "@/lib/run-request";
 import { AUTO_APPROVE_COOKIE, writeClientCookie } from "@/lib/runs/preferences";
 import { startRun } from "@/lib/runs/start-run";
@@ -43,6 +43,8 @@ export function MissionInput({
   const autopilotId = useId();
   const autopilotHintId = useId();
   const goal = detected?.kind === "goal";
+  const awaitingRepo = detected === null && awaitsRepo(value);
+  const repoLike = detected?.kind === "repo" || awaitingRepo;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -121,6 +123,23 @@ export function MissionInput({
                 >
                   {startError}
                 </motion.span>
+              ) : awaitingRepo ? (
+                <motion.span
+                  key="awaiting-repo"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.14 }}
+                  className="flex min-w-0 items-center gap-2 text-text-subtle"
+                >
+                  <span className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md border border-dashed border-border-strong px-2 text-xs font-medium text-text-muted">
+                    <KindGlyph kind="repo" />
+                    Repo X-ray
+                  </span>
+                  <span className="truncate font-mono text-xs">
+                    <span className="sr-only sm:not-sr-only">keep typing </span>owner/repo
+                  </span>
+                </motion.span>
               ) : detected === null ? (
                 <motion.span
                   key="idle"
@@ -172,7 +191,9 @@ export function MissionInput({
           >
             {starting
               ? "Starting…"
-              : runLabelFor(detected, { companyMission: mission, autopilot: goal && autopilot })}
+              : awaitingRepo
+                ? "Run Repo X-ray"
+                : runLabelFor(detected, { companyMission: mission, autopilot: goal && autopilot })}
             <CornerDownLeft className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
@@ -181,7 +202,7 @@ export function MissionInput({
         <div
           role="radiogroup"
           aria-label="Mission for a company URL"
-          hidden={detected?.kind === "repo"}
+          hidden={repoLike}
           className="flex rounded-lg border border-border bg-surface-2 p-0.5"
         >
           {(
@@ -209,7 +230,7 @@ export function MissionInput({
             </button>
           ))}
         </div>
-        {mission === "automation-audit" && detected?.kind !== "repo" ? (
+        {mission === "automation-audit" && !repoLike ? (
           <div className="flex items-center gap-2">
             <label htmlFor={departmentId} className="text-xs text-text-muted">
               Department
