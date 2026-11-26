@@ -109,9 +109,10 @@ describe("normaliseImprovements (ky gate run, 2026-11-25)", () => {
 
   it("keeps new test files when the model pluralises an existing test directory", () => {
     const { improvements, issues } = normaliseImprovements(kyDraft, evidence, snapshot);
-    expect(improvements).toHaveLength(6);
-    expect(improvements[1]?.files).toEqual(["test/test-constants.ts"]);
+    expect(improvements).toHaveLength(5);
+    expect(improvements[0]?.files).toEqual(["test/test-constants.ts"]);
     expect(issues.unknownFiles).toEqual([]);
+    expect(issues.fixtureSecrets).toEqual(["Rotate or remove secret-like value in test/hooks.ts"]);
   });
 
   it("accepts common spellings of kind, effort and single-string lists", () => {
