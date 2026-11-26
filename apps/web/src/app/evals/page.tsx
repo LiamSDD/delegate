@@ -11,11 +11,16 @@ import {
   type ResultMetric,
 } from "@delegate/evals/results";
 
+import { LearnedRoutingTable } from "@/components/evals/learned-routing";
 import { ParetoChart } from "@/components/evals/pareto-chart";
+import { Code, Empty, evalDateFormat as dateFormat, pct } from "@/components/evals/parts";
+import { PromptVersions } from "@/components/evals/prompt-versions";
+import { Training } from "@/components/evals/training";
 import {
   buildDashboard,
   evalResultsDir,
   loadEvalResults,
+  loadEvalsLearning,
   loadRedteam,
   type Calibration,
   type EvolutionRow,
@@ -27,16 +32,6 @@ import {
 
 export const metadata: Metadata = { title: "Evals" };
 export const dynamic = "force-static";
-
-const dateFormat = new Intl.DateTimeFormat("en-GB", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
-
-function pct(value: number): string {
-  return `${(value * 100).toFixed(0)}%`;
-}
 
 function Proportion({ value }: { value: ProportionInterval | null }) {
   if (value === null) return <span className="text-text-subtle">no data</span>;
@@ -52,14 +47,6 @@ function Proportion({ value }: { value: ProportionInterval | null }) {
 
 function seconds(ms: number | null): string {
   return ms === null ? "no data" : `${(ms / 1000).toFixed(1)} s`;
-}
-
-function Code({ children }: { children: ReactNode }) {
-  return (
-    <code className="rounded-xs bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-text">
-      {children}
-    </code>
-  );
 }
 
 function Section({
@@ -92,15 +79,6 @@ function Section({
       </div>
       {children}
     </section>
-  );
-}
-
-function Empty({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col items-start gap-2 rounded-lg border border-dashed border-border-strong px-5 py-6">
-      <h3 className="text-base font-medium">{title}</h3>
-      <div className="max-w-xl text-sm text-text-muted text-pretty">{children}</div>
-    </div>
   );
 }
 
@@ -609,6 +587,8 @@ export default function EvalsPage() {
   const resultsDir = evalResultsDir();
   const dashboard = buildDashboard(loadEvalResults(resultsDir));
   const redteam = loadRedteam(path.join(resultsDir, "redteam.json"));
+  const learning = loadEvalsLearning();
+  const invalid = [...dashboard.invalid, ...learning.training.invalid];
 
   return (
     <div className="mx-auto flex max-w-content flex-col gap-14 px-4 pt-16 pb-24 sm:px-6 md:pt-24">
@@ -625,11 +605,10 @@ export default function EvalsPage() {
         </p>
       </header>
 
-      {dashboard.invalid.length > 0 ? (
+      {invalid.length > 0 ? (
         <p className="rounded-lg border border-warning/40 bg-warning-soft px-4 py-3 text-sm text-warning">
-          Skipped {dashboard.invalid.length} result{" "}
-          {dashboard.invalid.length === 1 ? "file" : "files"} that did not match the schema:{" "}
-          {dashboard.invalid.join(", ")}
+          Skipped {invalid.length} result {invalid.length === 1 ? "file" : "files"} that did not
+          match the schema: {invalid.join(", ")}
         </p>
       ) : null}
 
@@ -664,8 +643,38 @@ export default function EvalsPage() {
       </Section>
 
       <Section
-        id="evolution"
+        id="training"
         index="04"
+        label="Training"
+        title="Rounds that had to earn their promotion"
+        note="Each step compares one candidate with its parent on the same cases. It is promoted only when the pooled and the paired score difference are both significant, no case regresses, no new hard check fails, the red-team suite stays at 0% and the same models served both arms. The mark shows the mean per-case difference with its 95% interval against zero."
+      >
+        <Training rows={learning.training.rows} lineage={learning.training.lineage} />
+      </Section>
+
+      <Section
+        id="prompts"
+        index="05"
+        label="Live prompts"
+        title="The prompt versions each mission runs"
+        note="The runtime loads the files named in RUNTIME_PROMPT_FILES. Training writes a promoted prompt as a new version file and never edits a shipped one; it goes live when the pointer changes in a reviewed commit. A promoted house playbook is live as soon as it is deployed."
+      >
+        <PromptVersions missions={learning.prompts} />
+      </Section>
+
+      <Section
+        id="routing"
+        index="06"
+        label="Learned routing"
+        title="Which model serves each role best"
+        note="Pass rates per mission, role and model from the trials each model served, with Wilson 95% intervals. An order is learned only when every ranked model has enough trials and the intervals do not overlap; otherwise the configured order stands and the reason is given."
+      >
+        <LearnedRoutingTable state={learning.routing} />
+      </Section>
+
+      <Section
+        id="evolution"
+        index="07"
         label="Evolution"
         title="Prompt and playbook lineage"
         note="Every proposed revision, the parent it came from, the eval comparison and why it was promoted or rejected."
@@ -675,7 +684,7 @@ export default function EvalsPage() {
 
       <Section
         id="redteam"
-        index="05"
+        index="08"
         label="Red team"
         title="Attack success rate, target 0%"
         note="Attacks by category from the red-team suite. Any success fails the local gate."

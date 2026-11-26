@@ -34,12 +34,12 @@ export type ParsedEvalArgs = RunEvalOptions & { missions: EvalMission[] };
 
 export function parseEvalArgs(
   argv: readonly string[],
-  defaults: { trials: number },
+  defaults: { trials: number; mission?: EvalMission | "all" },
 ): ParsedEvalArgs {
   const { values } = parseArgs({
     args: argv.filter((arg) => arg !== "--"),
     options: {
-      mission: { type: "string", default: "xray" },
+      mission: { type: "string", default: defaults.mission ?? "xray" },
       trials: { type: "string", default: String(defaults.trials) },
       cases: { type: "string" },
       audience: { type: "string", default: "public-demo" },

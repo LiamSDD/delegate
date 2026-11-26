@@ -7,6 +7,7 @@ import {
   loadRuntimePrompts,
   type RunMissionOptions,
   type RunMissionResult,
+  type RuntimePrompts,
 } from "@delegate/runtime/server";
 import { z } from "zod";
 
@@ -76,6 +77,30 @@ export interface RunEvalOptions {
   resultsDir: string;
   threshold: number;
   datasetFile?: string;
+  prompts?: Partial<RuntimePrompts>;
+}
+
+export interface SharedCooldown {
+  wait(): Promise<void>;
+  pause(ms: number): Promise<void>;
+  until(): number;
+}
+
+export function createSharedCooldown(
+  sleep: (ms: number) => Promise<void>,
+  now: () => Date,
+): SharedCooldown {
+  let pending: Promise<void> = Promise.resolve();
+  let until = 0;
+  return {
+    wait: () => pending,
+    pause: (ms) => {
+      until = Math.max(until, now().getTime() + ms);
+      pending = Promise.all([pending, sleep(ms)]).then(() => undefined);
+      return pending;
+    },
+    until: () => until,
+  };
 }
 
 export interface RunEvalDeps {
@@ -88,6 +113,7 @@ export interface RunEvalDeps {
   answerQuestion?: (request: AnswerRequest) => Promise<QuestionAnswer>;
   log: (line: string) => void;
   onTrial?: (record: TrialRecord) => void;
+  cooldown?: SharedCooldown;
 }
 
 export interface TrialRecord {
@@ -210,8 +236,11 @@ function promptSlug(name: string): string {
   return name.replace(/[^a-z0-9-]+/g, "-");
 }
 
-export function missionPromptVersions(adapter: MissionAdapter): Record<string, number> {
-  const runtime = loadRuntimePrompts();
+export function missionPromptVersions(
+  adapter: MissionAdapter,
+  overrides: Partial<RuntimePrompts> = {},
+): Record<string, number> {
+  const runtime = loadRuntimePrompts(overrides);
   const prompts = [
     ...adapter.runtimePrompts.map((key) => runtime[key]),
     loadEvalPrompt(adapter.judge.promptFile),
@@ -516,7 +545,7 @@ export async function runMissionEval<C extends BaseCase, X>(
   const id = `${stamp(startedAt)}${options.offline ? "-replay" : ""}`;
   const outDir = runDir(options.resultsDir, adapter.mission, id);
   mkdirSync(outDir, { recursive: true });
-  const versions = missionPromptVersions(adapter);
+  const versions = missionPromptVersions(adapter, options.prompts);
   const judgePrompt = loadEvalPrompt(adapter.judge.promptFile);
   const criteria = adapter.judge.criteria;
   const targets: BudgetTargets = {
@@ -524,7 +553,7 @@ export async function runMissionEval<C extends BaseCase, X>(
     maxTokens: RUN_BUDGETS[options.audience].maxTokens,
   };
   const judgeServing = new Map<string, { provider: string; model: string; calls: number }>();
-  let cooldown: Promise<void> = Promise.resolve();
+  const cooldown = deps.cooldown ?? createSharedCooldown(deps.sleep, deps.now);
 
   const runOnce = async (
     evalCase: C,
@@ -556,6 +585,7 @@ export async function runMissionEval<C extends BaseCase, X>(
         emit: sink.emit,
         now: deps.now,
         ...(adapter.hardDeadlineMs === undefined ? {} : { hardDeadlineMs: adapter.hardDeadlineMs }),
+        ...(options.prompts === undefined ? {} : { prompts: options.prompts }),
         ...stores,
       });
     } catch (error) {
@@ -598,7 +628,7 @@ export async function runMissionEval<C extends BaseCase, X>(
     } else {
       const stores = adapter.extras?.stores() ?? {};
       for (let attempt = 0; ; attempt += 1) {
-        await cooldown;
+        await cooldown.wait();
         const run = await runOnce(evalCase, trial, attempt, stores);
         const failed = run.events.find((event) => event.type === "run.failed");
         const code = failed?.type === "run.failed" ? failed.payload.error.code : undefined;
@@ -610,8 +640,7 @@ export async function runMissionEval<C extends BaseCase, X>(
           const wait = retryWait(run.events, attempt);
           deps.log(`  ${evalCase.id}#${trial}: ${code}, retrying in ${wait / 1000} s`);
           retries += 1;
-          cooldown = deps.sleep(wait);
-          await cooldown;
+          await cooldown.pause(wait);
           continue;
         }
         events = run.events;
@@ -915,6 +944,8 @@ export function buildResultFile(
         ...(Object.keys(record.missionMetrics).length === 0
           ? {}
           : { metrics: record.missionMetrics }),
+        hardFailures: record.hardFailures,
+        ...(record.serving.length === 0 ? {} : { serving: record.serving }),
       })),
     })),
     agreement: toResultAgreement(summary.agreement),

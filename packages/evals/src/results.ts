@@ -39,6 +39,14 @@ export const ResultJudgeModelSchema = z.strictObject({
   calls: z.number().int().positive(),
 });
 
+export const ResultTrialServingSchema = z.strictObject({
+  role: z.enum(["planner", "worker", "fast"]),
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  calls: z.number().int().positive(),
+});
+export type ResultTrialServing = z.infer<typeof ResultTrialServingSchema>;
+
 export const ResultTrialSchema = z.strictObject({
   trial: count,
   runId: z.string().min(1),
@@ -52,6 +60,8 @@ export const ResultTrialSchema = z.strictObject({
   costMicroUsd: count,
   tokens: count,
   metrics: z.record(z.string(), z.number()).optional(),
+  hardFailures: z.array(z.string().min(1)).optional(),
+  serving: z.array(ResultTrialServingSchema).optional(),
 });
 export type ResultTrial = z.infer<typeof ResultTrialSchema>;
 
