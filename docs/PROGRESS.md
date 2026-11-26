@@ -93,3 +93,9 @@ Append one entry per completed task: date, shipped, next, known issues, metrics.
 - Hard deadlines and checkpoint resume for custom goal and Repo X-ray; host-gate waits abortable.
 - Two independent reviews found 2 high and 2 blocking issues plus 9 smaller ones; all fixed with tests. Red-team: 106 attacks across 10 categories, 0 successes.
 - Migrations 0005–0008 applied to Neon with `scripts/neon-migrate.sh`.
+
+## 2026-11-27 · Runtime quality fixes from live runs
+
+- **Repo X-ray fixture tokens**: on sindresorhus/ky the #1 improvement was rotating a fixture token in `test/hooks.ts`. Secret findings now carry a confidence: test, fixture, example, mock and spec paths, and placeholder-like values (placeholder words, dictionary words plus digits, low-entropy provider formats), are low confidence, aggregated into one low-severity "Test fixture tokens, verify not real" hotspot, kept out of the improver's evidence and dropped in code if the improver still proposes rotating them. Real provider-format tokens in production paths stay high severity. The reported line 4061 was correct (the file has 8,063 lines).
+- **Goal coverage** (`goal-coverage.v1.md`, `fast` role, zod-parsed with one repair): grades whether the brief answers the goal (answered, partly, not answered) with the missing aspects. A custom goal about PSF licences produced a brief about GitHub repo counts at 100% citation accuracy; coverage is now graded before deep research (unanswered aspects become the first thin sections and reference searches, within the existing two-round bound) and again after the critic when the brief changed. Shown next to citation accuracy in the top bar, the goal panel, the critic report and the run summary; flagged as `critic.flagged` when not answered or unchecked. The custom-goal eval grader gains a soft `goal_answered` check and a `goalCoverage` metric.
+- Not run: live `/eval` and `/redteam` (paid or keyed providers); covered by scripted-provider tests.
