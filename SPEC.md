@@ -266,7 +266,7 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 - [x] Explicit streaming tool-use loop; `web_search` (server tool), `web_fetch`, quarantined reader, `extract`
 - [x] SSE replay-then-live; run view on real events; live cost; budgets; prompt caching
 - [x] Eval harness with the first X-ray dataset
-- [ ] *Done when:* a real URL gives a cited brief under the targets, reloading resumes the stream, and the evals run
+- [x] *Done when:* a real URL gives a cited brief under the targets, reloading resumes the stream, and the evals run (live X-ray eval p50 62 s against the 90 s target, n=16; resume after disconnect verified in M1)
 
 ### M2 · Multi-agent + Automation Audit
 - [x] Planner DAG with approve/edit, dynamic replanning, parallel lanes, critic with claim verification
@@ -290,12 +290,12 @@ Every milestone ends deployed and demoable. `main` is always shippable; unfinish
 - [ ] *Done when:* a PR passing the repo's tests is opened on one of the owner's repos after approval (flow live and covered by tests and red-team cases; the owner has not yet connected a repository for the live PR)
 
 ### M6 · Platform interfaces
-- [ ] REST API, OpenAPI, TypeScript SDK, signed webhooks, CLI
+- [x] REST API, OpenAPI, TypeScript SDK, signed webhooks, CLI (ADR 0018; webhook endpoints need `DELEGATE_ENCRYPTION_KEY`, which the public demo does not set)
 - [ ] MCP server (call Delegate from Claude Code), MCP client connectors, Ops Pulse (MCP server and connectors shipped early, ADR 0014; Ops Pulse not started)
 - [ ] *Done when:* Demo B steps 1–2 work from a terminal
 
 ### M7 · Enterprise
-- [ ] RBAC + SSO, policy editor with dry-run, Mission Control
+- [ ] RBAC + SSO, policy editor with dry-run, Mission Control (Mission Control and a policy dry run shipped, ADR 0019; member roles are enforced in row-level security; SSO and policy editing not started)
 - [ ] Standing missions and triggers, Competitive Intel monitor, Doc Intelligence, Data Analyst
 - [ ] BYOK and the provider interface (Bedrock/Vertex), Docker Compose self-hosting
 - [ ] *Done when:* **Demo B works end to end**

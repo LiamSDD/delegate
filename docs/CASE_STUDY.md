@@ -14,7 +14,7 @@ I set three rules before writing any code:
 
 ## How the work was organised
 
-The repo has a `CLAUDE.md` working agreement, a `SPEC.md` roadmap split into milestones, and an ADR for every architectural decision (16 so far). Each milestone followed the same loop:
+The repo has a `CLAUDE.md` working agreement, a `SPEC.md` roadmap split into milestones, and an ADR for every architectural decision (20 so far). Each milestone followed the same loop:
 
 1. **Plan.** I wrote the milestone plan and the acceptance condition ("done when attack success rate is 0% and a fork starts in under 10 s").
 2. **Fan out.** Independent features went to parallel coding agents, each in its own git worktree, with a written brief: files to read, constraints, what done looks like, what not to touch.
@@ -23,7 +23,7 @@ The repo has a `CLAUDE.md` working agreement, a `SPEC.md` roadmap split into mil
 5. **Fix with tests.** Every finding got a failing test first. Several also became red-team cases.
 6. **Measure live.** Deploy, run the eval suite against real sites on the real models, and fix what the numbers show.
 
-The local gate (`pnpm check`: typecheck, lint, 1,800+ tests, build, eval smoke, red-team) replaces CI. Nothing is pushed unless it passes.
+The local gate (`pnpm check`: typecheck, lint, 2,700 tests, build, eval smoke, red-team) replaces CI. Nothing is pushed unless it passes.
 
 ## What the reviews and evals caught
 
@@ -45,8 +45,8 @@ The point of the harness is that problems are found by the process, not by luck.
 
 ## Results
 
-- 110 red-team attacks across 10 categories, 0% success, enforced before every push.
-- Company X-ray live eval: 81% pass (95% CI 57–93%, n=16), median 61 s, $0.
+- The red-team suite runs in the local gate before every push; the committed run has 0% attack success.
+- Company X-ray live eval: 81% pass (95% CI 57–93%, n=16), median 62 s, $0.
 - Fork from any step: first new event in 0.2 s on the live site.
 - Crawl engine: 150 pages in 15.5 s (was over 150 s), never more than 6 concurrent requests per host.
 
