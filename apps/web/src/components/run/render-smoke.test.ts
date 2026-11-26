@@ -11,6 +11,7 @@ import { AgentLanes } from "./agent-lanes";
 import { AuditPanel } from "./audit-panel";
 import { PlanApprovalCard } from "./plan-approval-card";
 import { PlanPanel } from "./plan-panel";
+import { planTabLabel } from "./run-view";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: () => undefined }) }));
 
@@ -89,5 +90,10 @@ describe("M2 run view panels render from a simulated audit", () => {
       createElement(PlanApprovalCard, { runId: RUN, version: 1, steps: AUDIT_SIMULATED_PLAN }),
     );
     expect(card).toContain("Approve plan");
+  });
+
+  it("names the phone plan tab apart from the approve button it leads to", () => {
+    expect(planTabLabel(false)).toBe("Plan");
+    expect(planTabLabel(true)).not.toMatch(/approve/i);
   });
 });

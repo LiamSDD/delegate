@@ -102,6 +102,10 @@ function Skeleton({
   );
 }
 
+export function planTabLabel(pending: boolean): string {
+  return pending ? "Review plan" : "Plan";
+}
+
 function isRunnable(id: string): id is RunnableMissionId {
   return (RUNNABLE_MISSION_IDS as readonly string[]).includes(id);
 }
@@ -176,7 +180,7 @@ export function RunView({
   const pendingPlan = replay.active ? null : (ready?.pendingPlan ?? null);
   const tab: TabId = chosenTab ?? (pendingPlan !== null ? "plan" : hasBrief ? "brief" : "activity");
   const TABS: { id: TabId; label: string }[] = [
-    { id: "plan", label: pendingPlan === null ? "Plan" : "Approve plan" },
+    { id: "plan", label: planTabLabel(pendingPlan !== null) },
     { id: "activity", label: "Agents" },
     {
       id: "brief",
