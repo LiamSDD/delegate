@@ -14,10 +14,7 @@ export function usePopoverPlacement(
   const [placement, setPlacement] = useState<PopoverPlacement>(CENTRED);
 
   useLayoutEffect(() => {
-    if (!open) {
-      setPlacement(CENTRED);
-      return;
-    }
+    if (!open) return;
     const measure = () => {
       const box = anchor.current?.getBoundingClientRect();
       const panel = popover.current;
@@ -39,8 +36,9 @@ export function usePopoverPlacement(
     };
   }, [open, anchor, popover]);
 
+  const active = open ? placement : CENTRED;
   return {
-    side: placement.side,
-    style: placement.shift === 0 ? {} : { left: `calc(50% + ${String(placement.shift)}px)` },
+    side: active.side,
+    style: active.shift === 0 ? {} : { left: `calc(50% + ${String(active.shift)}px)` },
   };
 }
