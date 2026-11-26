@@ -78,7 +78,7 @@ export const webhookEndpoints = pgTable(
       { select: admins, insert: admins, update: admins, delete: admins },
       sql`${t.createdBy} = ${currentUserId}`,
     ),
-    ...definerPolicies("webhook_endpoints", ["select"]),
+    ...definerPolicies("webhook_endpoints", ["select", "delete"]),
   ],
 ).enableRLS();
 

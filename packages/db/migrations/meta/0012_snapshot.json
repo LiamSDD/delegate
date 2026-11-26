@@ -3783,6 +3783,15 @@
             "delegate_definer"
           ],
           "using": "true"
+        },
+        "webhook_endpoints_definer_delete": {
+          "name": "webhook_endpoints_definer_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "delegate_definer"
+          ],
+          "using": "true"
         }
       },
       "checkConstraints": {

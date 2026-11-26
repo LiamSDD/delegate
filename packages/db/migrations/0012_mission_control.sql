@@ -16,12 +16,13 @@ CREATE POLICY "mcp_connectors_definer_select" ON "mcp_connectors" AS PERMISSIVE 
 CREATE POLICY "mcp_connectors_definer_delete" ON "mcp_connectors" AS PERMISSIVE FOR DELETE TO "delegate_definer" USING (true);--> statement-breakpoint
 CREATE POLICY "workspace_settings_definer_select" ON "workspace_settings" AS PERMISSIVE FOR SELECT TO "delegate_definer" USING (true);--> statement-breakpoint
 CREATE POLICY "workspace_settings_definer_delete" ON "workspace_settings" AS PERMISSIVE FOR DELETE TO "delegate_definer" USING (true);--> statement-breakpoint
+CREATE POLICY "webhook_endpoints_definer_delete" ON "webhook_endpoints" AS PERMISSIVE FOR DELETE TO "delegate_definer" USING (true);--> statement-breakpoint
 CREATE POLICY "playbooks_definer_delete" ON "playbooks" AS PERMISSIVE FOR DELETE TO "delegate_definer" USING ("playbooks"."workspace_id" is not null);--> statement-breakpoint
 GRANT SELECT ON TABLE run_events, artifacts TO delegate_definer;
 --> statement-breakpoint
 GRANT SELECT, DELETE ON TABLE assistants, documents, memories, mcp_connectors, github_installations, workspace_settings TO delegate_definer;
 --> statement-breakpoint
-GRANT DELETE ON TABLE policies, playbooks, api_tokens TO delegate_definer;
+GRANT DELETE ON TABLE policies, playbooks, api_tokens, webhook_endpoints TO delegate_definer;
 --> statement-breakpoint
 CREATE OR REPLACE FUNCTION app_reject_run_while_paused()
 RETURNS trigger
@@ -104,6 +105,9 @@ BEGIN
     'connectors', (SELECT count(*) FROM public.mcp_connectors c WHERE c.workspace_id = p_workspace_id),
     'githubInstallations', (SELECT count(*) FROM public.github_installations g WHERE g.workspace_id = p_workspace_id),
     'apiTokens', (SELECT count(*) FROM public.api_tokens t WHERE t.workspace_id = p_workspace_id),
+    'webhookEndpoints', (SELECT count(*) FROM public.webhook_endpoints w WHERE w.workspace_id = p_workspace_id),
+    'webhookDeliveries', (SELECT count(*) FROM public.webhook_deliveries w WHERE w.workspace_id = p_workspace_id),
+    'idempotencyKeys', (SELECT count(*) FROM public.idempotency_keys k WHERE k.workspace_id = p_workspace_id),
     'settings', (SELECT count(*) FROM public.workspace_settings s WHERE s.workspace_id = p_workspace_id),
     'auditEntries', (
       SELECT count(*) FROM public.audit_log l
@@ -127,6 +131,9 @@ BEGIN
   DELETE FROM public.policies p WHERE p.workspace_id = p_workspace_id;
   DELETE FROM public.mcp_connectors c WHERE c.workspace_id = p_workspace_id;
   DELETE FROM public.github_installations g WHERE g.workspace_id = p_workspace_id;
+  DELETE FROM public.webhook_deliveries w WHERE w.workspace_id = p_workspace_id;
+  DELETE FROM public.webhook_endpoints w WHERE w.workspace_id = p_workspace_id;
+  DELETE FROM public.idempotency_keys k WHERE k.workspace_id = p_workspace_id;
   DELETE FROM public.api_tokens t WHERE t.workspace_id = p_workspace_id;
   DELETE FROM public.workspace_settings s WHERE s.workspace_id = p_workspace_id;
   PERFORM set_config('delegate.workspace_erasure', '', true);

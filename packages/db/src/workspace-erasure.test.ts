@@ -6,6 +6,9 @@ import { z } from "zod";
 import { withTenant } from "./client";
 import {
   apiTokens,
+  idempotencyKeys,
+  webhookDeliveries,
+  webhookEndpoints,
   approvals,
   artifacts,
   assistants,
@@ -45,6 +48,9 @@ const ERASED_DIRECTLY = [
   "mcp_connectors",
   "github_installations",
   "api_tokens",
+  "webhook_deliveries",
+  "webhook_endpoints",
+  "idempotency_keys",
   "workspace_settings",
 ] as const;
 
@@ -71,6 +77,9 @@ const WORKSPACE_TABLES: [string, PgTable, AnyPgColumn][] = [
   ["mcp_connectors", mcpConnectors, mcpConnectors.workspaceId],
   ["github_installations", githubInstallations, githubInstallations.workspaceId],
   ["api_tokens", apiTokens, apiTokens.workspaceId],
+  ["webhook_endpoints", webhookEndpoints, webhookEndpoints.workspaceId],
+  ["webhook_deliveries", webhookDeliveries, webhookDeliveries.workspaceId],
+  ["idempotency_keys", idempotencyKeys, idempotencyKeys.workspaceId],
   ["workspace_settings", workspaceSettings, workspaceSettings.workspaceId],
   ["audit_log", auditLog, auditLog.workspaceId],
   ["members", members, members.workspaceId],
@@ -129,6 +138,34 @@ describe("delete_workspace_data", () => {
       accountLogin: `acme-${label}`,
       accountType: "Organization",
       repositorySelection: "all",
+    });
+    const [endpoint] = await db
+      .insert(webhookEndpoints)
+      .values({
+        workspaceId,
+        createdBy: userId,
+        url: `https://hooks.${label}.example/delegate`,
+        origin: `https://hooks.${label}.example`,
+        events: ["run.completed"],
+        secretCiphertext: `ciphertext-${label}`,
+      })
+      .returning({ id: webhookEndpoints.id });
+    if (!endpoint) throw new Error("webhook endpoint was not created");
+    await db.insert(webhookDeliveries).values({
+      workspaceId,
+      endpointId: endpoint.id,
+      eventType: "webhook.test",
+      eventKey: `test-${label}`,
+      data: { label },
+      nextAttemptAt: new Date(),
+    });
+    await db.insert(idempotencyKeys).values({
+      workspaceId,
+      createdBy: userId,
+      key: `key-${label}`,
+      requestHash: (label === "a" ? "c" : "d").repeat(64),
+      lockedUntil: new Date(),
+      expiresAt: new Date(Date.now() + 86_400_000),
     });
     await db.insert(apiTokens).values({
       workspaceId,
@@ -327,6 +364,9 @@ describe("delete_workspace_data", () => {
       mcp_connectors: 1,
       github_installations: 1,
       api_tokens: 1,
+      webhook_endpoints: 1,
+      webhook_deliveries: 1,
+      idempotency_keys: 1,
       workspace_settings: 1,
       audit_log: 1,
       members: 4,
@@ -346,6 +386,9 @@ describe("delete_workspace_data", () => {
       connectors: 1,
       githubInstallations: 1,
       apiTokens: 1,
+      webhookEndpoints: 1,
+      webhookDeliveries: 1,
+      idempotencyKeys: 1,
       settings: 1,
       auditEntries: 1,
     });
