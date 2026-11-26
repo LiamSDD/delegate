@@ -1,7 +1,10 @@
 import { isValidElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-const stored = vi.hoisted(() => ({ input: {} as Record<string, unknown>, mission: "repo-xray" }));
+const stored = vi.hoisted((): { input: Record<string, unknown>; mission: string } => ({
+  input: {},
+  mission: "repo-xray",
+}));
 
 vi.mock("next/navigation", () => ({
   notFound: () => {
