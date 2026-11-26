@@ -31,7 +31,7 @@ import {
 } from "@/server/eval-results";
 
 export const metadata: Metadata = { title: "Evals" };
-export const dynamic = "force-static";
+export const dynamic = "force-dynamic";
 
 function Proportion({ value }: { value: ProportionInterval | null }) {
   if (value === null) return <span className="text-text-subtle">no data</span>;

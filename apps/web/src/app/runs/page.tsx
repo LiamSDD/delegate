@@ -64,8 +64,7 @@ export default async function RunsPage() {
         <div className="flex flex-col items-start gap-4 rounded-xl border border-dashed border-border-strong px-6 py-10">
           <h2 className="text-lg font-medium">No runs yet</h2>
           <p className="max-w-lg text-sm text-text-muted">
-            Paste a company URL on the home page to start an AI Automation Audit or a Company X-ray.
-            Repo X-ray and custom goals arrive in later milestones.
+            Paste a company URL, a GitHub repository or a goal on the home page to start a run.
           </p>
           <Link
             href="/?focus=mission"

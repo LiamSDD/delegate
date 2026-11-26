@@ -53,9 +53,11 @@ describe("mission catalogue", () => {
     }
   });
 
-  it("marks Repo X-ray live ahead of its milestone, and nothing else in M5", () => {
+  it("marks the shipped engineering missions live and later milestones not yet", () => {
     expect(isMissionLive(missionById("repo-xray"))).toBe(true);
-    expect(isMissionLive(missionById("ship-a-pr"))).toBe(false);
+    expect(isMissionLive(missionById("ship-a-pr"))).toBe(true);
+    expect(isMissionLive(missionById("ops-pulse"))).toBe(false);
+    expect(isMissionLive(missionById("doc-intelligence"))).toBe(false);
     expect(
       MISSIONS.filter((mission) => mission.live === true).map((mission) => mission.id),
     ).toEqual(["repo-xray"]);

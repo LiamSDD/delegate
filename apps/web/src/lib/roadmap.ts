@@ -17,7 +17,7 @@ export const MILESTONES: readonly Milestone[] = [
   { id: "M8", title: "Launch polish" },
 ];
 
-export const CURRENT_MILESTONE: MilestoneId = "M3";
+export const CURRENT_MILESTONE: MilestoneId = "M5";
 
 export function milestoneById(id: MilestoneId): Milestone {
   const milestone = MILESTONES.find((candidate) => candidate.id === id);
