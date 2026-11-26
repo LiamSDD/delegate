@@ -256,7 +256,6 @@ function ApprovalCard({
       <p className="text-xs text-text-muted">
         {item.reason} <span className="font-mono text-text-subtle">· {item.policyId}</span>
       </p>
-      <p className="text-2xs text-text-subtle">Approvals in the run view arrive in M3.</p>
     </Card>
   );
 }
