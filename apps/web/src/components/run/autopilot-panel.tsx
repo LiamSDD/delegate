@@ -129,7 +129,7 @@ export function MissionGraph({
           {nodes.filter((node) => node.runId !== null).length} of {nodes.length} launched
         </Eyebrow>
       </div>
-      <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <ol className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {nodes.map((node, index) => (
           <NodeCard key={node.nodeId} node={node} index={index} />
         ))}

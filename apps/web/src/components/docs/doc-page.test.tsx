@@ -1,3 +1,4 @@
+import { buildOpenApiDocument } from "@delegate/sdk/contract";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,7 +9,7 @@ import { buildDocsRegistry, loadDoc } from "@/lib/docs/registry";
 import { readRepoText } from "@/lib/docs/repo";
 import { REPO_URL } from "@/lib/site";
 
-import { ApiReferenceView, loadApiReference } from "./api-reference";
+import { apiReferenceState, type ApiReferenceState, ApiReferenceView } from "./api-reference";
 import { DocPage } from "./doc-page";
 import { DocsNav, findNavItem } from "./docs-nav";
 
@@ -91,10 +92,14 @@ describe("docs page", () => {
     expect(record).toContain("ADR 0001: Hand-written agent runtime on the Messages API");
   });
 
-  it("starts the API page in a loading state that names the document it fetches", () => {
+  it("renders the API page from the served document with its Markdown formatted", () => {
     const html = page(["api"]);
-    expect(html).toContain('aria-busy="true"');
-    expect(html).toContain(OPENAPI_PATH);
+    expect(html).not.toContain('aria-busy="true"');
+    expect(html).toContain("Delegate API");
+    expect(html).toContain('<strong class="font-semibold text-text">Authentication.</strong>');
+    expect(html).toMatch(/<code class="[^"]*">Authorization: Bearer dlg_…<\/code>/);
+    expect(html).not.toContain("**Authentication.**");
+    expect(html).not.toContain("`Authorization");
   });
 });
 
@@ -150,75 +155,79 @@ describe("docs menu", () => {
 });
 
 describe("API reference", () => {
-  const respond = (body: BodyInit | null, status: number) => () =>
-    Promise.resolve(new Response(body, { status }));
+  const view = (state: ApiReferenceState) =>
+    renderToStaticMarkup(
+      <ApiReferenceView state={state} registry={registry} source="docs/guides/rest-api.md" />,
+    );
 
-  it("says so honestly when the deployment has no OpenAPI document", async () => {
-    const state = await loadApiReference(respond("Not found", 404));
+  it("says so honestly when the document is not OpenAPI 3", () => {
+    const state = apiReferenceState({ swagger: "2.0" });
     expect(state).toEqual({
       status: "unavailable",
-      detail: `${OPENAPI_PATH} answered 404 on this deployment.`,
+      detail: `The document served at ${OPENAPI_PATH} is not an OpenAPI 3 document.`,
     });
-    const html = renderToStaticMarkup(<ApiReferenceView state={state} />);
+    const html = view(state);
     expect(html).toContain("The REST reference is not available on this deployment.");
-    expect(html).toContain("answered 404");
     expect(html).toContain('href="/docs/guides/mcp-clients"');
+    expect(apiReferenceState("<html>")).toMatchObject({ status: "unavailable" });
   });
 
-  it("treats network failures and non-OpenAPI answers the same way", async () => {
-    expect(await loadApiReference(() => Promise.reject(new Error("offline")))).toMatchObject({
-      status: "unavailable",
-      detail: `The request to ${OPENAPI_PATH} did not complete.`,
-    });
-    expect(await loadApiReference(respond("<html>", 200))).toMatchObject({
-      status: "unavailable",
-      detail: `${OPENAPI_PATH} did not return JSON.`,
-    });
-    expect(await loadApiReference(respond('{"swagger":"2.0"}', 200))).toMatchObject({
-      status: "unavailable",
-      detail: `${OPENAPI_PATH} did not return an OpenAPI 3 document.`,
-    });
+  it("renders the document this deployment serves", () => {
+    expect(apiReferenceState(buildOpenApiDocument())).toMatchObject({ status: "ready" });
   });
 
-  it("renders operations, parameters and schemas from a served document as text", async () => {
-    const calls: string[] = [];
-    const state = await loadApiReference((input) => {
-      calls.push(typeof input === "string" ? input : "not a path");
-      return Promise.resolve(
-        Response.json({
-          openapi: "3.1.0",
-          info: { title: "Delegate API", version: "1.2.3", description: "<img src=x onerror=1>" },
-          paths: {
-            "/runs/{runId}": {
-              get: {
-                summary: "Get a run",
-                parameters: [{ name: "runId", in: "path", schema: { type: "string" } }],
-                responses: {
-                  "200": {
-                    description: "The run",
-                    content: {
-                      "application/json": { schema: { $ref: "#/components/schemas/Run" } },
-                    },
-                  },
+  it("renders operations, parameters and schemas with inline Markdown and no raw HTML", () => {
+    const state = apiReferenceState({
+      openapi: "3.1.0",
+      info: {
+        title: "Delegate API",
+        version: "1.2.3",
+        description: "**Errors.** Branch on `code`.\n\nInline <img src=x onerror=1> stays text.",
+      },
+      paths: {
+        "/runs/{runId}": {
+          get: {
+            summary: "Get a run",
+            description: "Reads _one_ run.",
+            parameters: [
+              {
+                name: "runId",
+                in: "path",
+                description: "The `runId` from **POST /runs**.",
+                schema: { type: "string" },
+              },
+            ],
+            responses: {
+              "404": { description: "`not_found`: no such run.\n\n`gone`: the run expired." },
+              "200": {
+                description: "The run, as `Run`",
+                content: {
+                  "application/json": { schema: { $ref: "#/components/schemas/Run" } },
                 },
               },
             },
           },
-          components: {
-            schemas: { Run: { type: "object", properties: { id: { type: "string" } } } },
-          },
-        }),
-      );
+        },
+      },
+      components: {
+        schemas: { Run: { type: "object", properties: { id: { type: "string" } } } },
+      },
     });
-    expect(calls).toEqual([OPENAPI_PATH]);
-    const html = renderToStaticMarkup(<ApiReferenceView state={state} />);
+    const html = view(state);
     expect(html).toContain("Delegate API");
     expect(html).toContain("version 1.2.3 · OpenAPI 3.1.0");
     expect(html).toContain('<article id="get-runs-runid" aria-label="GET /runs/{runId}"');
     expect(html).toContain("required");
     expect(html).toContain('<a href="#schema-run"');
     expect(html).toContain('id="schema-run"');
+    expect(html).toContain('<strong class="font-semibold text-text">Errors.</strong>');
+    expect(html).toMatch(/<code class="[^"]*">code<\/code>/);
+    expect(html).toContain("<em>one</em>");
+    expect(html).toContain('<strong class="font-semibold text-text">POST /runs</strong>');
+    expect(html).toMatch(/The run, as <code class="[^"]*">Run<\/code>/);
+    expect(html).not.toMatch(/<p\b[^>]*>(?:(?!<\/p>).)*<(?:p|div)\b/s);
     expect(html).toContain("&lt;img src=x onerror=1&gt;");
     expect(html).not.toContain("<img");
+    expect(html).not.toMatch(/\*\*|`/);
   });
 });

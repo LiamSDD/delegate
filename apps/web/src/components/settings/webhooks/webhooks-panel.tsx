@@ -232,7 +232,7 @@ function DeliveryRow({
 }) {
   const state = deliveryState(delivery, maxAttempts);
   return (
-    <li className="grid gap-x-4 gap-y-1 border-b border-border px-4 py-3 last:border-b-0 md:grid-cols-[9rem_1fr_auto] md:items-baseline">
+    <li className="grid grid-cols-1 gap-x-4 gap-y-1 border-b border-border px-4 py-3 last:border-b-0 md:grid-cols-[9rem_1fr_auto] md:items-baseline">
       <p className="font-mono text-2xs text-text-subtle">{formatInstant(delivery.createdAt)}</p>
       <div className="flex min-w-0 flex-col gap-0.5">
         <p className="text-sm text-text">
@@ -329,7 +329,7 @@ export function WebhooksPanel({ initial }: { initial: WebhooksOverview }) {
             <code className="font-mono text-xs">openssl rand -hex 32</code>.
           </p>
         )}
-        <form onSubmit={addEndpoint} className="grid max-w-3xl gap-4 md:grid-cols-2">
+        <form onSubmit={addEndpoint} className="grid grid-cols-1 max-w-3xl gap-4 md:grid-cols-2">
           <label className="flex flex-col gap-1.5 text-sm text-text-muted">
             Endpoint URL
             <input

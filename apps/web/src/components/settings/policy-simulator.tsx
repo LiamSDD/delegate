@@ -175,7 +175,7 @@ export function PolicySimulator({ options }: { options: SimulatorOptions }) {
         }}
         className="flex min-w-0 flex-col gap-4 rounded-xl border border-border bg-surface px-4 py-4 shadow-sm"
       >
-        <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 min-w-0 gap-4 sm:grid-cols-2">
           <label className="flex min-w-0 flex-col gap-1.5">
             <span className={fieldLabel}>Mission</span>
             <select

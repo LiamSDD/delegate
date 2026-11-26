@@ -412,16 +412,27 @@ function renderBlocks(
   ));
 }
 
+function soleParagraph(tokens: readonly Token[]): Tokens.Paragraph | null {
+  const [first, ...rest] = tokens.filter((token) => token.type !== "space");
+  if (first === undefined || rest.length > 0) return null;
+  const known = asMarkedToken(first);
+  return known?.type === "paragraph" ? known : null;
+}
+
 export function Markdown({
   markdown,
   source,
   registry,
   directives = {},
+  inline = false,
+  className,
 }: {
   markdown: ParsedMarkdown;
   source: string;
   registry: DocsRegistry;
   directives?: Partial<Record<LiveDirective, ReactNode>>;
+  inline?: boolean;
+  className?: string | undefined;
 }) {
   const context: RenderContext = {
     source,
@@ -431,8 +442,16 @@ export function Markdown({
     plain: false,
     section: { id: null, text: null },
   };
+  const paragraph = inline ? soleParagraph(markdown.tokens) : null;
+  if (paragraph !== null)
+    return <span className={className}>{renderInline(paragraph.tokens, context)}</span>;
   return (
-    <div className="text-base text-text [&>*:first-child]:mt-0 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0">
+    <div
+      className={cn(
+        "text-base text-text [&>*:first-child]:mt-0 [&>*:first-child]:border-t-0 [&>*:first-child]:pt-0",
+        className,
+      )}
+    >
       {renderBlocks(markdown.tokens, context, false)}
     </div>
   );

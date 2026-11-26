@@ -83,9 +83,11 @@ function ToolCard({
   return (
     <Card tone={tone} icon={<Wrench className={iconClass} />} fresh={fresh}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-sm font-medium text-text">{item.tool}</span>
+        <span className="min-w-0 font-mono text-sm font-medium break-all text-text">
+          {item.tool}
+        </span>
         {item.host === null ? null : (
-          <span className="truncate font-mono text-xs text-text-muted">{item.host}</span>
+          <span className="min-w-0 truncate font-mono text-xs text-text-muted">{item.host}</span>
         )}
         <span className="ml-auto flex items-center gap-2">
           {item.durationMs === null ? null : (
@@ -114,9 +116,9 @@ function ToolCard({
       {item.summary === null ? (
         <p className="truncate font-mono text-xs text-text-subtle">{item.argsSummary}</p>
       ) : (
-        <p className="text-xs text-text-muted">{item.summary}</p>
+        <p className="text-xs break-words text-text-muted">{item.summary}</p>
       )}
-      {item.error === null ? null : <p className="text-xs text-danger">{item.error}</p>}
+      {item.error === null ? null : <p className="text-xs break-words text-danger">{item.error}</p>}
     </Card>
   );
 }
@@ -135,7 +137,7 @@ function PolicyCard({
           <span className="font-medium text-success">Allowed</span>{" "}
           <span className="font-mono text-xs text-text-muted">{item.tool}</span>
         </p>
-        <p className="text-xs text-text-muted">
+        <p className="text-xs break-words text-text-muted">
           {item.reason} <span className="font-mono text-text-subtle">· {item.policyId}</span>
         </p>
       </Card>
@@ -154,8 +156,8 @@ function PolicyCard({
         </span>{" "}
         <span className="font-mono text-xs text-text-muted">{item.tool}</span>
       </p>
-      <p className="text-xs text-text">{item.reason}</p>
-      <p className="font-mono text-2xs text-text-subtle">rule {item.policyId}</p>
+      <p className="text-xs break-words text-text">{item.reason}</p>
+      <p className="font-mono text-2xs break-all text-text-subtle">rule {item.policyId}</p>
     </Card>
   );
 }
@@ -186,7 +188,7 @@ function FlagCard({
       <blockquote className="rounded-md border border-warning/30 bg-surface px-2 py-1.5 font-mono text-xs break-words whitespace-pre-wrap text-text">
         {item.claim}
       </blockquote>
-      <p className="text-xs text-text">
+      <p className="text-xs break-words text-text">
         <span className="font-medium">Verdict: </span>
         {item.reason.replace(/^Verdict:\s*/i, "")}
         {item.sourceId === null ? null : (
@@ -252,8 +254,8 @@ function ApprovalCard({
   return (
     <Card tone="warning" icon={<Hand className={iconClass} />} fresh={fresh}>
       <p className="text-sm font-medium text-warning">Approval requested</p>
-      <p className="text-sm text-text">{item.summary}</p>
-      <p className="text-xs text-text-muted">
+      <p className="text-sm break-words text-text">{item.summary}</p>
+      <p className="text-xs break-words text-text-muted">
         {item.reason} <span className="font-mono text-text-subtle">· {item.policyId}</span>
       </p>
     </Card>

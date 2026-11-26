@@ -20,7 +20,7 @@ const createdFormat = new Intl.DateTimeFormat("en-GB", {
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid gap-1 border-b border-border px-4 py-3 last:border-b-0 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-6">
+    <div className="grid grid-cols-1 gap-1 border-b border-border px-4 py-3 last:border-b-0 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-6">
       <dt className="font-mono text-2xs tracking-label text-text-subtle uppercase sm:pt-0.5">
         {label}
       </dt>

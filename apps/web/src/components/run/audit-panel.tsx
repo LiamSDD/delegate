@@ -200,7 +200,7 @@ function OpportunityCard({
         id={bodyId}
         className={cn("border-t border-border", open ? "block" : "hidden print:block")}
       >
-        <div className="grid gap-px bg-border md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-px bg-border md:grid-cols-2">
           <div className="flex flex-col gap-1 bg-surface px-4 py-3">
             <Eyebrow>Today</Eyebrow>
             <p className="text-sm leading-6 text-text">{opportunity.workflow}</p>
@@ -225,7 +225,7 @@ function OpportunityCard({
               </button>
             ) : null}
           </div>
-          <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 print:hidden">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 print:hidden">
             {sliderSpecs(opportunity).map((spec) => (
               <Slider
                 key={spec.key}
@@ -248,7 +248,7 @@ function OpportunityCard({
           </p>
         </div>
 
-        <div className="grid gap-5 border-t border-border px-4 py-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 border-t border-border px-4 py-4 md:grid-cols-2">
           <div className="flex flex-col gap-2">
             <Eyebrow>Evidence</Eyebrow>
             {opportunity.evidence.length === 0 ? (

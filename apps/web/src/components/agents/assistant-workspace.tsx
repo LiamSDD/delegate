@@ -304,7 +304,7 @@ export function AssistantWorkspace({
         </div>
       </header>
 
-      <div className="mx-auto grid w-full max-w-[96rem] gap-6 px-4 py-5 md:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] xl:gap-8">
+      <div className="mx-auto grid w-full max-w-[96rem] grid-cols-1 gap-6 px-4 py-5 md:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] xl:gap-8">
         <section
           aria-label="Chat"
           className="flex h-[min(44rem,calc(100dvh-14rem))] min-h-[28rem] flex-col"

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { TraceView } from "@/components/trace/trace-view";
+import { runTarget } from "@/lib/runs/target";
 import { currentGuest } from "@/server/page-session";
 import { getRunRecord } from "@/server/runs";
 
@@ -13,12 +14,11 @@ export default async function TracePage({ params }: PageProps<"/runs/[id]/trace"
   if (guest === null) notFound();
   const record = await getRunRecord(guest.app, guest.session.userId, id);
   if (record === null) notFound();
-  const url = typeof record.input.url === "string" ? record.input.url : null;
   return (
     <TraceView
       key={record.id}
       runId={record.id}
-      target={url === null ? null : new URL(url).hostname.replace(/^www\./, "")}
+      target={runTarget(record.input)}
       missionId={record.mission}
     />
   );

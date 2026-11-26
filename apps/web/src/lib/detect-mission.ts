@@ -81,6 +81,34 @@ function githubRepo(url: URL): string | null {
   return `${owner}/${repo}`;
 }
 
+function isGithubHostPrefix(url: URL): boolean {
+  return (
+    url.pathname === "/" &&
+    [...GITHUB_HOSTS].some((host) => host !== url.hostname && host.startsWith(url.hostname))
+  );
+}
+
+function isIncompleteRepo(url: URL): boolean {
+  if (isGithubHostPrefix(url)) return true;
+  if (!GITHUB_HOSTS.has(url.hostname)) return false;
+  const segments = url.pathname.split("/").filter((segment) => segment !== "");
+  if (segments.length === 0) return true;
+  const [owner] = segments;
+  return (
+    segments.length === 1 &&
+    owner !== undefined &&
+    GITHUB_OWNER.test(owner) &&
+    !GITHUB_RESERVED.has(owner.toLowerCase())
+  );
+}
+
+export function awaitsRepo(raw: string): boolean {
+  const text = raw.trim().slice(0, MAX_INPUT_LENGTH);
+  if (text === "") return false;
+  const url = parsePublicUrl(text);
+  return url !== null && isIncompleteRepo(url);
+}
+
 function companyUrl(url: URL): string {
   const path = url.pathname === "/" ? "" : url.pathname.replace(/\/+$/, "");
   return `${url.protocol}//${url.hostname}${path}`;
@@ -92,6 +120,7 @@ export function detectMission(raw: string): DetectedMission | null {
 
   const url = parsePublicUrl(text);
   if (url !== null) {
+    if (isIncompleteRepo(url)) return null;
     const repo = githubRepo(url);
     if (repo !== null) {
       return {

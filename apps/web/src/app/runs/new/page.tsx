@@ -13,7 +13,7 @@ export const metadata: Metadata = { title: "New run" };
 
 function Row({ term, children }: { term: string; children: ReactNode }) {
   return (
-    <div className="grid gap-1 border-t border-border py-3.5 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-6">
+    <div className="grid grid-cols-1 gap-1 border-t border-border py-3.5 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-6">
       <dt className="font-mono text-2xs leading-6 tracking-label text-text-subtle uppercase">
         {term}
       </dt>

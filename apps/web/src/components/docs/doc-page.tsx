@@ -18,14 +18,14 @@ import { HEADING_SCROLL_MARGIN } from "./styles";
 const TOC_MIN_HEADINGS = 2;
 const TOC_MAX_DEPTH = 3;
 
-function renderDirective(name: LiveDirective, registry: DocsRegistry): ReactNode {
+function renderDirective(name: LiveDirective, registry: DocsRegistry, source: string): ReactNode {
   switch (name) {
     case "redteam-summary":
       return <RedteamSummaryPanel summary={loadRedteamSummary()} />;
     case "adr-index":
       return <AdrIndex adrs={registry.adrs} />;
     case "openapi-reference":
-      return <ApiReference />;
+      return <ApiReference registry={registry} source={source} />;
   }
 }
 
@@ -65,7 +65,7 @@ export function DocPage({ doc, registry }: { doc: LoadedDoc; registry: DocsRegis
   const { previous, next } = registry.neighbours(entry);
   const directives: Partial<Record<LiveDirective, ReactNode>> = {};
   for (const name of markdown.directives)
-    if (isLiveDirective(name)) directives[name] = renderDirective(name, registry);
+    if (isLiveDirective(name)) directives[name] = renderDirective(name, registry, entry.source);
 
   return (
     <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_13.5rem] xl:gap-12">
@@ -144,7 +144,7 @@ export function DocPage({ doc, registry }: { doc: LoadedDoc; registry: DocsRegis
             <nav
               aria-label="Previous and next page"
               data-print="hide"
-              className="grid gap-3 sm:grid-cols-2"
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2"
             >
               {previous === null ? null : <PagerLink entry={previous} direction="previous" />}
               {next === null ? null : <PagerLink entry={next} direction="next" />}

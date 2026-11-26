@@ -60,7 +60,7 @@ function Entries({ listing }: { listing: AuditListing }) {
         return (
           <li
             key={`${entry.runId}:${entry.seq}`}
-            className="grid gap-2 border-b border-border px-4 py-3 last:border-b-0 md:grid-cols-[9rem_minmax(0,1fr)_12rem] md:gap-6"
+            className="grid grid-cols-1 gap-2 border-b border-border px-4 py-3 last:border-b-0 md:grid-cols-[9rem_minmax(0,1fr)_12rem] md:gap-6"
           >
             <div className="flex items-center gap-3 md:flex-col md:items-start md:gap-1.5">
               <span

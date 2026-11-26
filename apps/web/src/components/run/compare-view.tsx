@@ -206,7 +206,7 @@ function ClaimRow({ change }: { change: ClaimChange }) {
         <ClaimText label={change.a.label} text={change.a.text} muted />
       ) : null}
       {change.kind === "changed" ? (
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
           <div className="flex flex-col gap-0.5">
             <span className="font-mono text-2xs text-text-subtle">A</span>
             <ClaimText label={change.a.label} text={change.a.text} muted />
@@ -320,7 +320,7 @@ export function CompareView({
             These runs are different missions, so the comparison is only indicative.
           </p>
         )}
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <RunHeading side="A" run={a} />
           <RunHeading side="B" run={b} />
         </div>

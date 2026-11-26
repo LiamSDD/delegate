@@ -23,7 +23,7 @@ export function ArrivalPage({
 }: ArrivalPageProps) {
   const target = milestoneById(milestone);
   return (
-    <div className="mx-auto grid max-w-content gap-16 px-6 pt-16 pb-24 md:pt-24 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-24">
+    <div className="mx-auto grid grid-cols-1 max-w-content gap-16 px-6 pt-16 pb-24 md:pt-24 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-24">
       <div className="flex flex-col gap-12">
         <header className="flex flex-col gap-5">
           <p className="font-mono text-2xs tracking-label text-text-subtle uppercase">
