@@ -165,6 +165,7 @@ export const RUNTIME_PROMPT_FILES = {
   repoArchitect: "repo-xray.architect.v1.md",
   repoImprover: "repo-xray.improver.v2.md",
   gapAnalysis: "deep-research.gaps.v2.md",
+  goalCoverage: "goal-coverage.v1.md",
 } as const;
 
 export const REFLECT_BUDGET: RunBudgetLimits = { maxTokens: 20_000, maxMicroUsd: 0 };

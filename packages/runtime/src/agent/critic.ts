@@ -6,6 +6,7 @@ import { type PromptFile } from "../prompts";
 import { quoteAppearsIn } from "../quarantine/reader";
 import { NoModelAvailableError } from "../router";
 import { RunAbortedError, type RunContext } from "./context";
+import { formatGoalCoverage } from "./goal-coverage";
 import { ModelStreamError } from "./model-call";
 import { chainHead } from "./pacing";
 import { StructuredOutputError, callStructured } from "./structured";
@@ -584,6 +585,13 @@ export async function runCritic(
 }
 
 export function formatAccuracy(report: CriticReport): string {
+  const accuracy = formatCitationAccuracy(report);
+  return report.goalCoverage === undefined
+    ? accuracy
+    : `${accuracy}; ${formatGoalCoverage(report.goalCoverage)}`;
+}
+
+function formatCitationAccuracy(report: CriticReport): string {
   return report.citationAccuracy === null
     ? "citation accuracy n/a"
     : `citation accuracy ${Math.round(report.citationAccuracy * 100)}% (${report.supported + report.fixed}/${report.claimsChecked}; ${report.fixed} fixed, ${report.weak ?? 0} weak kept, ${report.removed} removed)${report.publishedAccuracy === undefined || report.publishedAccuracy === null ? "" : `; published claims ${Math.round(report.publishedAccuracy * 100)}% supported`}${report.specificity?.score === undefined || report.specificity.score === null ? "" : `; specificity ${Math.round(report.specificity.score * 100)}%`}`;

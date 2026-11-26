@@ -3,6 +3,11 @@ import { CAPABILITIES } from "@delegate/policy";
 
 import { type RunContext } from "../../agent/context";
 import { formatAccuracy, runCriticSafely, unverifiedOutcome } from "../../agent/critic";
+import {
+  formatGoalCoverage,
+  gradeGoalCoverage,
+  needsMoreResearch,
+} from "../../agent/goal-coverage";
 import { runAgentLoop } from "../../agent/loop";
 import { CONNECTOR_OUTPUT_KIND } from "../../connectors/tools";
 import {
@@ -29,7 +34,7 @@ import {
   type SpecificityContext,
   type SpecificityTarget,
 } from "../../agent/specificity";
-import { type ResearchReport, type SpecificityReport } from "../../events";
+import { type GoalCoverage, type ResearchReport, type SpecificityReport } from "../../events";
 import { type PromptFile } from "../../prompts";
 import { READER_DEFAULTS, quoteAppearsIn, readUntrusted } from "../../quarantine/reader";
 import { NoModelAvailableError } from "../../router";
@@ -101,6 +106,7 @@ export interface CustomGoalPrompts {
   editor: PromptFile;
   goalConnectors?: PromptFile;
   gapAnalysis?: PromptFile;
+  goalCoverage?: PromptFile;
 }
 
 export interface CustomGoalDependencies {
@@ -178,6 +184,8 @@ interface BriefState {
   research?: ResearchReport;
   citationAccuracy?: number | null;
   publishedAccuracy?: number | null;
+  coverage?: GoalCoverage;
+  coverageVersion?: number;
 }
 
 function skipped(summary: string, confidence = 0.6): SubAgentResult {
@@ -337,6 +345,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     prompts.critic,
     prompts.editor,
     ...(prompts.gapAnalysis === undefined ? [] : [prompts.gapAnalysis]),
+    ...(prompts.goalCoverage === undefined ? [] : [prompts.goalCoverage]),
   ].map((prompt) => `${prompt.name}@${prompt.version}`);
   const specificityTarget = (): SpecificityTarget => ({
     names:
@@ -819,6 +828,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
                 : { publishedAccuracy: state.publishedAccuracy }),
               specificity: state.specificity,
               ...(state.research === undefined ? {} : { research: state.research }),
+              ...(state.coverage === undefined ? {} : { goalCoverage: state.coverage }),
             },
           }),
       ...(skippedForTime.length === 0
@@ -964,6 +974,38 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     };
   };
 
+  const gradeCoverage = async (stepId: string, state: BriefState) => {
+    if (prompts.goalCoverage === undefined) return null;
+    const { sections } = state;
+    const graded = await gradeGoalCoverage(ctx, {
+      stepId,
+      prompt: prompts.goalCoverage,
+      goal: input.goal,
+      objective: state.objective,
+      sections: [
+        ...sections.workstreams.map((stream) => ({
+          title: stream.name,
+          lines: stream.findings.map((claim) => claim.text),
+        })),
+        {
+          title: "Actions",
+          lines: sections.actions.map((action) => `${action.title}: ${action.basis.text}`),
+        },
+        { title: "Risks", lines: sections.risks.map((claim) => claim.text) },
+        { title: "Open questions", lines: sections.openQuestions },
+      ],
+    });
+    if (graded === null) return null;
+    state.coverage = {
+      ...graded.coverage,
+      ...(state.coverage?.researched === undefined
+        ? {}
+        : { researched: state.coverage.researched }),
+    };
+    state.coverageVersion = state.version;
+    return state.coverage;
+  };
+
   const publishDraft = async (state: BriefState, stepId: string) => {
     state.version += 1;
     await emit({
@@ -1036,7 +1078,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     },
   };
 
-  const sectionDrafts = (state: BriefState): SectionDraft[] => {
+  const sectionDrafts = (state: BriefState, gaps: readonly string[] = []): SectionDraft[] => {
     const goalWords = target.queries
       .join(" ")
       .split(/\s+/)
@@ -1053,14 +1095,28 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
     const missing = goalWords
       .filter((word) => !covered.has(word.toLowerCase()))
       .map((word) => ({ key: `goal.${word}`, title: word, claims: 0, keywords: [word] }));
-    return [...streams, ...missing];
+    const unanswered = gaps.map((aspect, index) => ({
+      key: `coverage.${index}`,
+      title: aspect,
+      claims: 0,
+      keywords: aspect.split(/\s+/).filter((word) => word.length > 2),
+    }));
+    return [...unanswered, ...streams, ...missing];
   };
 
-  const goalCandidates = (task: SubAgentTask, state: BriefState): FollowUpCandidate[] => {
+  const goalCandidates = (
+    task: SubAgentTask,
+    state: BriefState,
+    gaps: readonly string[] = [],
+  ): FollowUpCandidate[] => {
     const leads: FollowUpCandidate[] =
       company === null || kit === undefined ? [] : kit.followUps(task);
     const topics = [
-      ...new Set([...state.sections.workstreams.map((stream) => stream.name), ...target.queries]),
+      ...new Set([
+        ...gaps,
+        ...state.sections.workstreams.map((stream) => stream.name),
+        ...target.queries,
+      ]),
     ].slice(0, 6);
     for (const topicName of topics)
       leads.push({
@@ -1104,6 +1160,22 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         return skipped("No drafted brief to deepen.", 0.5);
       if (overtime()) return timeSkip(task);
       const stopAt = deadlineAt - GOAL_LIMITS.criticReserveMs;
+      const coverage = clock.fits(["fast", "planner"])
+        ? await gradeCoverage(task.step.id, state)
+        : null;
+      const gaps =
+        coverage === null || !needsMoreResearch(coverage)
+          ? []
+          : (coverage.missing.length > 0 ? coverage.missing : target.queries).slice(
+              0,
+              GOAL_LIMITS.deepTargetsPerRound,
+            );
+      if (coverage !== null)
+        await task.agent.say(
+          gaps.length === 0
+            ? `The first draft is graded: ${formatGoalCoverage(coverage)}.`
+            : `The first draft is graded: ${formatGoalCoverage(coverage)}. Follow-up research targets the unanswered aspects first.`,
+        );
       const outcome = await runDeepResearch({
         ctx: researchCtx,
         stepId: task.step.id,
@@ -1112,6 +1184,7 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         objective: state.objective,
         maxRounds: GOAL_LIMITS.deepRounds,
         targetsPerRound: GOAL_LIMITS.deepTargetsPerRound,
+        ...(gaps.length === 0 ? {} : { coverageTarget: 1 }),
         canContinue: () =>
           !overtime() &&
           ctx.now().getTime() + 2 * projectedCallMs(ctx, "planner") < stopAt &&
@@ -1120,8 +1193,8 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
           !overtime() && ctx.now().getTime() + projectedCallMs(ctx, "planner") < stopAt,
         deadlineReached: () => deadline.signal.aborted && ctx.signal?.aborted !== true,
         usePlanner: () => clock.fits(["planner", "planner", "fast", "worker"]),
-        sections: () => sectionDrafts(state),
-        candidates: () => goalCandidates(task, state),
+        sections: () => sectionDrafts(state, gaps),
+        candidates: () => goalCandidates(task, state, gaps),
         redraft: async (fresh) => {
           const facts = [...state.facts, ...fresh];
           const drafted = await draftBrief(task.step.id, facts, task.agent.say);
@@ -1142,6 +1215,8 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         },
       });
       state.research = outcome.report;
+      if (gaps.length > 0 && state.coverage !== undefined)
+        state.coverage = { ...state.coverage, researched: outcome.report.rounds.length > 0 };
       const cited = goalCitedSources(state.sections);
       return {
         summary: `Deep research: ${plural(outcome.report.rounds.length, "round")}, ${plural(outcome.facts.length, "new fact")}, coverage ${Math.round(outcome.report.coverage * 100)}% (stop: ${outcome.report.stopReason.replace(/_/g, " ")})`,
@@ -1152,6 +1227,48 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
         research: outcome.report,
       };
     },
+  };
+
+  const flagCoverage = async (stepId: string, coverage: GoalCoverage | undefined) => {
+    if (prompts.goalCoverage === undefined) return;
+    if (coverage === undefined) {
+      await emit({
+        runId,
+        type: "critic.flagged",
+        stepId,
+        payload: {
+          claimId: "goal-coverage:unchecked",
+          claim: "Whether the brief answers the goal was not checked",
+          reason:
+            "The goal-coverage grader was unavailable or out of time; citation accuracy says nothing about whether the brief answers the goal",
+          severity: "info",
+          category: "claim",
+        },
+      });
+      return;
+    }
+    if (coverage.verdict === "answered") return;
+    await emit({
+      runId,
+      type: "critic.flagged",
+      stepId,
+      payload: {
+        claimId: "goal-coverage",
+        claim:
+          `The brief ${coverage.verdict === "partly" ? "only partly answers" : "does not answer"} the goal${coverage.missing.length === 0 ? "" : `; missing: ${coverage.missing.join("; ")}`}`.slice(
+            0,
+            300,
+          ),
+        reason: (
+          (coverage.reason === "" ? "Graded by the goal-coverage check." : coverage.reason) +
+          (coverage.researched === true
+            ? " A follow-up research round targeted the missing aspects."
+            : "")
+        ).slice(0, 500),
+        severity: coverage.verdict === "not_answered" ? "warn" : "info",
+        category: "claim",
+      },
+    });
   };
 
   const critic: StepExecutor = {
@@ -1206,7 +1323,21 @@ export function createCustomGoalMission(deps: CustomGoalDependencies): PlannedMi
       state.specificity = specificity;
       state.citationAccuracy = outcome.report.citationAccuracy;
       state.publishedAccuracy = outcome.report.publishedAccuracy ?? null;
-      const report = { ...outcome.report, specificity };
+      const changed =
+        state.coverageVersion !== state.version || outcome.report.removed > 0 || demoted.length > 0;
+      let coverage = state.coverage;
+      if (changed) {
+        coverage = overtime()
+          ? undefined
+          : ((await gradeCoverage(task.step.id, state)) ?? undefined);
+        if (coverage === undefined) delete state.coverage;
+      }
+      await flagCoverage(task.step.id, coverage);
+      const report = {
+        ...outcome.report,
+        specificity,
+        ...(coverage === undefined ? {} : { goalCoverage: coverage }),
+      };
       await publishFinal(state, task.step.id);
       const accuracy = formatAccuracy(report);
       await task.agent.say(

@@ -205,6 +205,18 @@ function editorReply(user: string): Response {
   return textReply(JSON.stringify({ fixes }));
 }
 
+interface CoverageReply {
+  verdict: string;
+  missing: string[];
+  reason: string;
+}
+
+const ANSWERED: CoverageReply = {
+  verdict: "answered",
+  missing: [],
+  reason: "Every aspect of the goal is addressed.",
+};
+
 function referenceApi(url: URL): Response | undefined {
   if (url.hostname === "en.wikipedia.org" && url.pathname === "/w/api.php") {
     if (url.searchParams.get("list") === "search") {
@@ -259,13 +271,16 @@ async function runGoal(
     killAt?: string;
     reference?: (url: URL) => Response | undefined;
     mission?: Partial<RunMissionOptions>;
+    coverage?: (user: string, call: number) => CoverageReply;
   } = {},
 ): Promise<{
   status: string;
   events: RunEvent[];
   requested: string[];
+  coverageCalls: string[];
   resume: () => ReturnType<typeof resumeMission>;
 }> {
+  const coverageCalls: string[] = [];
   const site = fixtureFetch((url, init) => {
     const api = options.reference?.(url) ?? referenceApi(url);
     if (api !== undefined) return api;
@@ -278,6 +293,10 @@ async function runGoal(
     if (system.includes("You are the critic")) return criticReply(user);
     if (system.includes("You are the editor of Delegate.")) return editorReply(user);
     if (system.includes("You write a goal brief")) return synthesisReply(user);
+    if (system.includes("You grade whether a brief answers the goal")) {
+      coverageCalls.push(user);
+      return textReply(JSON.stringify(options.coverage?.(user, coverageCalls.length) ?? ANSWERED));
+    }
     return textReply("{}");
   });
   const events: RunEvent[] = [];
@@ -333,7 +352,7 @@ async function runGoal(
         return Promise.resolve();
       },
     });
-  return { status: result.status, events, requested: site.requested, resume };
+  return { status: result.status, events, requested: site.requested, coverageCalls, resume };
 }
 
 function finalBrief(events: readonly RunEvent[]): GoalBrief {
@@ -455,6 +474,95 @@ describe("runMission custom-goal end to end (fixture web, scripted model over HT
     );
     const completed = events.at(-1);
     expect(completed?.type).toBe("run.completed");
+    expect(brief.verification?.goalCoverage).toMatchObject({
+      verdict: "answered",
+      missing: [],
+      prompt: "goal-coverage@1",
+    });
+    expect(brief.promptVersions).toContain("goal-coverage@1");
+    expect(
+      events.some(
+        (event) =>
+          event.type === "critic.flagged" && event.payload.claimId.startsWith("goal-coverage"),
+      ),
+    ).toBe(false);
+    if (completed?.type === "run.completed")
+      expect(completed.payload.summary).toContain("goal coverage: answered");
+  });
+
+  it("grades whether the brief answers the goal, steers one research round at the gap and reports it honestly", async () => {
+    const MISSING = "customer retention playbooks";
+    const { status, events, coverageCalls } = await runGoal(
+      "I want to achieve acme's marketing and agentic work",
+      undefined,
+      {
+        coverage: () => ({
+          verdict: "not_answered",
+          missing: [MISSING],
+          reason: "The brief describes the company but never says how to retain customers.",
+        }),
+      },
+    );
+    expect(status).toBe("completed");
+    expect(coverageCalls.length).toBeGreaterThanOrEqual(1);
+    expect(coverageCalls.length).toBeLessThanOrEqual(2);
+    expect(coverageCalls[0]).toContain(
+      JSON.stringify("I want to achieve acme's marketing and agentic work"),
+    );
+    const deepened = events.find(
+      (event) => event.type === "step.completed" && event.stepId === "deepen_research",
+    );
+    if (deepened?.type !== "step.completed") throw new Error("no deep research step");
+    const rounds = deepened.payload.research?.rounds ?? [];
+    expect(rounds.length).toBeGreaterThanOrEqual(1);
+    expect(rounds.length).toBeLessThanOrEqual(2);
+    expect(rounds[0]?.thin[0]).toBe(MISSING);
+
+    const brief = finalBrief(events);
+    expect(brief.verification?.goalCoverage).toEqual({
+      verdict: "not_answered",
+      missing: [MISSING],
+      reason: "The brief describes the company but never says how to retain customers.",
+      prompt: "goal-coverage@1",
+      researched: true,
+    });
+    const flagged = events.find(
+      (event) => event.type === "critic.flagged" && event.payload.claimId === "goal-coverage",
+    );
+    expect(flagged).toMatchObject({
+      stepId: "critic",
+      payload: {
+        severity: "warn",
+        claim: `The brief does not answer the goal; missing: ${MISSING}`,
+      },
+    });
+    const critic = events.find(
+      (event) => event.type === "step.completed" && event.stepId === "critic",
+    );
+    if (critic?.type !== "step.completed") throw new Error("no critic step");
+    expect(critic.payload.critic?.goalCoverage?.verdict).toBe("not_answered");
+    expect(critic.payload.summary).toContain(`goal coverage: not answered (missing: ${MISSING})`);
+    const completed = events.at(-1);
+    if (completed?.type !== "run.completed") throw new Error("run did not complete");
+    expect(completed.payload.summary).toMatch(
+      /citation accuracy \d+%.*; goal coverage: not answered/,
+    );
+  });
+
+  it("flags the goal coverage as unchecked when the grader cannot answer", async () => {
+    const { status, events } = await runGoal(
+      "I want to achieve acme's marketing and agentic work",
+      undefined,
+      { coverage: () => ({ verdict: "unsure", missing: [], reason: "" }) },
+    );
+    expect(status).toBe("completed");
+    expect(finalBrief(events).verification?.goalCoverage).toBeUndefined();
+    expect(
+      events.find(
+        (event) =>
+          event.type === "critic.flagged" && event.payload.claimId === "goal-coverage:unchecked",
+      ),
+    ).toMatchObject({ payload: { severity: "info" } });
   });
 
   it("routes only the synthesis step to the offline entry in max quality", async () => {
