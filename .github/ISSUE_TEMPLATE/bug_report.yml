@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in Delegate is broken, wrong or confusing.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Security problems (an injection that leads to an action, a policy or approval bypass, cross-workspace access) must not be reported here: use the Security tab to report them privately (see SECURITY.md).
+        Never paste API keys, tokens or private data.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected to see instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: The mission and input (company URL, repository or goal), the page or command, and what you clicked.
+      placeholder: |
+        1. On the home page, paste https://example.com and start a Company X-ray
+        2. Approve the plan
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Live demo (delegate-beryl.vercel.app)
+        - Local run (pnpm dev)
+        - Self-hosted
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      multiple: true
+      options:
+        - Web app
+        - REST API or SDK
+        - CLI
+        - MCP server or connectors
+        - Webhooks
+        - Evals or red-team suite
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: run
+    attributes:
+      label: Run id or URL
+      description: The run page URL or id, if the bug happened during a run.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: Error messages, console output or the failing command's output. Remove anything private.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag or commit (`git rev-parse --short HEAD`) for local and self-hosted runs, plus Node and browser versions if relevant.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have not included keys, tokens or private data.
+          required: true

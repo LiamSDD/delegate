@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a mission, capability, guardrail or integration.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Delegate runs for $0 by default: proposals that need a paid service or an account to work by default will not be accepted, though optional providers are fine. Open-ended ideas can start in Discussions → Ideas.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What work can you not delegate today, or what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What Delegate should do, and where it fits (a mission, the runtime, a policy, the API, the UI).
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and evaluation
+      description: Does it add a side effect, read new untrusted content or need new capabilities? How would you know it works (an eval case, a test, a red-team case)?
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and discussions and this has not been proposed.
+          required: true
+        - label: I am willing to open a pull request for this.
+          required: false

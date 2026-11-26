@@ -196,6 +196,10 @@ pnpm check        # typecheck, lint, test and build across the monorepo
 
 Requires Node 26 and pnpm 12. No keys are needed. See [`.env.example`](.env.example) for optional providers and [self-hosting](docs/guides/self-hosting.md) for production setups.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the checks and how to propose a change. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 MIT
