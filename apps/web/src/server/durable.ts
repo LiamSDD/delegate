@@ -1,14 +1,37 @@
-import { AUTOPILOT_MISSION_ID, type ChildStartedPayload, foldRun } from "@delegate/runtime";
+import {
+  AUTOPILOT_MISSION_ID,
+  type ChildStartedPayload,
+  foldRun,
+  type RunEvent,
+} from "@delegate/runtime";
 import { analyseForResume, type FindInstallation } from "@delegate/runtime/server";
 
 import { isExecutableMission } from "@/lib/m2-contract";
-import { MAX_RESUMES, resumeDecision, resumeMarkerDraft, resumeNotices } from "@/lib/runs/resume";
+import {
+  awaitingPlanApproval,
+  countHandoffs,
+  endedWithHandoff,
+  MAX_HANDOFFS,
+  MAX_RESUMES,
+  type PlanWait,
+  resumeDecision,
+  resumeMarkerDraft,
+  resumeNotices,
+} from "@/lib/runs/resume";
 
 import { advanceAutopilot, autopilotLinkOf } from "./autopilot";
 import type { AppDatabase } from "./db";
 import { executeRun } from "./execute-run";
 import type { MissionConnections } from "./mission-runner";
+import { hasRoomForWork } from "./invocation";
 import { createDbLease } from "./leases";
+import {
+  latestPlanApproval,
+  PLAN_TIMEOUT_MS,
+  PLAN_TIMEOUT_REASON,
+  PlanDecisionError,
+  recordPlanDecision,
+} from "./plan-approval";
 import type { MissionRunner } from "./mission-runner";
 import type { RunRegistry } from "./run-registry";
 import type { RateLimiter } from "./session";
@@ -47,12 +70,13 @@ async function failWorkerLost(
   userId: string,
   record: RunRecord,
   message: string,
+  code = "worker_lost",
 ) {
   try {
     await appendEvent(
       app,
       { runId: record.id, workspaceId: record.workspaceId, userId },
-      { type: "run.failed", payload: { error: { code: "worker_lost", message } } },
+      { type: "run.failed", payload: { error: { code, message } } },
     );
   } catch (error: unknown) {
     if (!(error instanceof RunAlreadyTerminalError)) throw error;
@@ -64,12 +88,24 @@ async function resumeRun(
   userId: string,
   record: RunRecord,
   deps: DurableDeps,
+  mode: "resume" | "continue",
 ): Promise<void> {
   const ctx = { runId: record.id, workspaceId: record.workspaceId, userId };
   const lease = createDbLease(app, ctx);
   if (!(await lease.acquire())) return;
   const events = await readAllEvents(app, userId, record.id);
-  if (resumeNotices(events).length >= MAX_RESUMES) {
+  if (mode === "continue" && countHandoffs(events) > MAX_HANDOFFS) {
+    await lease.release();
+    await failWorkerLost(
+      app,
+      userId,
+      record,
+      `The run did not finish within ${String(MAX_HANDOFFS)} server invocations.`,
+      "handoff_limit",
+    );
+    return;
+  }
+  if (mode === "resume" && resumeNotices(events).length >= MAX_RESUMES) {
     await lease.release();
     await failWorkerLost(app, userId, record, "worker lost again after the maximum resumes");
     return;
@@ -85,12 +121,16 @@ async function resumeRun(
     await failWorkerLost(app, userId, record, "worker lost");
     return;
   }
-  const marker = resumeMarkerDraft({
-    skipped: analysis.completedSteps.length,
-    rerun: analysis.rerunSteps.length,
-  });
-  await appendEvent(app, ctx, marker);
-  const resumeFrom = await readAllEvents(app, userId, record.id);
+  if (mode === "resume")
+    await appendEvent(
+      app,
+      ctx,
+      resumeMarkerDraft({
+        skipped: analysis.completedSteps.length,
+        rerun: analysis.rerunSteps.length,
+      }),
+    );
+  const resumeFrom = mode === "resume" ? await readAllEvents(app, userId, record.id) : events;
   const missionId = record.mission;
   const link = autopilotLinkOf(resumeFrom);
   const approvals =
@@ -137,6 +177,34 @@ async function childApprovals(
   }
 }
 
+async function planWaitOf(
+  app: AppDatabase,
+  userId: string,
+  record: RunRecord,
+  events: readonly RunEvent[],
+  now: Date,
+): Promise<PlanWait | undefined> {
+  if (!awaitingPlanApproval(events)) return undefined;
+  const approval = await latestPlanApproval(app, userId, record.id);
+  if (approval?.status !== "pending") return "due";
+  if (approval.requestedAt.getTime() + PLAN_TIMEOUT_MS > now.getTime()) return "pending";
+  try {
+    await recordPlanDecision(
+      app,
+      { runId: record.id, workspaceId: record.workspaceId, userId },
+      approval.approvalId,
+      { decision: "rejected", reason: PLAN_TIMEOUT_REASON },
+    );
+  } catch (error: unknown) {
+    if (!(error instanceof PlanDecisionError)) throw error;
+  }
+  return "due";
+}
+
+function leaseHeld(record: RunRecord, now: Date): boolean {
+  return record.leaseExpiresAt !== null && record.leaseExpiresAt.getTime() > now.getTime();
+}
+
 export async function reviveOrSweep(
   app: AppDatabase,
   userId: string,
@@ -149,23 +217,32 @@ export async function reviveOrSweep(
     return getRunRecord(app, userId, record.id);
   }
   const now = deps.now?.() ?? new Date();
+  const terminal = record.lastEventType !== null && isTerminalEventType(record.lastEventType);
+  const activeHere = deps.registry.has(record.id) || resuming().has(record.id);
+  if (terminal || activeHere || leaseHeld(record, now)) return record;
+  const events = await readAllEvents(app, userId, record.id);
   const decision = resumeDecision(
     {
-      terminal: record.lastEventType !== null && isTerminalEventType(record.lastEventType),
+      terminal,
       execution: record.execution,
       mission: record.mission,
       leaseExpiresAt: record.leaseExpiresAt,
       lastEventAt: record.lastEventAt,
       createdAt: record.createdAt,
-      activeHere: deps.registry.has(record.id) || resuming().has(record.id),
+      activeHere,
       resumes: 0,
+      handedOff: endedWithHandoff(events),
+      ...(await planWaitOf(app, userId, record, events, now).then((planWait) =>
+        planWait === undefined ? {} : { planWait },
+      )),
     },
     now,
   );
-  if (decision === "resume") {
+  if (decision === "resume" || decision === "continue") {
+    if (!hasRoomForWork(Date.now())) return record;
     resuming().add(record.id);
     try {
-      await resumeRun(app, userId, record, deps);
+      await resumeRun(app, userId, record, deps, decision);
     } catch (error: unknown) {
       console.error("resume failed", record.id, error);
     } finally {
@@ -178,4 +255,33 @@ export async function reviveOrSweep(
     return getRunRecord(app, userId, record.id);
   }
   return record;
+}
+
+export const WAKE_ATTEMPTS = 4;
+export const WAKE_RETRY_MS = 1_500;
+
+export async function wakeRun(
+  app: AppDatabase,
+  userId: string,
+  runId: string,
+  deps: DurableDeps,
+  retryMs = WAKE_RETRY_MS,
+): Promise<void> {
+  try {
+    for (let attempt = 0; attempt < WAKE_ATTEMPTS; attempt += 1) {
+      const record = await getRunRecord(app, userId, runId);
+      if (record === null) return;
+      const after = await reviveOrSweep(app, userId, record, deps);
+      const now = deps.now?.() ?? new Date();
+      const waiting =
+        after !== null &&
+        after.status === "awaiting_plan_approval" &&
+        leaseHeld(after, now) &&
+        !deps.registry.has(runId);
+      if (!waiting) return;
+      await new Promise((resolve) => setTimeout(resolve, retryMs));
+    }
+  } catch (error: unknown) {
+    console.error("waking the run failed", runId, error instanceof Error ? error.message : "");
+  }
 }

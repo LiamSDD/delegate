@@ -20,6 +20,8 @@ import { notifyApprovalRequested } from "./webhooks/outbox";
 export const PLAN_APPROVAL_STEP = "plan";
 export const PLAN_POLL_MS = 300;
 export const PLAN_TIMEOUT_MS = 10 * 60_000;
+export const PLAN_INLINE_WAIT_MS = 10_000;
+export const PLAN_TIMEOUT_REASON = "Plan approval timed out.";
 export const PLAN_DECISION_ACTION = "plan.decision";
 
 export type PlanDecision =
@@ -31,7 +33,11 @@ export type AwaitPlanApproval = (
   signal?: AbortSignal,
 ) => Promise<PlanDecision>;
 
-const actionSchema = z.object({ kind: z.literal("plan"), steps: PlanStepsSchema });
+const actionSchema = z.object({
+  kind: z.literal("plan"),
+  steps: PlanStepsSchema,
+  version: z.int().positive().optional(),
+});
 
 const decisionDetailsSchema = z.object({
   decision: z.enum(["approved", "rejected"]),
@@ -72,19 +78,76 @@ export async function pendingPlanApproval(
   return action.success ? { approvalId: row.id, steps: action.data.steps } : null;
 }
 
-async function openPlanApproval(app: AppDatabase, ctx: RunContext, steps: PlanStep[]) {
+export interface PlanApprovalRow {
+  approvalId: string;
+  status: (typeof approvals.$inferSelect)["status"];
+  requestedAt: Date;
+  version: number | null;
+  steps: PlanStep[] | null;
+}
+
+async function latestPlanRow(tx: TenantTx, runId: string): Promise<PlanApprovalRow | null> {
+  const [row] = await tx
+    .select({
+      id: approvals.id,
+      status: approvals.status,
+      requestedAt: approvals.requestedAt,
+      action: approvals.action,
+    })
+    .from(approvals)
+    .where(and(eq(approvals.runId, runId), eq(approvals.stepId, PLAN_APPROVAL_STEP)))
+    .orderBy(desc(approvals.requestedAt))
+    .limit(1);
+  if (row === undefined) return null;
+  const action = actionSchema.safeParse(row.action);
+  return {
+    approvalId: row.id,
+    status: row.status,
+    requestedAt: row.requestedAt,
+    version: action.success ? (action.data.version ?? null) : null,
+    steps: action.success ? action.data.steps : null,
+  };
+}
+
+export async function latestPlanApproval(
+  app: AppDatabase,
+  userId: string,
+  runId: string,
+): Promise<PlanApprovalRow | null> {
+  return withTenant(app.db, userId, (tx) => latestPlanRow(tx, runId));
+}
+
+function sameSteps(stored: readonly PlanStep[] | null, asked: readonly PlanStep[]): boolean {
+  const parsed = PlanStepsSchema.safeParse(asked);
+  return (
+    stored !== null && parsed.success && JSON.stringify(stored) === JSON.stringify(parsed.data)
+  );
+}
+
+async function openPlanApproval(
+  app: AppDatabase,
+  ctx: RunContext,
+  plan: PlanApprovalRequest,
+): Promise<{ approvalId: string; requestedAt: Date; opened: boolean }> {
   return withTenant(app.db, ctx.userId, async (tx) => {
+    const existing = await latestPlanRow(tx, ctx.runId);
+    if (
+      existing !== null &&
+      existing.version === plan.version &&
+      sameSteps(existing.steps, plan.steps)
+    )
+      return { approvalId: existing.approvalId, requestedAt: existing.requestedAt, opened: false };
     const [row] = await tx
       .insert(approvals)
       .values({
         runId: ctx.runId,
         workspaceId: ctx.workspaceId,
         stepId: PLAN_APPROVAL_STEP,
-        action: { kind: "plan", steps },
+        action: { kind: "plan", steps: plan.steps, version: plan.version },
       })
-      .returning({ id: approvals.id });
+      .returning({ id: approvals.id, requestedAt: approvals.requestedAt });
     if (row === undefined) throw new Error("approval insert returned no row");
-    return row.id;
+    return { approvalId: row.id, requestedAt: row.requestedAt, opened: true };
   });
 }
 
@@ -198,33 +261,46 @@ export interface PlanApprovalWaiterOptions {
   pollMs?: number;
   timeoutMs?: number;
   now?: () => number;
+  park?: () => Promise<never>;
+  inlineWaitMs?: number;
 }
 
 export function createPlanApprovalWaiter(options: PlanApprovalWaiterOptions): AwaitPlanApproval {
   const { app, ctx } = options;
   const pollMs = options.pollMs ?? PLAN_POLL_MS;
   const timeoutMs = options.timeoutMs ?? PLAN_TIMEOUT_MS;
+  const inlineWaitMs = options.inlineWaitMs ?? PLAN_INLINE_WAIT_MS;
   const now = options.now ?? Date.now;
   return async (plan, signal) => {
-    const approvalId = await openPlanApproval(app, ctx, plan.steps);
+    const opened = await openPlanApproval(app, ctx, plan);
+    const { approvalId } = opened;
+    const already = opened.opened ? null : await decisionFor(app, ctx.userId, approvalId);
+    if (already !== null) return toDecision(already);
     if (options.autoApprove && mayAutoApprovePlan(plan)) {
       await recordPlanDecision(app, ctx, approvalId, { decision: "approved", auto: true });
       return { decision: "approved", auto: true };
     }
-    await notifyApprovalRequested(app, ctx, {
-      id: approvalId,
-      kind: "plan",
-      summary: `A plan with ${plan.steps.length} steps is waiting for approval.`,
-    });
-    const deadline = now() + timeoutMs;
+    if (opened.opened)
+      await notifyApprovalRequested(app, ctx, {
+        id: approvalId,
+        kind: "plan",
+        summary: `A plan with ${plan.steps.length} steps is waiting for approval.`,
+      });
+    const waitingSince = now();
+    const deadline = opened.opened
+      ? waitingSince + timeoutMs
+      : opened.requestedAt.getTime() + timeoutMs;
+    const park = plan.kind === "initial" ? options.park : undefined;
     for (;;) {
       if (signal?.aborted === true) {
         throw signal.reason instanceof Error ? signal.reason : new Error("aborted");
       }
       const recorded = await decisionFor(app, ctx.userId, approvalId);
       if (recorded !== null) return toDecision(recorded);
+      if (park !== undefined && now() < deadline && now() - waitingSince >= inlineWaitMs)
+        return park();
       if (now() >= deadline) {
-        const timedOut = { decision: "rejected" as const, reason: "Plan approval timed out." };
+        const timedOut = { decision: "rejected" as const, reason: PLAN_TIMEOUT_REASON };
         try {
           await recordPlanDecision(app, ctx, approvalId, timedOut);
           return timedOut;

@@ -18,7 +18,7 @@ import {
 } from "@delegate/runtime";
 import { eq, sql } from "drizzle-orm";
 
-import { RESUME_POLICY_ID } from "@/lib/runs/resume";
+import { isHandoffMarker, RESUME_POLICY_ID } from "@/lib/runs/resume";
 
 import type { AppDatabase } from "./db";
 import {
@@ -35,7 +35,10 @@ const INSERT_CHUNK = 200;
 export type ReadyFork = Extract<ForkPlan, { ok: true }>;
 
 export function isResumeMarker(event: RunEvent): boolean {
-  return event.type === "policy.decided" && event.payload.policyId === RESUME_POLICY_ID;
+  return (
+    (event.type === "policy.decided" && event.payload.policyId === RESUME_POLICY_ID) ||
+    isHandoffMarker(event)
+  );
 }
 
 export function planRunFork(

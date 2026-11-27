@@ -4,6 +4,9 @@ import { type AwaitShipApproval, redactPii, type RunEvent } from "@delegate/runt
 import type { AppDatabase } from "./db";
 import { type ExecutableMissionId, SHIP_MISSION_ID } from "@/lib/m2-contract";
 
+import { handoffMarkerDraft } from "@/lib/runs/resume";
+
+import { currentSlice, hasRoomForWork, type Slice } from "./invocation";
 import type { MissionConnections, MissionRunner } from "./mission-runner";
 import { type AwaitPlanApproval, createPlanApprovalWaiter } from "./plan-approval";
 import type { RunRegistry } from "./run-registry";
@@ -41,6 +44,20 @@ export interface ExecuteRunOptions {
   resumeFrom?: readonly RunEvent[];
   connections?: MissionConnections;
   onSettled?: () => Promise<void>;
+  slice?: Slice | null;
+  now?: () => number;
+  planWait?: { pollMs?: number; inlineWaitMs?: number };
+}
+
+export class RunHandoffError extends Error {
+  override readonly name = "RunHandoffError";
+  constructor(readonly kind: "handoff" | "park") {
+    super(
+      kind === "park"
+        ? "The run is waiting for a plan decision without holding a worker"
+        : "The run is handed off to a new invocation",
+    );
+  }
 }
 
 export async function executeRun(options: ExecuteRunOptions): Promise<void> {
@@ -75,16 +92,34 @@ async function executeHeld(
   isHeld: () => boolean,
 ): Promise<void> {
   const { app, ctx, registry } = options;
+  const now = options.now ?? Date.now;
+  const slice =
+    options.lease === undefined || options.slice === null
+      ? undefined
+      : (options.slice ?? currentSlice());
   const controller = registry.register(ctx.runId);
-  const signal =
-    leaseSignal === undefined
-      ? controller.signal
-      : AbortSignal.any([controller.signal, leaseSignal]);
-  const progress = { terminal: false };
+  const handoff = new AbortController();
+  const signal = AbortSignal.any([
+    controller.signal,
+    handoff.signal,
+    ...(leaseSignal === undefined ? [] : [leaseSignal]),
+  ]);
+  const progress: { terminal: boolean; stopped: RunHandoffError["kind"] | null } = {
+    terminal: false,
+    stopped: null,
+  };
+  const inflight = new Set<Promise<unknown>>();
   const emit = async (draft: EventDraft) => {
-    if (progress.terminal || !isHeld()) throw new RunAlreadyTerminalError(ctx.runId);
-    const event = await appendEvent(app, ctx, draft);
-    if (isTerminalEventType(event.type)) progress.terminal = true;
+    if (progress.terminal || progress.stopped !== null || !isHeld())
+      throw new RunAlreadyTerminalError(ctx.runId);
+    const appending = appendEvent(app, ctx, draft);
+    inflight.add(appending);
+    try {
+      const event = await appending;
+      if (isTerminalEventType(event.type)) progress.terminal = true;
+    } finally {
+      inflight.delete(appending);
+    }
   };
   const finish = async (draft: EventDraft) => {
     try {
@@ -93,8 +128,39 @@ async function executeHeld(
       if (!(error instanceof RunAlreadyTerminalError)) throw error;
     }
   };
+  const ended = () => progress.terminal;
+  const stop = async (kind: RunHandoffError["kind"]) => {
+    if (progress.stopped !== null || progress.terminal) return;
+    progress.stopped = kind;
+    await Promise.allSettled([...inflight]);
+    if (kind === "handoff" && !ended() && isHeld() && slice !== undefined)
+      await finish(
+        handoffMarkerDraft({ elapsedMs: now() - slice.startedAt, budgetMs: slice.budgetMs }),
+      );
+    handoff.abort(new RunHandoffError(kind));
+  };
+  const park = async (): Promise<never> => {
+    await stop("park");
+    throw new RunHandoffError("park");
+  };
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    if (slice !== undefined) {
+      if (!hasRoomForWork(now(), slice)) {
+        await stop("handoff");
+        return;
+      }
+      timer = setTimeout(
+        () => {
+          void stop("handoff").catch((error: unknown) => {
+            console.error("run hand-off failed", ctx.runId, publicError(error).message);
+          });
+        },
+        Math.max(0, slice.handoffAt - now()),
+      );
+      timer.unref();
+    }
     const result = await options.runner({
       runId: ctx.runId,
       missionId: options.missionId,
@@ -110,7 +176,13 @@ async function executeHeld(
           : { type: "guest", id: ctx.userId },
       awaitPlanApproval:
         options.awaitPlanApproval ??
-        createPlanApprovalWaiter({ app, ctx, autoApprove: options.autoApprovePlan ?? false }),
+        createPlanApprovalWaiter({
+          app,
+          ctx,
+          autoApprove: options.autoApprovePlan ?? false,
+          ...options.planWait,
+          ...(options.lease === undefined ? {} : { park }),
+        }),
       ...(options.missionId === SHIP_MISSION_ID
         ? { awaitShipApproval: options.awaitShipApproval ?? createShipApprovalWaiter({ app, ctx }) }
         : {}),
@@ -118,7 +190,7 @@ async function executeHeld(
         ? {}
         : { findInstallation: options.findInstallation }),
     });
-    if (!progress.terminal && !signal.aborted) {
+    if (!progress.terminal && !signal.aborted && progress.stopped === null) {
       await finish(
         result.status === "completed"
           ? { type: "run.completed", payload: { summary: "The mission reported completion." } }
@@ -131,7 +203,12 @@ async function executeHeld(
       );
     }
   } catch (error: unknown) {
-    if (!progress.terminal && !signal.aborted && !(error instanceof RunAlreadyTerminalError)) {
+    if (
+      !progress.terminal &&
+      !signal.aborted &&
+      progress.stopped === null &&
+      !(error instanceof RunAlreadyTerminalError)
+    ) {
       const { message, redactions } = publicError(error);
       console.error("run failed", ctx.runId, message);
       await finish({
@@ -143,6 +220,7 @@ async function executeHeld(
       });
     }
   } finally {
+    if (timer !== undefined) clearTimeout(timer);
     registry.unregister(ctx.runId);
   }
 }

@@ -2,6 +2,9 @@ import type { RunEvent } from "@delegate/runtime";
 import { describe, expect, it } from "vitest";
 
 import {
+  countHandoffs,
+  endedWithHandoff,
+  handoffMarkerDraft,
   LEASE_TTL_MS,
   MAX_RESUME_AGE_MS,
   MAX_RESUMES,
@@ -75,5 +78,40 @@ describe("resume notices", () => {
       { at: "2026-11-25T10:00:00.000Z", reason: draft.payload.reason },
     ]);
     expect(draft.payload.reason).toContain("3 completed steps kept");
+  });
+});
+
+describe("hand-offs and parked plans", () => {
+  it("continues a handed-off run at once, without the quiet period or the resume cap", () => {
+    const handedOff = { ...base, handedOff: true, lastEventAt: ago(100) };
+    expect(resumeDecision(handedOff, now)).toBe("continue");
+    expect(resumeDecision({ ...handedOff, resumes: MAX_RESUMES }, now)).toBe("continue");
+    expect(resumeDecision({ ...handedOff, createdAt: ago(MAX_RESUME_AGE_MS + 1) }, now)).toBe(
+      "continue",
+    );
+    expect(
+      resumeDecision({ ...handedOff, leaseExpiresAt: new Date(now.getTime() + 5_000) }, now),
+    ).toBe("none");
+    expect(resumeDecision({ ...handedOff, execution: "simulated" }, now)).toBe("none");
+  });
+
+  it("never resumes or sweeps a run that waits for a plan decision", () => {
+    const waiting = { ...base, planWait: "pending" as const, lastEventAt: ago(9 * 60_000) };
+    expect(resumeDecision(waiting, now)).toBe("none");
+    expect(resumeDecision({ ...waiting, leaseExpiresAt: ago(60_000) }, now)).toBe("none");
+    expect(resumeDecision({ ...waiting, execution: "simulated" }, now)).toBe("none");
+    expect(resumeDecision({ ...waiting, planWait: "due" }, now)).toBe("continue");
+    expect(resumeDecision({ ...waiting, planWait: "due", execution: "simulated" }, now)).toBe(
+      "sweep",
+    );
+  });
+
+  it("reads hand-off markers back from the log", () => {
+    const draft = handoffMarkerDraft({ elapsedMs: 275_000, budgetMs: 300_000 });
+    const event = { runId: "r", seq: 2, at: now.toISOString(), ...draft } as RunEvent;
+    expect(draft.payload.reason).toContain("275 s into its 300 s limit");
+    expect(endedWithHandoff([event])).toBe(true);
+    expect(countHandoffs([event, event])).toBe(2);
+    expect(resumeNotices([event])).toEqual([]);
   });
 });

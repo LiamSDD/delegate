@@ -39,6 +39,7 @@ export function useRunStream(runId: string): RunStream {
     let frame: number | null = null;
     let buffer: RunEvent[] = [];
     let disposed = false;
+    let rotating = false;
 
     const flush = () => {
       frame = null;
@@ -98,16 +99,18 @@ export function useRunStream(runId: string): RunStream {
 
     function connect() {
       if (disposed) return;
-      dispatch({ type: "connecting" });
+      if (!rotating) dispatch({ type: "connecting" });
       const query = lastSeq.current > 0 ? `?after=${lastSeq.current}` : "";
       const next = new EventSource(`/api/runs/${runId}/events${query}`);
       source = next;
       for (const type of RUN_EVENT_TYPES) next.addEventListener(type, onRunEvent);
       next.addEventListener("stream.replay", (message: MessageEvent<string>) => {
+        if (rotating) return;
         const parsed = replaySchema.safeParse(JSON.parse(message.data));
         dispatch({ type: "replay", count: parsed.success ? parsed.data.count : 0 });
       });
       next.addEventListener("stream.live", () => {
+        rotating = false;
         flushNow();
         attempts.current = 0;
         setLiveFromSeq((current) => current ?? lastSeq.current);
@@ -117,6 +120,13 @@ export function useRunStream(runId: string): RunStream {
         flushNow();
         next.close();
         dispatch({ type: "ended" });
+      });
+      next.addEventListener("stream.rotate", () => {
+        flushNow();
+        next.close();
+        attempts.current = 0;
+        rotating = true;
+        connect();
       });
       next.addEventListener("stream.error", () => {
         next.close();

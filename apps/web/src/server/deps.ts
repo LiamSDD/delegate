@@ -10,6 +10,7 @@ import { defaultOpenEndpoint, loadMissionConnections } from "./connectors";
 import { connectedInstallations, githubAppConfig } from "./github-connect";
 import { workspaceKnowledge } from "./assistants";
 import { getAppDatabase } from "./db";
+import { createScheduler } from "./invocation";
 import { createFakeRunner } from "./fake-runner";
 import type { MissionRunner } from "./mission-runner";
 import { runRegistry } from "./run-registry";
@@ -42,6 +43,12 @@ export function dbPlaybooks(scope: { workspaceId: string; userId: string }): Pla
   };
 }
 
+const scheduleInRequest = createScheduler({
+  keepAlive: (work) => {
+    after(work);
+  },
+});
+
 export function apiDeps(): ApiDeps {
   return {
     app: getAppDatabase,
@@ -50,9 +57,7 @@ export function apiDeps(): ApiDeps {
     ipLimiter: networkRunLimiter(),
     registry: runRegistry(),
     runner: () => selectRunner(process.env),
-    schedule: (task) => {
-      after(task);
-    },
+    schedule: scheduleInRequest,
     production: process.env.NODE_ENV === "production",
     shipEnabled: isShipAPrEnabled(process.env),
     shipInstallations: connectedInstallations(getAppDatabase),

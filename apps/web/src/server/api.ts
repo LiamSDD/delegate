@@ -17,7 +17,7 @@ import { authenticateBearer, hasBearer } from "./api-tokens";
 import { autopilotGraph, cancelAutopilotChildren, createAutopilotRun } from "./autopilot";
 import { isRunsPausedError, RUNS_PAUSED_MESSAGE } from "./control/pause";
 import type { AppDatabase } from "./db";
-import { reviveOrSweep } from "./durable";
+import { reviveOrSweep, wakeRun } from "./durable";
 import { executeRun } from "./execute-run";
 import { createForkRecord, planRunFork } from "./fork";
 import { createDbLease } from "./leases";
@@ -49,7 +49,14 @@ import {
   signSession,
 } from "./session";
 import { buildRunView } from "./run-view-api";
-import { createRunEventStream, parseResumeSeq, type RunStreamOptions, SSE_HEADERS } from "./sse";
+import { withInvocation } from "./invocation";
+import {
+  createRunEventStream,
+  parseResumeSeq,
+  type RunStreamOptions,
+  SSE_HEADERS,
+  UI_STREAM_ROTATE_MS,
+} from "./sse";
 import { readAutomation, readRunsPaused } from "./workspace-settings";
 
 export interface ApiDeps {
@@ -62,7 +69,7 @@ export interface ApiDeps {
   schedule: (task: () => Promise<void>) => void;
   production: boolean;
   now?: () => Date;
-  stream?: Pick<RunStreamOptions, "pollMs" | "heartbeatMs" | "idleHookMs">;
+  stream?: Pick<RunStreamOptions, "pollMs" | "heartbeatMs" | "idleHookMs" | "maxStreamMs">;
   connections?: (app: AppDatabase, ctx: RunContext) => Promise<MissionConnections | undefined>;
   shipEnabled?: boolean;
   shipInstallations?: (workspaceId: string, userId: string) => FindInstallation;
@@ -607,17 +614,20 @@ export async function handleRunEvents(
     return new Response(null, { status: 204, headers: NO_STORE });
   }
 
-  const stream = createRunEventStream({
-    afterSeq,
-    signal: request.signal,
-    ...deps.stream,
-    source: {
-      load: (after) => readEvents(app, session.userId, runId, after),
-      onIdle: async () => {
-        await freshRecord(app, session, runId, deps);
+  const stream = withInvocation(() =>
+    createRunEventStream({
+      afterSeq,
+      signal: request.signal,
+      maxStreamMs: UI_STREAM_ROTATE_MS,
+      ...deps.stream,
+      source: {
+        load: (after) => readEvents(app, session.userId, runId, after),
+        onIdle: async () => {
+          await freshRecord(app, session, runId, deps);
+        },
       },
-    },
-  });
+    }),
+  );
   return new Response(stream, { status: 200, headers: SSE_HEADERS });
 }
 
@@ -758,6 +768,7 @@ export async function handlePlanDecision(
     console.error("plan decision failed", error);
     return apiError(500, "internal", "The decision could not be recorded.");
   }
+  deps.schedule(() => wakeRun(guest.app, guest.session.userId, runId, deps));
   return Response.json(
     { decision: details.decision, edited: "steps" in details && details.steps !== undefined },
     { headers: NO_STORE },
