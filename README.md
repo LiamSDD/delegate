@@ -2,9 +2,9 @@
 
 **Turns a goal, a company URL or a repo into finished, verified work.**
 
-<a href="https://github.com/LiamSDD/LiamSDD/blob/main/assets/demos/delegate-demo-1080p60.mp4"><img src="docs/images/demo-loop.gif" alt="Delegate demo: a goal goes in, the plan is approved, agents work in parallel and every claim comes back cited" width="100%"></a>
+<a href="https://github.com/LiamSDD/LiamSDD/blob/main/assets/demos/delegate-demo-1080p60.mp4"><img src="docs/images/demo-loop.gif" alt="Delegate demo: a company URL goes in, agents audit it in parallel, and Build it crawls the site into a tested assistant" width="100%"></a>
 
-[Watch the 60-second demo](https://github.com/LiamSDD/LiamSDD/blob/main/assets/demos/delegate-demo-1080p60.mp4): real live runs on free models, with only the waiting sped up.
+[Watch the 62-second demo](https://github.com/LiamSDD/LiamSDD/blob/main/assets/demos/delegate-demo-1080p60.mp4): real live runs on free models, with only the waiting sped up.
 
 ## Why
 
