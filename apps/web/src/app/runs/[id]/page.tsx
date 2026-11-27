@@ -10,6 +10,8 @@ import { currentGuest } from "@/server/page-session";
 import { getRunRecord } from "@/server/runs";
 import { runTarget } from "@/lib/runs/target";
 
+export const maxDuration = 300;
+
 export const metadata: Metadata = { title: "Run" };
 
 export default async function RunPage({ params }: PageProps<"/runs/[id]">) {

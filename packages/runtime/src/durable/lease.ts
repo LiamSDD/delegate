@@ -40,32 +40,41 @@ export async function holdLease<T>(
   lease: RunLease,
   outer: AbortSignal | undefined,
   work: (signal: AbortSignal, held: () => boolean) => Promise<T>,
+  now: () => number = Date.now,
 ): Promise<{ acquired: false } | { acquired: true; value: T; lost: boolean }> {
+  const acquiredAt = now();
   if (!(await lease.acquire())) return { acquired: false };
   const controller = new AbortController();
   const signal =
     outer === undefined ? controller.signal : AbortSignal.any([outer, controller.signal]);
-  const state = { lost: false };
+  const state = { lost: false, renewedAt: acquiredAt };
+  const held = () => !state.lost && now() - state.renewedAt < lease.ttlMs;
+  const lose = () => {
+    if (state.lost) return;
+    state.lost = true;
+    controller.abort(new LeaseLostError());
+  };
   const timer = setInterval(
     () => {
+      if (state.lost) return;
+      if (now() - state.renewedAt >= lease.ttlMs) {
+        lose();
+        return;
+      }
+      const issuedAt = now();
       lease.renew().then(
-        (held) => {
-          if (!held) {
-            state.lost = true;
-            controller.abort(new LeaseLostError());
-          }
+        (renewed) => {
+          if (renewed) state.renewedAt = Math.max(state.renewedAt, issuedAt);
+          else lose();
         },
-        () => {
-          state.lost = true;
-          controller.abort(new LeaseLostError());
-        },
+        () => undefined,
       );
     },
     Math.max(1_000, Math.floor(lease.ttlMs / 3)),
   );
   timer.unref();
   try {
-    const value = await work(signal, () => !state.lost);
+    const value = await work(signal, held);
     return { acquired: true, value, lost: state.lost };
   } finally {
     clearInterval(timer);

@@ -170,4 +170,26 @@ describe("createRunEventStream", () => {
     expect(result.filter((frame) => frame.comment === "heartbeat")).toHaveLength(2);
     expect(idle).toBe(2);
   });
+
+  it("rotates a long stream with a control frame so work it triggers gets a fresh invocation", async () => {
+    let clock = 0;
+    const stream = createRunEventStream({
+      afterSeq: 0,
+      signal: new AbortController().signal,
+      pollMs: 250,
+      heartbeatMs: 15_000,
+      maxStreamMs: 1_000,
+      now: () => clock,
+      sleep: (ms) => {
+        clock += ms;
+        return Promise.resolve();
+      },
+      source: {
+        load: (after) => Promise.resolve([created()].filter((event) => event.seq > after)),
+      },
+    });
+    const result = frames(await readAll(stream));
+    expect(result.at(-1)).toEqual({ event: "stream.rotate", data: '{"seq":1}' });
+    expect(result.some((frame) => frame.event === "stream.end")).toBe(false);
+  });
 });

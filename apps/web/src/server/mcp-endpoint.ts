@@ -19,7 +19,7 @@ import {
 import { authenticateBearer, type TokenSession } from "./api-tokens";
 import { createRateLimiter, type RateLimiter } from "./session";
 import type { AppDatabase } from "./db";
-import { reviveOrSweep } from "./durable";
+import { reviveOrSweep, wakeRun } from "./durable";
 import { pendingPlanApproval, PlanDecisionError, recordPlanDecision } from "./plan-approval";
 import { buildRunView } from "./run-view-api";
 import { artifactContent, getRunRecord, isTerminalEventType, listRuns } from "./runs";
@@ -129,6 +129,7 @@ export function inProcessBackend(
           );
         throw error;
       }
+      deps.schedule(() => wakeRun(app, session.userId, runId, deps));
       return { decision: decision.decision };
     },
     async getArtifact(runId, artifactId) {

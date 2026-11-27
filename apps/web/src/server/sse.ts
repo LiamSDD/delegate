@@ -5,6 +5,7 @@ import { isTerminalEventType, REPLAY_PAGE_SIZE } from "./runs";
 export const POLL_INTERVAL_MS = 250;
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 export const CLIENT_RETRY_MS = 2000;
+export const UI_STREAM_ROTATE_MS = 60_000;
 
 export const SSE_HEADERS: Readonly<Record<string, string>> = {
   "Content-Type": "text/event-stream; charset=utf-8",
@@ -42,6 +43,7 @@ export interface RunStreamOptions {
   pollMs?: number;
   heartbeatMs?: number;
   idleHookMs?: number;
+  maxStreamMs?: number;
   replayPageSize?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   now?: () => number;
@@ -76,8 +78,9 @@ export function createRunEventStream(options: RunStreamOptions): ReadableStream<
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      let lastWrite = now();
-      let lastIdle = now();
+      const openedAt = now();
+      let lastWrite = openedAt;
+      let lastIdle = openedAt;
       let seq = options.afterSeq;
       const progress = { terminal: false };
       const write = (text: string) => {
@@ -93,6 +96,7 @@ export function createRunEventStream(options: RunStreamOptions): ReadableStream<
         }
       };
       const stopped = () => lifecycle.cancelled || signal.aborted;
+      const ended = () => progress.terminal;
 
       try {
         write(`retry: ${CLIENT_RETRY_MS}\n\n`);
@@ -114,6 +118,17 @@ export function createRunEventStream(options: RunStreamOptions): ReadableStream<
           if (source.onIdle !== undefined && now() - lastIdle >= idleHookMs) {
             lastIdle = now();
             await source.onIdle();
+          }
+          if (
+            !ended() &&
+            options.maxStreamMs !== undefined &&
+            now() - openedAt >= options.maxStreamMs
+          ) {
+            writeEvents(await source.load(seq));
+            if (!ended()) {
+              write(controlFrame("stream.rotate", { seq }));
+              break;
+            }
           }
         }
         if (progress.terminal) write(controlFrame("stream.end", { seq }));

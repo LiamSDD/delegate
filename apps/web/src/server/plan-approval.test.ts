@@ -9,6 +9,7 @@ import { createFakeRunner } from "./fake-runner";
 import type { MissionRunner } from "./mission-runner";
 import {
   createPlanApprovalWaiter,
+  latestPlanApproval,
   pendingPlanApproval,
   type PlanDecision,
   readPlanDecision,
@@ -312,5 +313,95 @@ describe("widening revisions under auto-approve", () => {
         await updateAutomation(app, session, { autoApprovePlans: true });
       }),
     );
+  });
+});
+
+describe("durable plan waits", () => {
+  it("parks after the inline wait and reuses the same approval when the run continues", async () => {
+    const { ctx, cookie } = await newRun();
+    let parked = 0;
+    const parking = createPlanApprovalWaiter({
+      app,
+      ctx,
+      autoApprove: false,
+      pollMs: 5,
+      inlineWaitMs: 20,
+      park: () => {
+        parked += 1;
+        return Promise.reject(new Error("parked"));
+      },
+    });
+    await expect(parking({ version: 1, steps, kind: "initial" })).rejects.toThrow("parked");
+    expect(parked).toBe(1);
+    const pending = await pendingPlanApproval(app, ctx.userId, ctx.runId);
+    expect(pending).not.toBeNull();
+
+    const response = await handlePlanDecision(
+      post(ctx.runId, cookie, { decision: "approved" }),
+      ctx.runId,
+      deps(),
+    );
+    expect(response.status).toBe(200);
+    const resumed = createPlanApprovalWaiter({ app, ctx, autoApprove: false, pollMs: 5 });
+    await expect(resumed({ version: 1, steps, kind: "initial" })).resolves.toEqual({
+      decision: "approved",
+    });
+    expect(await latestPlanApproval(app, ctx.userId, ctx.runId)).toMatchObject({
+      approvalId: pending?.approvalId,
+      version: 1,
+    });
+  });
+
+  it("keeps a widening revision waiting inline instead of parking", async () => {
+    const { ctx } = await newRun();
+    const wait = createPlanApprovalWaiter({
+      app,
+      ctx,
+      autoApprove: false,
+      pollMs: 5,
+      timeoutMs: 60,
+      inlineWaitMs: 5,
+      park: () => Promise.reject(new Error("parked")),
+    });
+    await expect(
+      wait({ version: 2, steps: widened, kind: "revision", required: true }),
+    ).resolves.toEqual({ decision: "rejected", reason: "Plan approval timed out." });
+  });
+
+  it("never auto-approves a reused row that a widening revision opened", async () => {
+    const { ctx } = await newRun();
+    const human = createPlanApprovalWaiter({
+      app,
+      ctx,
+      autoApprove: true,
+      pollMs: 5,
+      timeoutMs: 60_000,
+    });
+    const controller = new AbortController();
+    const revision = human(
+      { version: 2, steps: widened, kind: "revision", required: true },
+      controller.signal,
+    );
+    await waitForPending(ctx);
+    controller.abort(new Error("handed off"));
+    await expect(revision).rejects.toThrow("handed off");
+    let parked = 0;
+    const resumed = createPlanApprovalWaiter({
+      app,
+      ctx,
+      autoApprove: true,
+      pollMs: 5,
+      timeoutMs: 60,
+      inlineWaitMs: 1,
+      park: () => {
+        parked += 1;
+        return Promise.reject(new Error("parked"));
+      },
+    });
+    await expect(resumed({ version: 2, steps: widened, kind: "initial" })).resolves.toEqual({
+      decision: "rejected",
+      reason: "Plan approval timed out.",
+    });
+    expect(parked).toBe(0);
   });
 });

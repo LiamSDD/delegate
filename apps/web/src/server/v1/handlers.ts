@@ -24,7 +24,7 @@ import type { TokenSession } from "../api-tokens";
 import { type AssistantStores, ensureLoaded, findAssistant, listAssistants } from "../assistants";
 import { answerStream, type ChatDeps } from "../chat";
 import type { AppDatabase } from "../db";
-import { reviveOrSweep } from "../durable";
+import { reviveOrSweep, wakeRun } from "../durable";
 import { pendingPlanApproval, PlanDecisionError, recordPlanDecision } from "../plan-approval";
 import { buildRunView } from "../run-view-api";
 import {
@@ -227,6 +227,7 @@ function decidePlan(decision: "approved" | "rejected") {
         ? new V1Error("forbidden", "This token's user cannot decide this plan.")
         : new V1Error("no_pending_plan", "This plan was already decided.");
     }
+    ctx.deps.api.schedule(() => wakeRun(ctx.app, ctx.session.userId, runId, ctx.deps.api));
     return { body: { runId, decision } };
   };
 }
@@ -351,6 +352,7 @@ const chatWithAssistant: Handler<"chatWithAssistant"> = async (ctx) => {
     question: ctx.body.question,
     history: ctx.body.history,
     signal: AbortSignal.any([ctx.request.signal, controller.signal]),
+    scope: { userId: ctx.session.userId, workspaceId: view.workspaceId },
   });
   if (ctx.wantsEventStream)
     return {

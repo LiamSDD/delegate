@@ -8,6 +8,8 @@ import { reviveOrSweep } from "@/server/durable";
 import { currentGuest } from "@/server/page-session";
 import { getRunRecord, listOpenRuns, listRuns, type RunListItem } from "@/server/runs";
 
+export const maxDuration = 300;
+
 export const metadata: Metadata = { title: "Runs" };
 
 const STATUS: Record<RunListItem["status"], { label: string; className: string }> = {

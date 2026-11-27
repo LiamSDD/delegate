@@ -75,7 +75,7 @@ ALTER ROLE delegate_app_login PASSWORD '<from your secret manager>';
 
 ## What to know before you rely on it
 
-- **Run length.** The route that starts runs declares a maximum duration of 300 seconds. A run that needs longer is checkpointed in the event log and resumes from its last finished step when its page, or its Autopilot parent, is next read. There is no job service and no cron in this repository, so a run nobody reads again waits. ADR 0007 explains the design.
+- **Run length.** The route that starts runs declares a maximum duration of 300 seconds. A run that needs longer is checkpointed in the event log and resumes from its last finished step when its page, or its Autopilot parent, is next read. On Vercel a run hands off to a new invocation 25 s before the limit and continues on the next read; set `DELEGATE_FUNCTION_MAX_MS` if your platform has a different limit. There is no job service and no cron in this repository, so a run nobody reads again waits. ADR 0007 explains the design.
 - **Rate limits.** The per-guest and per-address run limits and the MCP request limit are counted in memory by each server process. With several instances they are per instance.
 - **Retention.** Demo workspaces are limited to 7 days of retention by a database constraint, and the function `purge_expired_demo_runs()` deletes what has expired. Nothing in this repository schedules that function. Call it from your own scheduler with a login that has the `delegate_maintenance` role. See [privacy and retention](privacy-and-retention.md).
 - **Where prompts go.** Model calls leave your server for the providers in `config/models.json`. Each entry records the provider's terms and the highest data classification it may receive.

@@ -4,7 +4,7 @@ import { type ChildMissionId, type ChildOutcome, type RunEvent } from "../../eve
 import { AUTOMATION_AUDIT_KIND, AutomationAuditSchema } from "../automation-audit/schema";
 import { estimateRoi } from "../automation-audit/roi";
 import { ASSISTANT_KIND, AssistantArtifactSchema } from "../build-agent/schema";
-import { GOAL_BRIEF_KIND, GoalBriefSchema } from "../custom-goal/schema";
+import { GOAL_BRIEF_KIND, type GoalBrief, GoalBriefSchema } from "../custom-goal/schema";
 import { REPO_XRAY_KIND, RepoXraySchema } from "../repo-xray/schema";
 import { SHIP_RESULT_KIND, ShipResultSchema } from "../ship-a-pr/schema";
 import { childArtifacts, COMPANY_XRAY_BRIEF_KIND, type ChildArtifact } from "./chain";
@@ -47,19 +47,74 @@ function eur(value: number): string {
 
 const SourcesSchema = z.object({ sources: z.array(z.unknown()) });
 
-function detailsFor(missionId: ChildMissionId, artifact: ChildArtifact): Details {
+export const BRIEF_QUALITY_GATE = { minCitationAccuracy: 0.7, maxWeakClaims: 5 } as const;
+
+export function weakClaimCount(events: readonly RunEvent[]): number {
+  return new Set(
+    events.flatMap((event) =>
+      event.type === "critic.flagged" && event.payload.claimId.endsWith(":weak")
+        ? [event.payload.claimId]
+        : [],
+    ),
+  ).size;
+}
+
+export function briefQualityFlags(brief: GoalBrief, weakClaims: number): string[] {
+  const flags: string[] = [];
+  const accuracy = brief.verification?.citationAccuracy;
+  if (
+    accuracy !== undefined &&
+    accuracy !== null &&
+    accuracy < BRIEF_QUALITY_GATE.minCitationAccuracy
+  )
+    flags.push(
+      `The brief's citation accuracy is ${percent(accuracy)}, below the ${percent(BRIEF_QUALITY_GATE.minCitationAccuracy)} gate: check its claims before relying on the missions it fed.`,
+    );
+  if (weakClaims > BRIEF_QUALITY_GATE.maxWeakClaims)
+    flags.push(
+      `${String(weakClaims)} claims in the brief are only weakly supported by their sources (gate: ${String(BRIEF_QUALITY_GATE.maxWeakClaims)}).`,
+    );
+  const coverage = brief.verification?.goalCoverage;
+  if (coverage !== undefined && coverage.verdict !== "answered")
+    flags.push(
+      cut(
+        `The brief ${coverage.verdict === "partly" ? "only partly answers" : "does not answer"} the goal${coverage.missing.length === 0 ? "" : `; missing: ${coverage.missing.join("; ")}`}.`,
+        300,
+      ),
+    );
+  return flags;
+}
+
+function briefDetails(brief: GoalBrief, weakClaims: number): Details {
+  const accuracy = brief.verification?.citationAccuracy;
+  const coverage = brief.verification?.goalCoverage;
+  return {
+    metrics: [
+      metric("Ranked actions", brief.actions.length),
+      metric("Cited sources", brief.sources.length),
+      ...(accuracy === undefined || accuracy === null
+        ? []
+        : [metric("Citation accuracy", percent(accuracy))]),
+      ...(weakClaims === 0 ? [] : [metric("Weak claims", weakClaims)]),
+      ...(coverage === undefined
+        ? []
+        : [metric("Goal coverage", coverage.verdict.replace("_", " "))]),
+    ],
+    links: [],
+    needsHuman: briefQualityFlags(brief, weakClaims),
+  };
+}
+
+function detailsFor(
+  missionId: ChildMissionId,
+  artifact: ChildArtifact,
+  events: readonly RunEvent[],
+): Details {
   switch (missionId) {
     case "custom-goal": {
       const brief = GoalBriefSchema.safeParse(artifact.content);
       if (!brief.success) return none;
-      return {
-        metrics: [
-          metric("Ranked actions", brief.data.actions.length),
-          metric("Cited sources", brief.data.sources.length),
-        ],
-        links: [],
-        needsHuman: [],
-      };
+      return briefDetails(brief.data, weakClaimCount(events));
     }
     case "company-xray": {
       const brief = SourcesSchema.safeParse(artifact.content);
@@ -159,7 +214,7 @@ export function summariseChild(
   );
   const artifact = childArtifacts(events).get(CHILD_DELIVERABLE_KINDS[missionId]);
   const runLink: Link = { label: "Open the run", href: `/runs/${childRunId}` };
-  const details = artifact === undefined ? none : detailsFor(missionId, artifact);
+  const details = artifact === undefined ? none : detailsFor(missionId, artifact, events);
   const deliverable =
     artifact === undefined
       ? null
