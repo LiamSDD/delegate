@@ -442,3 +442,62 @@ describe("summariseChild and the report", () => {
     expect(report.headline).toMatch(/^1 of 4 steps done/);
   });
 });
+
+describe("brief quality flags", () => {
+  const BRIEF_RUN = "00000000-0000-4000-8000-000000000009";
+
+  function briefLog(accuracy: number, weak: number, verdict: "answered" | "partly") {
+    const brief = {
+      ...goalBriefFixture({ name: "Acme", url: "https://acme.example/" }),
+      verification: {
+        citationAccuracy: accuracy,
+        specificity: { score: 0.8, specific: 4, generic: 1, movedToContext: 0, dropped: 0 },
+        goalCoverage: {
+          verdict,
+          missing: verdict === "answered" ? [] : ["ticket volumes"],
+          reason: "r",
+          prompt: "goal-coverage.v1",
+        },
+      },
+    };
+    const log = childLog(
+      BRIEF_RUN,
+      "custom-goal",
+      [{ kind: "goal-brief", title: "B", content: brief }],
+      {
+        status: "completed",
+        summary: "Brief ready.",
+      },
+    );
+    const flags: RunEvent[] = Array.from({ length: weak }, (_, index) => ({
+      runId: BRIEF_RUN,
+      seq: 100 + index,
+      at: "2026-11-25T10:00:00.000Z",
+      type: "critic.flagged",
+      stepId: "verify",
+      payload: {
+        claimId: `c${String(index)}:weak`,
+        claim: "A claim",
+        reason: "Kept as weakly supported",
+        severity: "info",
+        category: "claim",
+      },
+    }));
+    return [...log.slice(0, -1), ...flags, ...log.slice(-1)];
+  }
+
+  it("flags a completed brief with low citation accuracy, many weak claims or a partial answer", () => {
+    const weak = summariseChild("custom-goal", BRIEF_RUN, briefLog(0.5, 14, "partly"));
+    expect(weak.status).toBe("completed");
+    expect(weak.metrics).toContainEqual({ label: "Citation accuracy", value: "50%" });
+    expect(weak.metrics).toContainEqual({ label: "Weak claims", value: "14" });
+    expect(weak.needsHuman).toHaveLength(3);
+    expect(weak.needsHuman[0]).toContain("50%, below the 70% gate");
+    expect(weak.needsHuman[1]).toContain("14 claims");
+    expect(weak.needsHuman[2]).toContain("only partly answers the goal; missing: ticket volumes");
+
+    const sound = summariseChild("custom-goal", BRIEF_RUN, briefLog(0.92, 2, "answered"));
+    expect(sound.needsHuman).toEqual([]);
+    expect(sound.metrics).toContainEqual({ label: "Goal coverage", value: "answered" });
+  });
+});
