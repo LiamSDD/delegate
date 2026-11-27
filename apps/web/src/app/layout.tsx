@@ -18,6 +18,15 @@ import { themeInitScript } from "@/lib/theme";
 export const metadata: Metadata = {
   title: { default: "Delegate", template: "%s · Delegate" },
   description: "Turns a company's goals into finished, verified work, safely enough to let it run.",
+  metadataBase: new URL("https://delegate-beryl.vercel.app"),
+  openGraph: {
+    type: "website",
+    siteName: "Delegate",
+    title: "Delegate · give it a goal, get back verified work",
+    description:
+      "Open-source multi-agent platform: parallel agents, every claim checked against its source, risky actions wait for approval.",
+  },
+  twitter: { card: "summary_large_image" },
 };
 
 export const viewport: Viewport = {
