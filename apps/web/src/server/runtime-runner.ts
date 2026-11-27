@@ -3,6 +3,7 @@ import path from "node:path";
 
 import modelsConfig from "@config/models.json";
 import {
+  type KnowledgeStore,
   parsePromptFile,
   type Playbook,
   PlaybookSchema,
@@ -59,6 +60,7 @@ export function readShippedPlaybook(key: string, root = resolveRepoRoot()): Play
 export interface RuntimeRunnerOptions {
   env: Record<string, string | undefined>;
   playbooks?: (scope: { workspaceId: string; userId: string }) => PlaybookStore;
+  knowledge?: (scope: { workspaceId: string; userId: string }) => KnowledgeStore;
   runMission?: (options: RunMissionOptions) => Promise<RunMissionResult>;
   resumeMission?: (options: ResumeMissionOptions) => Promise<ResumeMissionResult>;
   loadPrompts?: () => RuntimePrompts;
@@ -109,6 +111,9 @@ export function createRuntimeRunner(options: RuntimeRunnerOptions): MissionRunne
       ...(findInstallation === undefined ? {} : { findInstallation }),
       planApprover,
       ...assistantStores(),
+      ...(scope === undefined || options.knowledge === undefined
+        ? {}
+        : { knowledge: options.knowledge(scope) }),
       ...(connections === undefined ? {} : { connections }),
       ...learning,
     };

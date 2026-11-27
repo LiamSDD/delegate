@@ -1,4 +1,10 @@
-import { artifacts, runs, withTenant } from "@delegate/db";
+import {
+  artifacts,
+  createDbKnowledgeStore,
+  runs,
+  type TenantScope,
+  withTenant,
+} from "@delegate/db";
 import {
   type AssistantStore,
   createMemoryAssistantStore,
@@ -38,8 +44,24 @@ export function assistantStores(): AssistantStores {
   return holder.__delegateAssistantStores;
 }
 
+export function workspaceKnowledge(
+  app: () => Promise<AppDatabase>,
+  scope: TenantScope,
+): KnowledgeStore {
+  const store = () => app().then((database) => createDbKnowledgeStore(database.db, scope));
+  return {
+    getPage: (collection, url) => store().then((knowledge) => knowledge.getPage(collection, url)),
+    putPage: (page) => store().then((knowledge) => knowledge.putPage(page)),
+    listChunks: (collection) => store().then((knowledge) => knowledge.listChunks(collection)),
+    setEmbeddings: (entries) => store().then((knowledge) => knowledge.setEmbeddings(entries)),
+    searchFullText: (params) => store().then((knowledge) => knowledge.searchFullText(params)),
+    searchVector: (params) => store().then((knowledge) => knowledge.searchVector(params)),
+  };
+}
+
 export interface AssistantView {
   assistant: AssistantArtifact;
+  workspaceId: string;
   evals: AssistantEvals | null;
   gaps: GapsReport | null;
   runId: string;
@@ -70,6 +92,7 @@ export async function findAssistant(
     const [row] = await tx
       .select({
         runId: artifacts.runId,
+        workspaceId: artifacts.workspaceId,
         content: artifacts.content,
         createdAt: artifacts.createdAt,
         runStatus: runs.status,
@@ -103,6 +126,7 @@ export async function findAssistant(
       .find((parsed) => parsed.success)?.data;
     return {
       assistant: assistant.data,
+      workspaceId: row.workspaceId,
       evals: evals ?? null,
       gaps: gaps ?? null,
       runId: row.runId,

@@ -8,6 +8,7 @@ import type { ApiDeps } from "./api";
 import type { ConnectionsDeps } from "./connections-api";
 import { defaultOpenEndpoint, loadMissionConnections } from "./connectors";
 import { connectedInstallations, githubAppConfig } from "./github-connect";
+import { workspaceKnowledge } from "./assistants";
 import { getAppDatabase } from "./db";
 import { createFakeRunner } from "./fake-runner";
 import type { MissionRunner } from "./mission-runner";
@@ -23,7 +24,14 @@ export function selectRunner(env: Record<string, string | undefined>): {
   run: MissionRunner;
 } {
   if (isFakeRunnerEnabled(env)) return { execution: "simulated", run: createFakeRunner() };
-  return { execution: "live", run: createRuntimeRunner({ env, playbooks: dbPlaybooks }) };
+  return {
+    execution: "live",
+    run: createRuntimeRunner({
+      env,
+      playbooks: dbPlaybooks,
+      knowledge: (scope) => workspaceKnowledge(getAppDatabase, scope),
+    }),
+  };
 }
 
 export function dbPlaybooks(scope: { workspaceId: string; userId: string }): PlaybookStore {

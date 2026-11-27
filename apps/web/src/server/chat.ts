@@ -15,18 +15,27 @@ const MAX_CHAT_BODY_BYTES = 32 * 1024;
 
 export type ChatMode = "owner" | "public";
 
+export interface ChatScope {
+  userId: string;
+  workspaceId: string;
+}
+
 export interface AnswerOptions {
   assistantId: string;
   question: string;
   history: ChatTurn[];
   signal: AbortSignal;
+  scope?: ChatScope;
 }
 
 export interface ChatDeps {
   publicLimiter: RateLimiter;
   guestLimiter: RateLimiter;
   exists: (assistantId: string) => Promise<boolean>;
-  guest: (request: Request, assistantId: string) => Promise<{ key: string } | null>;
+  guest: (
+    request: Request,
+    assistantId: string,
+  ) => Promise<{ key: string; scope?: ChatScope } | null>;
   answer: (options: AnswerOptions) => AsyncIterable<AnswerEvent>;
 }
 
@@ -112,13 +121,13 @@ export async function handleAssistantChat(
 
   let limiterKey: string;
   let limiter: RateLimiter;
+  const guest = await deps.guest(request, assistantId);
   if (mode === "owner") {
-    const guest = await deps.guest(request, assistantId);
     if (guest === null) return apiError(404, "not_found", "No assistant with that id.");
     limiterKey = guest.key;
     limiter = deps.guestLimiter;
   } else {
-    if (!(await deps.exists(assistantId))) {
+    if (guest === null && !(await deps.exists(assistantId))) {
       return apiError(404, "not_found", "No assistant with that id.");
     }
     limiterKey = `${assistantId}:${clientIp(request)}`;
@@ -138,6 +147,7 @@ export async function handleAssistantChat(
     question: parsed.data.question,
     history: parsed.data.history,
     signal,
+    ...(guest?.scope === undefined ? {} : { scope: guest.scope }),
   });
   return new Response(answerStream(events, controller), { status: 200, headers: SSE_HEADERS });
 }

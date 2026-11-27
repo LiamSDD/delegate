@@ -351,6 +351,7 @@ const chatWithAssistant: Handler<"chatWithAssistant"> = async (ctx) => {
     question: ctx.body.question,
     history: ctx.body.history,
     signal: AbortSignal.any([ctx.request.signal, controller.signal]),
+    scope: { userId: ctx.session.userId, workspaceId: view.workspaceId },
   });
   if (ctx.wantsEventStream)
     return {

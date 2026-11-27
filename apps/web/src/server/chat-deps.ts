@@ -4,7 +4,7 @@ import { answerQuestion } from "@delegate/runtime/server";
 import { isOwnerModeEnabled } from "@/flags";
 
 import { readCookie } from "./api";
-import { assistantStores, ensureLoaded, findAssistant } from "./assistants";
+import { assistantStores, ensureLoaded, findAssistant, workspaceKnowledge } from "./assistants";
 import type { ChatDeps } from "./chat";
 import { getAppDatabase } from "./db";
 import { loadRepoPrompts } from "./runtime-runner";
@@ -45,9 +45,12 @@ export function chatDeps(): ChatDeps {
       const view = await findAssistant(app, session.userId, assistantId);
       if (view === null) return null;
       await ensureLoaded(stores, view);
-      return { key: session.userId };
+      return {
+        key: session.userId,
+        scope: { userId: session.userId, workspaceId: view.workspaceId },
+      };
     },
-    answer: ({ assistantId, question, history, signal }) => {
+    answer: ({ assistantId, question, history, signal, scope }) => {
       prompts ??= loadRepoPrompts();
       return answerQuestion({
         assistantId,
@@ -57,7 +60,8 @@ export function chatDeps(): ChatDeps {
         env,
         audience: isOwnerModeEnabled(env) ? "owner" : "public-demo",
         assistants: stores.assistants,
-        knowledge: stores.knowledge,
+        knowledge:
+          scope === undefined ? stores.knowledge : workspaceKnowledge(getAppDatabase, scope),
         modelsConfig,
         prompts,
         latency: "interactive",
