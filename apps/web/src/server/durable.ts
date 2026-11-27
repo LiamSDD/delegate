@@ -288,12 +288,10 @@ export async function wakeRun(
     for (let attempt = 0; attempt < WAKE_ATTEMPTS; attempt += 1) {
       const record = await getRunRecord(app, userId, runId);
       if (record === null) return;
-      const after = await reviveOrSweep(app, userId, record, deps);
       const now = deps.now?.() ?? new Date();
-      const waiting =
-        after !== null &&
-        after.status === "awaiting_plan_approval" &&
-        (leaseHeld(after, now) || deps.registry.has(runId));
+      const busyBefore = leaseHeld(record, now) || deps.registry.has(runId);
+      const after = await reviveOrSweep(app, userId, record, deps);
+      const waiting = busyBefore && after !== null && after.status === "awaiting_plan_approval";
       if (!waiting) return;
       await new Promise((resolve) => setTimeout(resolve, retryMs));
     }

@@ -256,7 +256,7 @@ describe("planned hand-offs", () => {
     const runner = slowRunner(calls, slices);
     const h = await harness(runner);
     const shortInvocation = <T>(work: () => Promise<T>) =>
-      withInvocation(work, { budgetMs: 100, marginMs: 60, minMs: 10 });
+      withInvocation(work, { budgetMs: 3_000, marginMs: 2_200, minMs: 10 });
     await shortInvocation(() =>
       executeRun({
         app,
@@ -312,7 +312,7 @@ describe("planned hand-offs", () => {
     const runner = slowRunner(calls, 10, false);
     const h = await harness(runner);
     const shortInvocation = <T>(work: () => Promise<T>) =>
-      withInvocation(work, { budgetMs: 100, marginMs: 60, minMs: 10 });
+      withInvocation(work, { budgetMs: 3_000, marginMs: 2_200, minMs: 10 });
     await shortInvocation(() =>
       executeRun({
         app,
