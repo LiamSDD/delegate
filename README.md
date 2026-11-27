@@ -1,12 +1,49 @@
 # Delegate
 
-**Turns a company's goals into finished, verified work, safely enough for an enterprise to let it run.**
-
-Paste a company URL, a GitHub repo or a goal. Delegate plans the work, runs specialist agents in parallel, verifies every claim against its source, asks before anything risky happens, and records every step so the run can be replayed, forked and evaluated.
+**Turns a goal, a company URL or a repo into finished, verified work.**
 
 <a href="https://github.com/LiamSDD/LiamSDD/blob/main/assets/demos/delegate-demo-1080p60.mp4"><img src="docs/images/demo-loop.gif" alt="Delegate demo: a goal goes in, the plan is approved, agents work in parallel and every claim comes back cited" width="100%"></a>
 
-**[Watch the 60-second demo](https://github.com/LiamSDD/LiamSDD/blob/main/assets/demos/delegate-demo-1080p60.mp4)**: real live runs on the free model chain, with only the waiting sped up.
+[Watch the 60-second demo](https://github.com/LiamSDD/LiamSDD/blob/main/assets/demos/delegate-demo-1080p60.mp4): real live runs on free models, with only the waiting sped up.
+
+## Why
+
+- **Agents run in parallel** on a plan you approve or edit first.
+- **Every claim is checked** against its source and cited.
+- **Risky actions wait for approval**; every tool call passes a policy engine and is audited.
+- **Every run is an event log** you can replay, fork from any step and compare.
+- **Runs for $0** on free models, with no keys and no sign-up.
+
+## Quick start
+
+```bash
+pnpm install
+pnpm dev          # web app on http://localhost:3000
+pnpm check        # typecheck, lint, test and build
+```
+
+Needs Node 26 and pnpm 12. No keys needed.
+
+**[Live demo](https://delegate-beryl.vercel.app)** (no sign-up) · **[Docs](https://delegate-beryl.vercel.app/docs)** · **[Case study](docs/CASE_STUDY.md)** · [Evals](https://delegate-beryl.vercel.app/evals)
+
+## Status
+
+- M0–M5 shipped; M6 platform interfaces shipped except Ops Pulse; M7 in progress.
+- Five missions and Autopilot run live end to end. Ship-a-PR is built and off on the public demo.
+- Latest live X-ray eval: 81% pass (95% CI 57–93%, n=16), p50 62 s, $0.
+- 2,700 tests. Every number here comes from code or committed result files; see [`/evals`](https://delegate-beryl.vercel.app/evals) and [`docs/PROGRESS.md`](docs/PROGRESS.md).
+
+## What you can delegate
+
+| Mission | Input | Deliverable | Live demo |
+|---|---|---|---|
+| Company X-ray | Company URL | Cited brief: offering, customers, market, competitors, positioning, news, SWOT, stack signals | Live |
+| AI Automation Audit | Company URL, optional department | 5–8 workflows to automate, ranked by an adjustable ROI model | Live |
+| Build it | An Audit opportunity | A cited assistant trained on the company's site, with an eval set, a gaps report and an embeddable widget | Live |
+| Repo X-ray | Public GitHub URL | Architecture map, hotspots, test gaps and ranked improvements, cited to `path:line` | Live |
+| Ship-a-PR | A Repo X-ray improvement, an authorised repo | The change made and tested in a sandbox; a pull request only after a person approves the exact diff | Built; off |
+| Custom goal | A goal in plain language | Cited brief with findings by workstream, a ranked action plan and risks | Live |
+| Autopilot | A goal | The goal brief, up to three follow-up missions with their own approvals, and a final report | Live |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/home-dark.png">
@@ -14,38 +51,12 @@ Paste a company URL, a GitHub repo or a goal. Delegate plans the work, runs spec
   <img alt="Delegate home page: one input for a company URL, a GitHub repo or a goal, with the live model chain" src="docs/images/home-dark.png" width="100%">
 </picture>
 
-**Live demo: [delegate-beryl.vercel.app](https://delegate-beryl.vercel.app)**. Paste a company URL and watch the agents work. Free models, $0, no sign-up.
-
-**Read the case study: [How I built Delegate with Claude Code](docs/CASE_STUDY.md)**.
-
-> **Status: M0–M5 shipped, M6 platform interfaces shipped except Ops Pulse, M7 in progress.** Five missions and Autopilot run live end to end on free NVIDIA-hosted models with a keyless fallback; the sixth, Ship-a-PR, is built and switched off on the public demo. Around them: deep research, agent teams, a quarantined reader, a policy engine on every tool call, fork, replay and run compare from the event log, Mission Control, workspace Settings, a REST API with an SDK, a CLI and signed webhooks, and an MCP server with MCP connectors. A red-team suite runs in the local gate. Latest live X-ray eval: 81% pass (95% CI 57–93%, n=16), p50 62 s, $0. 2,700 tests. Every number on this page comes from code or committed result files in this repo; see [`/evals`](https://delegate-beryl.vercel.app/evals) and [`docs/PROGRESS.md`](docs/PROGRESS.md).
-
-## Why it exists
-
-A demo agent that does impressive things is common. What enterprises actually pay for is the hard part around it:
-
-| | What Delegate does |
-|---|---|
-| **Value** | Work specific to the company: a cited Company X-ray, an AI Automation Audit with an adjustable ROI model, "Build it", which turns the top opportunity into a working cited assistant, Repo X-ray for codebases, and Autopilot, which carries a goal through several of these missions. |
-| **Trust** | Every claim is cited and checked. Untrusted content is read only by a quarantined, tool-less model. Every tool call passes a policy engine; risky actions need approval; everything is audited. |
-| **Operability** | Every run is an append-only event log: replayable, forkable from any step, traced with OpenTelemetry, costed, and regression-tested with statistics. Mission Control shows what is running and what waits on a person. |
-| **Integration** | MCP server (call it from Claude Code or Codex), REST API v1 with OpenAPI and a TypeScript SDK, a CLI, signed webhooks, MCP client connectors, self-hosting on one machine or on Vercel and Neon, bring-your-own Claude key. |
-
-## What you can delegate
-
-| Mission | Input | Deliverable | On the live demo |
-|---|---|---|---|
-| Company X-ray | Company URL | Cited brief: offering, customers, market, competitors, positioning, news, SWOT, stack signals | Live |
-| AI Automation Audit | Company URL, optional department | 5–8 company-specific workflows to automate, ranked by an explicit, adjustable ROI model | Live |
-| Build it | An Audit opportunity | A cited assistant trained on the company's own site, with an eval set, a gaps report and an embeddable widget | Live |
-| Repo X-ray | Public GitHub URL | Architecture map, hotspots, test gaps and ranked improvements, cited to `path:line` | Live |
-| Ship-a-PR | A Repo X-ray improvement, an authorised repo | The change made and tested in a sandbox; a pull request only after a person approves the exact diff | Built; off on the public demo |
-| Custom goal | A goal in plain language | Cited goal brief with findings by workstream, a ranked action plan and risks | Live |
-| Autopilot | A goal | The goal brief, then up to three follow-up missions, each with its own plan, approvals and deliverable, and a final report | Live |
-
 ## Runs for $0
 
-Delegate needs no paid API and no accounts by default ([ADR 0003](docs/adr/0003-zero-cost-model-routing.md)). Each role (planner, worker, fast) has a fallback chain: keyless hosted open-weight models, then in-browser models on WebGPU, then local models with Ollama. Free-tier keys (Kimi K3, DeepSeek, Groq, Cerebras) and Claude with your own key are optional extras. The router falls back on rate limits, stalls and errors, and every step records which model served it.
+- No paid API and no accounts by default ([ADR 0003](docs/adr/0003-zero-cost-model-routing.md)).
+- Each role (planner, worker, fast) has a fallback chain: keyless hosted models, then in-browser WebGPU, then local Ollama.
+- Optional: free-tier keys (Kimi K3, DeepSeek, Groq, Cerebras) or Claude with your own key.
+- The router falls back on rate limits, stalls and errors; every step records which model served it.
 
 ## Architecture
 
@@ -69,11 +80,11 @@ flowchart LR
   EV -. finished or needs a decision .-> WH[Signed webhooks]
 ```
 
-- **Hand-written agent runtime**, no agent framework ([ADR 0001](docs/adr/0001-hand-written-runtime.md)). The loop is about 170 lines and meant to be read in one sitting.
-- **Quarantined reader** (dual-LLM pattern) so instructions hidden in a web page have nothing to talk to ([ADR 0002](docs/adr/0002-quarantined-reader.md)).
-- **Event log as the single source of truth:** the UI, traces, replay, forks and crash recovery are all rebuilt from typed `RunEvent`s.
+- **Hand-written agent runtime**, no framework ([ADR 0001](docs/adr/0001-hand-written-runtime.md)). The loop is about 170 lines.
+- **Quarantined reader** (dual-LLM pattern): instructions hidden in a web page have nothing to talk to ([ADR 0002](docs/adr/0002-quarantined-reader.md)).
+- **Event log as the source of truth:** UI, traces, replay, forks and crash recovery are all rebuilt from typed `RunEvent`s.
 
-Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Threat model: [`docs/SECURITY.md`](docs/SECURITY.md). Decisions: [`docs/adr/`](docs/adr) (20 ADRs).
+More: [architecture](docs/ARCHITECTURE.md) · [threat model](docs/SECURITY.md) · [decisions](docs/adr) (20 ADRs).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/trust-dark.png">
@@ -81,15 +92,14 @@ Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Threat model: [`doc
   <img alt="How Delegate stays trustworthy: quarantined reader, policy on every tool call, append-only event log, evals with confidence intervals" src="docs/images/trust-dark.png" width="100%">
 </picture>
 
-## What is built
-
-### Capabilities
+<details>
+<summary><b>Capabilities</b></summary>
 
 | Capability | What it does | Where |
 |---|---|---|
 | Missions | Company X-ray, AI Automation Audit, Build it, Repo X-ray, Ship-a-PR and custom goals, each with an input schema, allowed capabilities, a deliverable schema and an eval dataset. | [`packages/runtime/src/missions`](packages/runtime/src/missions), [guide](docs/guides/missions.md) |
 | Planner, orchestrator, critic | Validated step DAG with phases, plan approval and editing, parallel sub-agents with per-step budgets, capped replanning, and a critic that checks atomic claims against whole quotes. A revision that widens capabilities always waits for a person. | [ADR 0006](docs/adr/0006-planner-orchestrator-critic.md), [ADR 0015](docs/adr/0015-deep-research-and-specificity.md) |
-| Deep research | Bounded follow-up rounds after the first draft on sections with thin evidence; generic background claims are moved to context or dropped, and specificity is reported next to citation accuracy. | [ADR 0015](docs/adr/0015-deep-research-and-specificity.md) |
+| Deep research | Bounded follow-up rounds on sections with thin evidence; generic claims are moved to context or dropped, and specificity is reported next to citation accuracy. | [ADR 0015](docs/adr/0015-deep-research-and-specificity.md) |
 | Autopilot | A coordinator run that starts a custom goal, then up to three child missions from its ranked actions. Each child keeps its own approvals; depth is one by construction. | [ADR 0016](docs/adr/0016-autopilot.md) |
 | Agent teams | A plan step may declare a bounded fan-out of members with their own budgets, a typed run blackboard, a self-check before hand-off, and one typed-output path with repair. | [ADR 0020](docs/adr/0020-agent-teams-and-learned-routing.md) |
 | Durable runs, fork, replay, compare | Runs resume from the event log after a crash; any step can be forked; recorded runs replay; two runs diff claim by claim. | [ADR 0007](docs/adr/0007-durable-runs-from-the-event-log.md), [ADR 0009](docs/adr/0009-fork-replay-compare.md) |
@@ -102,7 +112,10 @@ Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Threat model: [`doc
 | MCP | Remote MCP server at `/api/mcp` for Claude Code, Codex, Cursor and VS Code; MCP client connectors whose output goes through the quarantined reader and whose side-effecting tools ask for approval. | [ADR 0014](docs/adr/0014-connections.md) |
 | Docs site | The guides in [`docs/guides`](docs/guides), served at [`/docs`](https://delegate-beryl.vercel.app/docs) with search. | [`apps/web`](apps/web) |
 
-### Packages and tests
+</details>
+
+<details>
+<summary><b>Packages and tests</b> (2,700 in total)</summary>
 
 | Package | What it does | Tests |
 |---|---|---|
@@ -119,37 +132,11 @@ Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Threat model: [`doc
 
 Counted on `main` with `vitest run` in each package and `vitest run --dir scripts` at the root; `pnpm check` runs the same suites before every push.
 
-## Roadmap
+</details>
 
-| Milestone | Scope | Status |
-|---|---|---|
-| M0 · Foundation | Monorepo, data model with RLS, events, router, policy, evals stats, design system | Done |
-| M1 · Runtime + Company X-ray | Streaming tool-use loop, quarantined reader, run view on live events, first eval dataset | Done |
-| M2 · Multi-agent + Automation Audit | Planner DAG, parallel lanes, critic, interactive ROI model, trace waterfall | Done; the five-company exit check is not recorded yet |
-| M3 · Build it + durability | Build-an-Agent (crawler, hybrid RAG, widget), durable runs, approvals | Done; the Demo A exit check is not recorded yet |
-| M4 · Trust layer | Red-team suite, replay, fork-from-step, `/evals` scoreboard | Done |
-| M5 · Engineering missions | Repo X-ray, Ship-a-PR in a sandbox | Done; Ship-a-PR has not opened a live pull request yet |
-| M6 · Platform interfaces | REST API, SDK, webhooks, CLI, MCP server and connectors, Ops Pulse | Shipped except Ops Pulse |
-| M7 · Enterprise | RBAC + SSO, policy editor, Mission Control, standing missions, self-hosting | In progress: Mission Control, Settings with a policy dry run, BYOK Claude and member roles in row-level security are in; SSO, policy editing, standing missions and Bedrock/Vertex are not |
-| M8 · Launch polish | Load test, accessibility audit, demo videos | Planned |
+## Connect from Claude Code or Codex
 
-Shipped beyond the original plan: Autopilot, deep research, agent teams, evolving playbooks and the training loop. Next: Studio, which takes an idea to a working product.
-
-The full spec, including both demo scripts, is in [`SPEC.md`](SPEC.md) and [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md).
-
-## Built with Claude Code
-
-This repo is developed with Claude Code as a disciplined engineering team, and the workflow is part of the project. The [case study](docs/CASE_STUDY.md) describes how.
-
-- [`CLAUDE.md`](CLAUDE.md): the working agreement every session reads (rules with their reasons, definition of done, model facts).
-- [`.claude/commands/`](.claude/commands): `next-task`, `verify`, `eval`, `redteam`, `demo-check`, `adr`.
-- [`.claude/agents/`](.claude/agents): `code-reviewer`, `security-reviewer`, `eval-analyst`, `ux-critic`.
-- Hooks: lint on every edited file, secret scan before every commit, full check before every push.
-- Independent workstreams run as parallel sub-agents, each scoped to its own packages, then reviewed before merge.
-
-## Connect from Claude Code / Codex
-
-Delegate is a remote MCP server at `https://<host>/api/mcp` (Streamable HTTP). Create a workspace API token under **Settings → Connections**, which also shows ready-to-paste setup for Cursor, VS Code and any MCP client.
+Delegate is a remote MCP server at `https://<host>/api/mcp`. Create a token under **Settings → Connections**, which also shows setup for Cursor, VS Code and other clients.
 
 ```bash
 # Claude Code
@@ -164,13 +151,17 @@ url = "https://<host>/api/mcp"
 bearer_token_env_var = "DELEGATE_TOKEN"
 ```
 
-Then ask your agent to "run a company X-ray on acme.com with Delegate". The tools are `start_mission`, `get_run`, `wait_for_run`, `approve_plan`, `reject_plan`, `list_runs` and `get_artifact`; deliverables are also resources (`delegate://runs/{runId}/deliverable`). Runs started over MCP stream live in the web UI and go through the same policies, approvals, quotas and audit log. For stdio-only clients: `DELEGATE_URL=https://<host> DELEGATE_TOKEN=<token> pnpm --filter @delegate/mcp-server stdio`.
+- Then ask your agent to "run a company X-ray on acme.com with Delegate".
+- Tools: `start_mission`, `get_run`, `wait_for_run`, `approve_plan`, `reject_plan`, `list_runs`, `get_artifact`. Deliverables are also resources (`delegate://runs/{runId}/deliverable`).
+- Runs started over MCP stream live in the web UI and go through the same policies, approvals, quotas and audit log.
+- Stdio-only clients: `DELEGATE_URL=https://<host> DELEGATE_TOKEN=<token> pnpm --filter @delegate/mcp-server stdio`.
+- The same page connects your own MCP servers and GitHub repositories ([ADR 0014](docs/adr/0014-connections.md)).
 
-The same page connects your own MCP servers (tools are listed on connect; side-effecting tools ask for approval unless you pre-approve them) and your GitHub repositories. Design and threat model: [ADR 0014](docs/adr/0014-connections.md).
+Full guide: [connect MCP clients](docs/guides/connect-mcp-clients.md).
 
 ## Use it from a terminal or your code
 
-The same token works for the REST API, the SDK and the CLI ([API guide](docs/guides/api.md), [CLI guide](docs/guides/cli.md)):
+The same token works for the REST API, the SDK and the CLI.
 
 ```bash
 pnpm delegate login --api-url https://<host>
@@ -184,21 +175,40 @@ const delegate = createDelegateClient({ baseUrl: process.env.DELEGATE_URL ?? "",
 const run = await delegate.runs.create({ missionId: "company-xray", input: { url: "https://acme.com" } });
 ```
 
-Webhook endpoints are added under **Settings → Webhooks**; each delivery is signed with HMAC-SHA256 and verified with `verifyWebhook` from `@delegate/sdk/webhooks` ([guide](docs/guides/webhooks.md)).
+Guides: [API](docs/guides/api.md) · [CLI](docs/guides/cli.md) · [webhooks](docs/guides/webhooks.md) (HMAC-SHA256, verified with `verifyWebhook` from `@delegate/sdk/webhooks`) · [self-hosting](docs/guides/self-hosting.md) · optional providers in [`.env.example`](.env.example).
 
-## Run it locally
+<details>
+<summary><b>Roadmap</b></summary>
 
-```bash
-pnpm install
-pnpm dev          # web app on http://localhost:3000
-pnpm check        # typecheck, lint, test and build across the monorepo
-```
+| Milestone | Scope | Status |
+|---|---|---|
+| M0 · Foundation | Monorepo, data model with RLS, events, router, policy, evals stats, design system | Done |
+| M1 · Runtime + Company X-ray | Streaming tool-use loop, quarantined reader, run view on live events, first eval dataset | Done |
+| M2 · Multi-agent + Automation Audit | Planner DAG, parallel lanes, critic, interactive ROI model, trace waterfall | Done; the five-company exit check is not recorded yet |
+| M3 · Build it + durability | Build-an-Agent (crawler, hybrid RAG, widget), durable runs, approvals | Done; the Demo A exit check is not recorded yet |
+| M4 · Trust layer | Red-team suite, replay, fork-from-step, `/evals` scoreboard | Done |
+| M5 · Engineering missions | Repo X-ray, Ship-a-PR in a sandbox | Done; Ship-a-PR has not opened a live pull request yet |
+| M6 · Platform interfaces | REST API, SDK, webhooks, CLI, MCP server and connectors, Ops Pulse | Shipped except Ops Pulse |
+| M7 · Enterprise | RBAC + SSO, policy editor, Mission Control, standing missions, self-hosting | In progress: Mission Control, Settings with a policy dry run, BYOK Claude and member roles in row-level security are in; SSO, policy editing, standing missions and Bedrock/Vertex are not |
+| M8 · Launch polish | Load test, accessibility audit, demo videos | Planned |
 
-Requires Node 26 and pnpm 12. No keys are needed. See [`.env.example`](.env.example) for optional providers and [self-hosting](docs/guides/self-hosting.md) for production setups.
+Shipped beyond the original plan: Autopilot, deep research, agent teams, evolving playbooks and the training loop. Next: Studio, which takes an idea to a working product. Full spec and demo scripts: [`SPEC.md`](SPEC.md), [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md).
+
+</details>
+
+## Built with Claude Code
+
+The workflow is part of the project; the [case study](docs/CASE_STUDY.md) explains it.
+
+- [`CLAUDE.md`](CLAUDE.md): the working agreement every session reads.
+- [`.claude/commands/`](.claude/commands): `next-task`, `verify`, `eval`, `redteam`, `demo-check`, `adr`.
+- [`.claude/agents/`](.claude/agents): `code-reviewer`, `security-reviewer`, `eval-analyst`, `ux-critic`.
+- Hooks: lint on every edit, secret scan before every commit, full check before every push.
+- Independent workstreams run as parallel sub-agents, then get reviewed before merge.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the checks and how to propose a change. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+[Contributing guide](CONTRIBUTING.md) · [security policy](SECURITY.md) · [code of conduct](CODE_OF_CONDUCT.md)
 
 ## License
 
