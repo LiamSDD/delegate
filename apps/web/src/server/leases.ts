@@ -19,7 +19,7 @@ export function workerId(): string {
 export function createDbLease(
   app: AppDatabase,
   ctx: RunContext,
-  owner = workerId(),
+  owner = `${workerId()}:${randomUUID().slice(0, 8)}`,
   ttlMs = LEASE_TTL_MS,
 ): RunLease {
   const claim = async (takeOver: boolean) => {

@@ -367,4 +367,41 @@ describe("durable plan waits", () => {
       wait({ version: 2, steps: widened, kind: "revision", required: true }),
     ).resolves.toEqual({ decision: "rejected", reason: "Plan approval timed out." });
   });
+
+  it("never auto-approves a reused row that a widening revision opened", async () => {
+    const { ctx } = await newRun();
+    const human = createPlanApprovalWaiter({
+      app,
+      ctx,
+      autoApprove: true,
+      pollMs: 5,
+      timeoutMs: 60_000,
+    });
+    const controller = new AbortController();
+    const revision = human(
+      { version: 2, steps: widened, kind: "revision", required: true },
+      controller.signal,
+    );
+    await waitForPending(ctx);
+    controller.abort(new Error("handed off"));
+    await expect(revision).rejects.toThrow("handed off");
+    let parked = 0;
+    const resumed = createPlanApprovalWaiter({
+      app,
+      ctx,
+      autoApprove: true,
+      pollMs: 5,
+      timeoutMs: 60,
+      inlineWaitMs: 1,
+      park: () => {
+        parked += 1;
+        return Promise.reject(new Error("parked"));
+      },
+    });
+    await expect(resumed({ version: 2, steps: widened, kind: "initial" })).resolves.toEqual({
+      decision: "rejected",
+      reason: "Plan approval timed out.",
+    });
+    expect(parked).toBe(0);
+  });
 });

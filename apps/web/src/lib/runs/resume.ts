@@ -44,8 +44,8 @@ export function resumeDecision(run: ResumeCandidate, now: Date): ResumeDecision 
   if (run.terminal || run.activeHere) return "none";
   const leased = run.leaseExpiresAt !== null && run.leaseExpiresAt.getTime() > now.getTime();
   if (leased) return "none";
-  if (run.handedOff === true) return continuable(run) ? "continue" : "none";
   if (run.planWait === "pending") return "none";
+  if (run.handedOff === true) return continuable(run) ? "continue" : "none";
   if (run.planWait === "due") return continuable(run) ? "continue" : "sweep";
   if (run.leaseExpiresAt === null) {
     const quietFor = now.getTime() - (run.lastEventAt ?? run.createdAt).getTime();
@@ -112,6 +112,27 @@ export function endedWithHandoff(events: readonly Pick<RunEvent, "type" | "paylo
 
 export function countHandoffs(events: readonly Pick<RunEvent, "type" | "payload">[]): number {
   return events.filter(isHandoffMarker).length;
+}
+
+export function stalledHandoffs(events: readonly Pick<RunEvent, "type" | "payload">[]): number {
+  let stalled = 0;
+  let progressed = false;
+  let seenMarker = false;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event === undefined) continue;
+    if (isHandoffMarker(event)) {
+      if (seenMarker) {
+        if (progressed) return stalled;
+        stalled += 1;
+      }
+      seenMarker = true;
+      progressed = false;
+      continue;
+    }
+    if (event.type === "step.completed" || event.type === "plan.approved") progressed = true;
+  }
+  return stalled;
 }
 
 export function awaitingPlanApproval(events: readonly RunEvent[]): boolean {

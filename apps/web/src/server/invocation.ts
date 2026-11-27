@@ -7,6 +7,8 @@ export const MIN_SLICE_MS = 90_000;
 interface Invocation {
   startedAt: number;
   budgetMs: number | null;
+  marginMs?: number;
+  minMs?: number;
   pending?: Set<Promise<void>>;
 }
 
@@ -29,13 +31,15 @@ export function functionBudgetMs(
 
 export function withInvocation<T>(
   fn: () => T,
-  options: { startedAt?: number; budgetMs?: number | null } = {},
+  options: { startedAt?: number; budgetMs?: number | null; marginMs?: number; minMs?: number } = {},
 ): T {
   if (store.getStore() !== undefined) return fn();
   return store.run(
     {
       startedAt: options.startedAt ?? Date.now(),
       budgetMs: options.budgetMs === undefined ? functionBudgetMs() : options.budgetMs,
+      ...(options.marginMs === undefined ? {} : { marginMs: options.marginMs }),
+      ...(options.minMs === undefined ? {} : { minMs: options.minMs }),
     },
     fn,
   );
@@ -47,7 +51,9 @@ export function currentSlice(): Slice | undefined {
   return {
     startedAt: invocation.startedAt,
     budgetMs: invocation.budgetMs,
-    handoffAt: invocation.startedAt + invocation.budgetMs - HANDOFF_MARGIN_MS,
+    handoffAt:
+      invocation.startedAt + invocation.budgetMs - (invocation.marginMs ?? HANDOFF_MARGIN_MS),
+    ...(invocation.minMs === undefined ? {} : { minMs: invocation.minMs }),
   };
 }
 
@@ -93,6 +99,7 @@ export function createScheduler(options: SchedulerOptions): (task: () => Promise
       return;
     }
     const invocation: Invocation = {
+      ...current,
       startedAt: current?.startedAt ?? now(),
       budgetMs: current === undefined ? budget() : current.budgetMs,
       pending: new Set(),

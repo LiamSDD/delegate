@@ -59,6 +59,21 @@ export function workspaceKnowledge(
   };
 }
 
+export function mirroredKnowledge(primary: KnowledgeStore, mirror: KnowledgeStore): KnowledgeStore {
+  return {
+    getPage: (collection, url) => primary.getPage(collection, url),
+    putPage: async (page) => {
+      const stored = await primary.putPage(page);
+      await mirror.putPage(page).catch(() => undefined);
+      return stored;
+    },
+    listChunks: (collection) => primary.listChunks(collection),
+    setEmbeddings: (entries) => primary.setEmbeddings(entries),
+    searchFullText: (params) => primary.searchFullText(params),
+    searchVector: (params) => primary.searchVector(params),
+  };
+}
+
 export interface AssistantView {
   assistant: AssistantArtifact;
   workspaceId: string;

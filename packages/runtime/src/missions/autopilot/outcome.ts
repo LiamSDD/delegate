@@ -50,9 +50,13 @@ const SourcesSchema = z.object({ sources: z.array(z.unknown()) });
 export const BRIEF_QUALITY_GATE = { minCitationAccuracy: 0.7, maxWeakClaims: 5 } as const;
 
 export function weakClaimCount(events: readonly RunEvent[]): number {
-  return events.filter(
-    (event) => event.type === "critic.flagged" && event.payload.claimId.endsWith(":weak"),
-  ).length;
+  return new Set(
+    events.flatMap((event) =>
+      event.type === "critic.flagged" && event.payload.claimId.endsWith(":weak")
+        ? [event.payload.claimId]
+        : [],
+    ),
+  ).size;
 }
 
 export function briefQualityFlags(brief: GoalBrief, weakClaims: number): string[] {

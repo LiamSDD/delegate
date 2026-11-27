@@ -10,6 +10,7 @@ import { isExecutableMission } from "@/lib/m2-contract";
 import {
   awaitingPlanApproval,
   countHandoffs,
+  stalledHandoffs,
   endedWithHandoff,
   MAX_HANDOFFS,
   MAX_RESUMES,
@@ -94,13 +95,16 @@ async function resumeRun(
   const lease = createDbLease(app, ctx);
   if (!(await lease.acquire())) return;
   const events = await readAllEvents(app, userId, record.id);
-  if (mode === "continue" && countHandoffs(events) > MAX_HANDOFFS) {
+  if (
+    mode === "continue" &&
+    (countHandoffs(events) >= MAX_HANDOFFS || stalledHandoffs(events) >= 2)
+  ) {
     await lease.release();
     await failWorkerLost(
       app,
       userId,
       record,
-      `The run did not finish within ${String(MAX_HANDOFFS)} server invocations.`,
+      `The run made no progress or did not finish within ${String(MAX_HANDOFFS)} server invocations.`,
       "handoff_limit",
     );
     return;
@@ -186,7 +190,8 @@ async function planWaitOf(
 ): Promise<PlanWait | undefined> {
   if (!awaitingPlanApproval(events)) return undefined;
   const approval = await latestPlanApproval(app, userId, record.id);
-  if (approval?.status !== "pending") return "due";
+  if (approval === null) return undefined;
+  if (approval.status !== "pending") return "due";
   if (approval.requestedAt.getTime() + PLAN_TIMEOUT_MS > now.getTime()) return "pending";
   try {
     await recordPlanDecision(
@@ -220,16 +225,31 @@ export async function reviveOrSweep(
   const terminal = record.lastEventType !== null && isTerminalEventType(record.lastEventType);
   const activeHere = deps.registry.has(record.id) || resuming().has(record.id);
   if (terminal || activeHere || leaseHeld(record, now)) return record;
+  resuming().add(record.id);
+  try {
+    return await decideAndResume(app, userId, record, deps, now);
+  } finally {
+    resuming().delete(record.id);
+  }
+}
+
+async function decideAndResume(
+  app: AppDatabase,
+  userId: string,
+  record: RunRecord,
+  deps: DurableDeps,
+  now: Date,
+): Promise<RunRecord | null> {
   const events = await readAllEvents(app, userId, record.id);
   const decision = resumeDecision(
     {
-      terminal,
+      terminal: false,
       execution: record.execution,
       mission: record.mission,
       leaseExpiresAt: record.leaseExpiresAt,
       lastEventAt: record.lastEventAt,
       createdAt: record.createdAt,
-      activeHere,
+      activeHere: false,
       resumes: 0,
       handedOff: endedWithHandoff(events),
       ...(await planWaitOf(app, userId, record, events, now).then((planWait) =>
@@ -240,13 +260,10 @@ export async function reviveOrSweep(
   );
   if (decision === "resume" || decision === "continue") {
     if (!hasRoomForWork(Date.now())) return record;
-    resuming().add(record.id);
     try {
       await resumeRun(app, userId, record, deps, decision);
     } catch (error: unknown) {
       console.error("resume failed", record.id, error);
-    } finally {
-      resuming().delete(record.id);
     }
     return getRunRecord(app, userId, record.id);
   }
@@ -276,8 +293,7 @@ export async function wakeRun(
       const waiting =
         after !== null &&
         after.status === "awaiting_plan_approval" &&
-        leaseHeld(after, now) &&
-        !deps.registry.has(runId);
+        (leaseHeld(after, now) || deps.registry.has(runId));
       if (!waiting) return;
       await new Promise((resolve) => setTimeout(resolve, retryMs));
     }

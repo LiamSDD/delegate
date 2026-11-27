@@ -9,6 +9,7 @@ import { type ApiDeps, handlePlanDecision } from "./api";
 import { type AppDatabase, createPgliteAppDatabase } from "./db";
 import { reviveOrSweep } from "./durable";
 import { executeRun } from "./execute-run";
+import { withInvocation } from "./invocation";
 import { createDbLease } from "./leases";
 import type { MissionRunner } from "./mission-runner";
 import { createRunRegistry } from "./run-registry";
@@ -70,23 +71,41 @@ function planningRunner(calls: Calls): MissionRunner {
   };
 }
 
-function slowRunner(calls: Calls, slices: number): MissionRunner {
+function sliceSteps(count: number): PlanStep[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `s${String(index + 1)}`,
+    role: "researcher" as const,
+    objective: `Slice ${String(index + 1)}`,
+    inputs: [],
+    capabilities: [],
+    acceptance: ["ok"],
+    budgetShare: 0.1,
+  }));
+}
+
+function slowRunner(calls: Calls, slices: number, progress = true): MissionRunner {
   return async ({ emit, resumeFrom, signal }) => {
     if (resumeFrom === undefined) calls.starts += 1;
     else calls.resumes += 1;
-    if (calls.starts + calls.resumes <= slices) {
+    const call = calls.starts + calls.resumes;
+    const plan = resumeFrom === undefined ? null : foldRun(resumeFrom).plan;
+    if (plan === null) {
+      await emit({ type: "plan.proposed", payload: { version: 1, steps: sliceSteps(slices) } });
       await emit({
-        type: "usage.updated",
-        payload: {
-          inputTokens: 10,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          costMicroUsd: 0,
-          provider: "scripted",
-          model: "scripted",
-        },
+        type: "plan.approved",
+        payload: { version: 1, approvedBy: { type: "system", id: "auto-approve" } },
       });
+    }
+    if (call <= slices) {
+      if (progress) {
+        const stepId = `s${String(call)}`;
+        await emit({ type: "step.started", stepId, payload: {} });
+        await emit({
+          type: "step.completed",
+          stepId,
+          payload: { outcome: "succeeded", summary: "ok", artifactIds: [] },
+        });
+      }
       await new Promise<void>((resolve) => {
         signal.addEventListener(
           "abort",
@@ -236,43 +255,27 @@ describe("planned hand-offs", () => {
     const slices = MAX_RESUMES + 2;
     const runner = slowRunner(calls, slices);
     const h = await harness(runner);
-    const slice = () => ({
-      startedAt: Date.now(),
-      budgetMs: 300_000,
-      handoffAt: Date.now() + 40,
-      minMs: 10,
-    });
-    await executeRun({
-      app,
-      ctx: h.ctx,
-      missionId: "automation-audit",
-      input: { url: "https://acme.test/" },
-      runner,
-      registry: h.deps.registry,
-      lease: createDbLease(app, h.ctx),
-      slice: slice(),
-    });
-    for (let round = 1; round < slices + 1; round += 1) {
+    const shortInvocation = <T>(work: () => Promise<T>) =>
+      withInvocation(work, { budgetMs: 100, marginMs: 60, minMs: 10 });
+    await shortInvocation(() =>
+      executeRun({
+        app,
+        ctx: h.ctx,
+        missionId: "automation-audit",
+        input: { url: "https://acme.test/" },
+        runner,
+        registry: h.deps.registry,
+        lease: createDbLease(app, h.ctx),
+      }),
+    );
+    for (let round = 0; round < slices; round += 1) {
       const record = await getRunRecord(app, h.session.userId, h.ctx.runId);
       expect(record?.leaseOwner).toBeNull();
       expect(record?.lastEventType).toBe("policy.decided");
       await revive(h);
       expect(h.tasks).toHaveLength(1);
       const task = h.tasks.shift();
-      if (round < slices) {
-        const events = await readAllEvents(app, h.session.userId, h.ctx.runId);
-        await executeRun({
-          app,
-          ctx: h.ctx,
-          missionId: "automation-audit",
-          input: { url: "https://acme.test/" },
-          runner,
-          registry: h.deps.registry,
-          lease: createDbLease(app, h.ctx),
-          resumeFrom: events,
-          slice: slice(),
-        });
-      } else if (task !== undefined) await task();
+      if (task !== undefined) await shortInvocation(task);
     }
     const events = await readAllEvents(app, h.session.userId, h.ctx.runId);
     expect(foldRun(events).status).toBe("completed");
@@ -295,11 +298,40 @@ describe("planned hand-offs", () => {
       slice: { startedAt: Date.now() - 280_000, budgetMs: 300_000, handoffAt: Date.now() + 5_000 },
     });
     expect(calls.starts).toBe(0);
-    await revive(h);
+    await Promise.all([revive(h), revive(h), revive(h)]);
+    expect(h.tasks).toHaveLength(1);
     await drain(h);
     const events = await readAllEvents(app, h.session.userId, h.ctx.runId);
     expect(foldRun(events).status).toBe("completed");
     expect(calls.resumes).toBe(1);
     expect(markers(events, RESUME_POLICY_ID)).toBe(0);
+  });
+
+  it("fails a run whose slices stop making progress instead of handing it off forever", async () => {
+    const calls = { starts: 0, resumes: 0 };
+    const runner = slowRunner(calls, 10, false);
+    const h = await harness(runner);
+    const shortInvocation = <T>(work: () => Promise<T>) =>
+      withInvocation(work, { budgetMs: 100, marginMs: 60, minMs: 10 });
+    await shortInvocation(() =>
+      executeRun({
+        app,
+        ctx: h.ctx,
+        missionId: "automation-audit",
+        input: { url: "https://acme.test/" },
+        runner,
+        registry: h.deps.registry,
+        lease: createDbLease(app, h.ctx),
+      }),
+    );
+    for (let round = 0; round < 6; round += 1) {
+      await revive(h);
+      const task = h.tasks.shift();
+      if (task === undefined) break;
+      await shortInvocation(task);
+    }
+    const events = await readAllEvents(app, h.session.userId, h.ctx.runId);
+    expect(foldRun(events).error?.code).toBe("handoff_limit");
+    expect(markers(events, HANDOFF_POLICY_ID)).toBe(3);
   });
 });

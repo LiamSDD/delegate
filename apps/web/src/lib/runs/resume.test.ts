@@ -6,6 +6,7 @@ import {
   endedWithHandoff,
   handoffMarkerDraft,
   LEASE_TTL_MS,
+  stalledHandoffs,
   MAX_RESUME_AGE_MS,
   MAX_RESUMES,
   resumeDecision,
@@ -100,6 +101,7 @@ describe("hand-offs and parked plans", () => {
     expect(resumeDecision(waiting, now)).toBe("none");
     expect(resumeDecision({ ...waiting, leaseExpiresAt: ago(60_000) }, now)).toBe("none");
     expect(resumeDecision({ ...waiting, execution: "simulated" }, now)).toBe("none");
+    expect(resumeDecision({ ...waiting, handedOff: true }, now)).toBe("none");
     expect(resumeDecision({ ...waiting, planWait: "due" }, now)).toBe("continue");
     expect(resumeDecision({ ...waiting, planWait: "due", execution: "simulated" }, now)).toBe(
       "sweep",
@@ -113,5 +115,26 @@ describe("hand-offs and parked plans", () => {
     expect(endedWithHandoff([event])).toBe(true);
     expect(countHandoffs([event, event])).toBe(2);
     expect(resumeNotices([event])).toEqual([]);
+  });
+
+  it("counts hand-offs in a row that completed no step", () => {
+    const marker = {
+      runId: "r",
+      seq: 0,
+      at: now.toISOString(),
+      ...handoffMarkerDraft({ elapsedMs: 1, budgetMs: 2 }),
+    } as RunEvent;
+    const completed = {
+      runId: "r",
+      seq: 0,
+      at: now.toISOString(),
+      type: "step.completed",
+      stepId: "s",
+      payload: { outcome: "succeeded", summary: "ok", artifactIds: [] },
+    } as RunEvent;
+    expect(stalledHandoffs([completed, marker])).toBe(0);
+    expect(stalledHandoffs([completed, marker, completed, marker])).toBe(0);
+    expect(stalledHandoffs([completed, marker, marker])).toBe(1);
+    expect(stalledHandoffs([completed, marker, marker, marker])).toBe(2);
   });
 });

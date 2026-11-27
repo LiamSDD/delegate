@@ -94,7 +94,7 @@ async function executeHeld(
   const { app, ctx, registry } = options;
   const now = options.now ?? Date.now;
   const slice =
-    options.lease === undefined || options.slice === null
+    options.lease === undefined || options.slice === null || options.missionId === SHIP_MISSION_ID
       ? undefined
       : (options.slice ?? currentSlice());
   const controller = registry.register(ctx.runId);
@@ -132,12 +132,15 @@ async function executeHeld(
   const stop = async (kind: RunHandoffError["kind"]) => {
     if (progress.stopped !== null || progress.terminal) return;
     progress.stopped = kind;
-    await Promise.allSettled([...inflight]);
-    if (kind === "handoff" && !ended() && isHeld() && slice !== undefined)
-      await finish(
-        handoffMarkerDraft({ elapsedMs: now() - slice.startedAt, budgetMs: slice.budgetMs }),
-      );
-    handoff.abort(new RunHandoffError(kind));
+    try {
+      await Promise.allSettled([...inflight]);
+      if (kind === "handoff" && !ended() && isHeld() && slice !== undefined)
+        await finish(
+          handoffMarkerDraft({ elapsedMs: now() - slice.startedAt, budgetMs: slice.budgetMs }),
+        );
+    } finally {
+      handoff.abort(new RunHandoffError(kind));
+    }
   };
   const park = async (): Promise<never> => {
     await stop("park");

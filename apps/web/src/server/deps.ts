@@ -8,7 +8,7 @@ import type { ApiDeps } from "./api";
 import type { ConnectionsDeps } from "./connections-api";
 import { defaultOpenEndpoint, loadMissionConnections } from "./connectors";
 import { connectedInstallations, githubAppConfig } from "./github-connect";
-import { workspaceKnowledge } from "./assistants";
+import { assistantStores, mirroredKnowledge, workspaceKnowledge } from "./assistants";
 import { getAppDatabase } from "./db";
 import { createScheduler } from "./invocation";
 import { createFakeRunner } from "./fake-runner";
@@ -30,7 +30,8 @@ export function selectRunner(env: Record<string, string | undefined>): {
     run: createRuntimeRunner({
       env,
       playbooks: dbPlaybooks,
-      knowledge: (scope) => workspaceKnowledge(getAppDatabase, scope),
+      knowledge: (scope) =>
+        mirroredKnowledge(workspaceKnowledge(getAppDatabase, scope), assistantStores().knowledge),
     }),
   };
 }

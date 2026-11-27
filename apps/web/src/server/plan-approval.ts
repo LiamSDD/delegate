@@ -37,6 +37,12 @@ const actionSchema = z.object({
   kind: z.literal("plan"),
   steps: PlanStepsSchema,
   version: z.int().positive().optional(),
+  request: z
+    .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("initial") }),
+      z.object({ kind: z.literal("revision"), required: z.boolean() }),
+    ])
+    .optional(),
 });
 
 const decisionDetailsSchema = z.object({
@@ -84,6 +90,15 @@ export interface PlanApprovalRow {
   requestedAt: Date;
   version: number | null;
   steps: PlanStep[] | null;
+  request: StoredRequest | null;
+}
+
+type StoredRequest = { kind: "initial" } | { kind: "revision"; required: boolean };
+
+function requestOf(plan: PlanApprovalRequest): StoredRequest {
+  return plan.kind === "initial"
+    ? { kind: "initial" }
+    : { kind: "revision", required: plan.required };
 }
 
 async function latestPlanRow(tx: TenantTx, runId: string): Promise<PlanApprovalRow | null> {
@@ -106,6 +121,7 @@ async function latestPlanRow(tx: TenantTx, runId: string): Promise<PlanApprovalR
     requestedAt: row.requestedAt,
     version: action.success ? (action.data.version ?? null) : null,
     steps: action.success ? action.data.steps : null,
+    request: action.success ? (action.data.request ?? null) : null,
   };
 }
 
@@ -128,7 +144,12 @@ async function openPlanApproval(
   app: AppDatabase,
   ctx: RunContext,
   plan: PlanApprovalRequest,
-): Promise<{ approvalId: string; requestedAt: Date; opened: boolean }> {
+): Promise<{
+  approvalId: string;
+  requestedAt: Date;
+  opened: boolean;
+  request: StoredRequest | null;
+}> {
   return withTenant(app.db, ctx.userId, async (tx) => {
     const existing = await latestPlanRow(tx, ctx.runId);
     if (
@@ -136,18 +157,33 @@ async function openPlanApproval(
       existing.version === plan.version &&
       sameSteps(existing.steps, plan.steps)
     )
-      return { approvalId: existing.approvalId, requestedAt: existing.requestedAt, opened: false };
+      return {
+        approvalId: existing.approvalId,
+        requestedAt: existing.requestedAt,
+        opened: false,
+        request: existing.request,
+      };
     const [row] = await tx
       .insert(approvals)
       .values({
         runId: ctx.runId,
         workspaceId: ctx.workspaceId,
         stepId: PLAN_APPROVAL_STEP,
-        action: { kind: "plan", steps: plan.steps, version: plan.version },
+        action: {
+          kind: "plan",
+          steps: plan.steps,
+          version: plan.version,
+          request: requestOf(plan),
+        },
       })
       .returning({ id: approvals.id, requestedAt: approvals.requestedAt });
     if (row === undefined) throw new Error("approval insert returned no row");
-    return { approvalId: row.id, requestedAt: row.requestedAt, opened: true };
+    return {
+      approvalId: row.id,
+      requestedAt: row.requestedAt,
+      opened: true,
+      request: requestOf(plan),
+    };
   });
 }
 
@@ -276,7 +312,9 @@ export function createPlanApprovalWaiter(options: PlanApprovalWaiterOptions): Aw
     const { approvalId } = opened;
     const already = opened.opened ? null : await decisionFor(app, ctx.userId, approvalId);
     if (already !== null) return toDecision(already);
-    if (options.autoApprove && mayAutoApprovePlan(plan)) {
+    const request = opened.request ?? { kind: "revision", required: true };
+    const asked = { version: plan.version, steps: plan.steps, ...request };
+    if (options.autoApprove && mayAutoApprovePlan(plan) && mayAutoApprovePlan(asked)) {
       await recordPlanDecision(app, ctx, approvalId, { decision: "approved", auto: true });
       return { decision: "approved", auto: true };
     }
@@ -290,7 +328,7 @@ export function createPlanApprovalWaiter(options: PlanApprovalWaiterOptions): Aw
     const deadline = opened.opened
       ? waitingSince + timeoutMs
       : opened.requestedAt.getTime() + timeoutMs;
-    const park = plan.kind === "initial" ? options.park : undefined;
+    const park = plan.kind === "initial" && request.kind === "initial" ? options.park : undefined;
     for (;;) {
       if (signal?.aborted === true) {
         throw signal.reason instanceof Error ? signal.reason : new Error("aborted");
