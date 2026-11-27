@@ -98,7 +98,7 @@ Every command that talks to the API takes `--api-url <url>` and `--json`.
 ```bash
 delegate run company-xray acme.example --focus "pricing and packaging"
 delegate run automation-audit acme.example --department Support
-delegate run build-agent acme.example --goal "Answer support questions" --name "Acme helper"
+delegate run build-agent acme.example --goal "Answer support questions" --name "Acme helper" --opportunity opp-123 --parent-run run-456
 delegate run custom-goal "Summarise the pricing page" --site acme.example
 delegate run repo-xray https://github.com/vercel/next.js --ref canary
 delegate run autopilot "Audit acme.example and build the most valuable assistant"
@@ -122,6 +122,7 @@ Options:
 | `--timeout <seconds>` | With `--watch`: stop watching after this long (exit 12). The run keeps going |
 | `--idempotency-key <key>` | Make the command safe to retry: the same key returns the same run for 24 hours |
 | `--parent-run <run-id>` | `build-agent` only: the audit run the opportunity comes from |
+| `--opportunity <id>` | `build-agent` only: the audit opportunity this run addresses |
 
 Ctrl-C stops watching (exit 130) and does **not** cancel the run. Pick it up again with `delegate runs events <run-id> --follow`.
 

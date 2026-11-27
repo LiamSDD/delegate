@@ -91,6 +91,21 @@ Options
   --timeout <seconds>    Stop watching after this long (exit 12); the run keeps going
   --idempotency-key <k>  Make "run" safe to retry: the same key returns the same run for 24 hours
   --api-url <url>        The Delegate deployment (default: the one you logged in to, or ${URL_ENV})
+  --token-stdin          Read the login token from standard input (login)
+  --site <domain>        Site for a build-agent run
+  --goal <text>          Goal for a build-agent run
+  --focus <text>         Focus for an audit or build-agent run
+  --department <name>    Department for an automation-audit run
+  --name <name>          Name for a build-agent run
+  --opportunity <id>     Opportunity an audit or build-agent run addresses
+  --parent-run <run-id>  Audit run the build-agent opportunity came from (build-agent)
+  --ref <ref>            Git reference for a repo-xray run
+  --status <status>      Filter runs by status (runs list)
+  --limit <n>            Maximum runs to list (runs list)
+  --cursor <cursor>      Continue a runs list from this cursor
+  --after <seq>          Read events after this sequence number (runs events)
+  --reason <text>        Explain why you reject a plan (reject-plan)
+  --output, -o <file>    Write an artifact to a file (artifacts get)
   --help, -h             This text
   --version              The CLI version
 
@@ -105,7 +120,7 @@ Exit codes
   10 run failed   11 run cancelled   12 --timeout elapsed   130 interrupted
 `;
 
-const OPTIONS = {
+export const OPTIONS = {
   help: { type: "boolean", short: "h" },
   version: { type: "boolean" },
   json: { type: "boolean" },
