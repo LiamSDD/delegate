@@ -18,7 +18,7 @@ import { themeInitScript } from "@/lib/theme";
 export const metadata: Metadata = {
   title: { default: "Delegate", template: "%s · Delegate" },
   description: "Turns a company's goals into finished, verified work, safely enough to let it run.",
-  metadataBase: new URL("https://delegate-beryl.vercel.app"),
+  metadataBase: new URL("https://trydelegate.app"),
   openGraph: {
     type: "website",
     siteName: "Delegate",

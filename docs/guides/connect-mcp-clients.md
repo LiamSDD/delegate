@@ -4,7 +4,7 @@ Delegate is a remote MCP server at `/api/mcp`. Add it to your coding agent once,
 
 ## 1. Create a token
 
-Open https://delegate-beryl.vercel.app/settings/connections and choose **Create token**. Give it a name you will recognise later, such as "Claude Code on my laptop".
+Open https://trydelegate.app/settings/connections and choose **Create token**. Give it a name you will recognise later, such as "Claude Code on my laptop".
 
 - The token is `dlg_` followed by 32 random bytes. It is shown once. Delegate stores a SHA-256 hash and a 12-character lookup prefix, so it cannot show the token again.
 - A token acts for one workspace, with the rights of the member who created it.
@@ -20,7 +20,7 @@ The snippets below are the ones the Connections page shows for the live site. On
 Run in a terminal, then check the connection with `/mcp` inside Claude Code.
 
 ```bash
-claude mcp add --transport http delegate https://delegate-beryl.vercel.app/api/mcp \
+claude mcp add --transport http delegate https://trydelegate.app/api/mcp \
   --header "Authorization: Bearer <your-delegate-token>"
 ```
 
@@ -30,7 +30,7 @@ Add to `~/.codex/config.toml`, then export `DELEGATE_TOKEN` in the shell that st
 
 ```toml
 [mcp_servers.delegate]
-url = "https://delegate-beryl.vercel.app/api/mcp"
+url = "https://trydelegate.app/api/mcp"
 bearer_token_env_var = "DELEGATE_TOKEN"
 
 # export DELEGATE_TOKEN=<your-delegate-token>
@@ -44,7 +44,7 @@ Add to `~/.cursor/mcp.json`, or to `.cursor/mcp.json` in a project. The token is
 {
   "mcpServers": {
     "delegate": {
-      "url": "https://delegate-beryl.vercel.app/api/mcp",
+      "url": "https://trydelegate.app/api/mcp",
       "headers": {
         "Authorization": "Bearer ${env:DELEGATE_TOKEN}"
       }
@@ -70,7 +70,7 @@ Add to `.vscode/mcp.json`. VS Code prompts for the token once and stores it secu
   "servers": {
     "delegate": {
       "type": "http",
-      "url": "https://delegate-beryl.vercel.app/api/mcp",
+      "url": "https://trydelegate.app/api/mcp",
       "headers": {
         "Authorization": "Bearer ${input:delegate-token}"
       }
@@ -84,7 +84,7 @@ Add to `.vscode/mcp.json`. VS Code prompts for the token once and stores it secu
 The endpoint speaks Streamable HTTP, stateless, with JSON responses. Send the token on every request.
 
 ```text
-URL:        https://delegate-beryl.vercel.app/api/mcp
+URL:        https://trydelegate.app/api/mcp
 Transport:  Streamable HTTP (POST only, no session)
 Header:     Authorization: Bearer <your-delegate-token>
 ```
@@ -94,7 +94,7 @@ Header:     Authorization: Bearer <your-delegate-token>
 A thin local server in this repository talks to the REST API with the same token.
 
 ```bash
-DELEGATE_URL=https://delegate-beryl.vercel.app DELEGATE_TOKEN=<your-delegate-token> \
+DELEGATE_URL=https://trydelegate.app DELEGATE_TOKEN=<your-delegate-token> \
   pnpm --filter @delegate/mcp-server stdio
 ```
 

@@ -88,7 +88,7 @@ A resolved approval cannot be changed or reopened, by anyone. [Database and row-
 
 ## Audit
 
-- Every policy decision is in the run's event log, and https://delegate-beryl.vercel.app/control/audit lists the decisions for your workspace, newest first, each with its run.
+- Every policy decision is in the run's event log, and https://trydelegate.app/control/audit lists the decisions for your workspace, newest first, each with its run.
 - Plan, tool and ship decisions are also written to the append-only `audit_log` table, with who decided.
 - Reasons are passed through PII redaction before they are stored.
 

@@ -16,7 +16,7 @@ When the App is not configured, the GitHub section of the Connections page says 
 
 ## Connect GitHub
 
-Open https://delegate-beryl.vercel.app/settings/connections and go to **GitHub**.
+Open https://trydelegate.app/settings/connections and go to **GitHub**.
 
 1. Choose **Connect GitHub**. GitHub asks you to authorise the App.
 2. Choose **Install on repositories** and pick the repositories Delegate may open pull requests on. Selecting only the repositories you need is the safer choice.

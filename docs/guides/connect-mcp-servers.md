@@ -4,7 +4,7 @@ A connector is a remote MCP server that you add to your workspace. Its tools bec
 
 ## Add a server
 
-Open https://delegate-beryl.vercel.app/settings/connections and go to **Your MCP servers**.
+Open https://trydelegate.app/settings/connections and go to **Your MCP servers**.
 
 | Field | Rules |
 |---|---|

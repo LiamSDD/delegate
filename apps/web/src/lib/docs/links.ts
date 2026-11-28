@@ -2,7 +2,7 @@ import { REPO_URL } from "@/lib/site";
 
 import { isSafeRepoPath } from "./repo";
 
-export const LIVE_DEMO_ORIGIN = "https://delegate-beryl.vercel.app";
+export const LIVE_DEMO_ORIGIN = "https://trydelegate.app";
 export const DOCS_BRANCH = "main";
 
 export type ResolvedLink =

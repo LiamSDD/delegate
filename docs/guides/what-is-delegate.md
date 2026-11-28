@@ -2,7 +2,7 @@
 
 Delegate is an agent platform. You give it a company URL, a public GitHub repository or a goal in plain language. It plans the work, runs specialist agents in parallel, checks every claim against its source and returns a finished deliverable: a cited company brief, a ranked automation audit with an explicit ROI model, a working assistant trained on a company's own site, an architecture map of a repository, or a tested code change that waits for your approval.
 
-It is live at https://delegate-beryl.vercel.app, needs no account and costs $0 per run. The fastest way to understand it is to [run a mission](quickstart.md).
+It is live at https://trydelegate.app, needs no account and costs $0 per run. The fastest way to understand it is to [run a mission](quickstart.md).
 
 ## What a run does
 
@@ -39,7 +39,7 @@ The runtime never names a model. It asks for a role (`planner`, `worker` or `fas
 
 - Untrusted content never reaches an agent that has tools. It is read in quarantine and comes back as typed facts.
 - Security lives in code paths with tests. A prompt that says "do not do X" is not treated as a control.
-- Every policy decision, approval and tool call is an event in the log, and the audit view at https://delegate-beryl.vercel.app/control/audit is read from that log.
+- Every policy decision, approval and tool call is an event in the log, and the audit view at https://trydelegate.app/control/audit is read from that log.
 - The [red-team suite](red-team.md) runs every attack case against the real code paths before each push. A single successful attack fails the gate.
 - Quality is [measured with confidence intervals](evals.md), and the scoreboard is built from result files committed to the repository.
 

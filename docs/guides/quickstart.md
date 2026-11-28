@@ -4,7 +4,7 @@ You need a browser. There is no sign-up and no key to paste.
 
 ## 1. Open the live site
 
-Go to https://delegate-beryl.vercel.app. Your first run creates an anonymous guest workspace for this browser, identified by a signed, HTTP-only session cookie that lasts 7 days. Runs you start are visible only to that session.
+Go to https://trydelegate.app. Your first run creates an anonymous guest workspace for this browser, identified by a signed, HTTP-only session cookie that lasts 7 days. Runs you start are visible only to that session.
 
 ## 2. Give it one input
 

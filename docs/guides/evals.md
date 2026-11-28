@@ -1,6 +1,6 @@
 # How evals work
 
-An eval answers one question: did a change make the missions better or worse? The scoreboard at https://delegate-beryl.vercel.app/evals shows the answer with error bars. This page explains how the numbers are produced and how to read them.
+An eval answers one question: did a change make the missions better or worse? The scoreboard at https://trydelegate.app/evals shows the answer with error bars. This page explains how the numbers are produced and how to read them.
 
 ## From a case to a number
 

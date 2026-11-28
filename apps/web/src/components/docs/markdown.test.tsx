@@ -108,7 +108,7 @@ describe("Markdown rendering: links", () => {
 
   it("keeps links to the live site on the current deployment", () => {
     const html = render(
-      "[c](https://delegate-beryl.vercel.app/settings/connections) [api](https://delegate-beryl.vercel.app/api/v1/openapi.json)",
+      "[c](https://trydelegate.app/settings/connections) [api](https://trydelegate.app/api/v1/openapi.json)",
     );
     expect(html).toContain('href="/settings/connections"');
     expect(html).toContain('href="/api/v1/openapi.json"');

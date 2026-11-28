@@ -1,6 +1,6 @@
 # How I built Delegate with Claude Code
 
-Delegate is an agent platform that turns a goal or a company URL into finished, cited work. It is live at https://delegate-beryl.vercel.app, it runs on free open-weight models at $0 per run, and the code is open at https://github.com/LiamSDD/delegate.
+Delegate is an agent platform that turns a goal or a company URL into finished, cited work. It is live at https://trydelegate.app, it runs on free open-weight models at $0 per run, and the code is open at https://github.com/LiamSDD/delegate.
 
 This is how it was built: one engineer directing coding agents inside a harness, with the guardrails doing most of the work.
 

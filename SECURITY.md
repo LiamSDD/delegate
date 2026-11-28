@@ -4,7 +4,7 @@ Delegate lets models read untrusted content and act with tools, so it treats pro
 
 ## Supported versions
 
-Delegate is pre-1.0. Fixes land on `main` and in the next release; older releases are not patched. The live demo is [delegate-beryl.vercel.app](https://delegate-beryl.vercel.app).
+Delegate is pre-1.0. Fixes land on `main` and in the next release; older releases are not patched. The live demo is [trydelegate.app](https://trydelegate.app).
 
 ## Reporting a vulnerability
 

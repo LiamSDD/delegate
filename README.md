@@ -24,14 +24,14 @@ pnpm check        # typecheck, lint, test and build
 
 Needs Node 26 and pnpm 12. No keys needed.
 
-**[Live demo](https://delegate-beryl.vercel.app)** (no sign-up) · **[Docs](https://delegate-beryl.vercel.app/docs)** · **[Case study](docs/CASE_STUDY.md)** · [Evals](https://delegate-beryl.vercel.app/evals)
+**[Live demo](https://trydelegate.app)** (no sign-up) · **[Docs](https://trydelegate.app/docs)** · **[Case study](docs/CASE_STUDY.md)** · [Evals](https://trydelegate.app/evals)
 
 ## Status
 
 - M0–M5 shipped; M6 platform interfaces shipped except Ops Pulse; M7 in progress.
 - Five missions and Autopilot run live end to end. Ship-a-PR is built and off on the public demo.
 - Latest live X-ray eval: 81% pass (95% CI 57–93%, n=16), p50 62 s, $0.
-- 2,700 tests. Every number here comes from code or committed result files; see [`/evals`](https://delegate-beryl.vercel.app/evals) and [`docs/PROGRESS.md`](docs/PROGRESS.md).
+- 2,700 tests. Every number here comes from code or committed result files; see [`/evals`](https://trydelegate.app/evals) and [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 ## What you can delegate
 
@@ -110,7 +110,7 @@ More: [architecture](docs/ARCHITECTURE.md) · [threat model](docs/SECURITY.md) �
 | Settings | API tokens, MCP connectors and GitHub, webhook endpoints, the policy sets with a dry run, automation defaults, and workspace export and deletion. | [ADR 0019](docs/adr/0019-mission-control-and-settings.md) |
 | Platform interfaces | REST API v1 (bearer tokens, idempotency keys, one error envelope, OpenAPI 3.1 at `/api/v1/openapi.json`), a typed SDK, the `delegate` CLI, and HMAC-signed webhooks with retries. | [ADR 0018](docs/adr/0018-platform-interfaces.md), [API](docs/guides/api.md), [CLI](docs/guides/cli.md), [webhooks](docs/guides/webhooks.md) |
 | MCP | Remote MCP server at `/api/mcp` for Claude Code, Codex, Cursor and VS Code; MCP client connectors whose output goes through the quarantined reader and whose side-effecting tools ask for approval. | [ADR 0014](docs/adr/0014-connections.md) |
-| Docs site | The guides in [`docs/guides`](docs/guides), served at [`/docs`](https://delegate-beryl.vercel.app/docs) with search. | [`apps/web`](apps/web) |
+| Docs site | The guides in [`docs/guides`](docs/guides), served at [`/docs`](https://trydelegate.app/docs) with search. | [`apps/web`](apps/web) |
 
 </details>
 

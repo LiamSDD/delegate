@@ -82,12 +82,12 @@ describe("resolveLink", () => {
   });
 
   it("turns links to the live site into same-deployment paths", () => {
-    expect(resolve("https://delegate-beryl.vercel.app/settings/connections")).toEqual({
+    expect(resolve("https://trydelegate.app/settings/connections")).toEqual({
       kind: "site",
       href: "/settings/connections",
     });
-    expect(resolve("https://delegate-beryl.vercel.app")).toEqual({ kind: "site", href: "/" });
-    expect(resolve("https://delegate-beryl.vercel.app/evals#redteam")).toEqual({
+    expect(resolve("https://trydelegate.app")).toEqual({ kind: "site", href: "/" });
+    expect(resolve("https://trydelegate.app/evals#redteam")).toEqual({
       kind: "site",
       href: "/evals#redteam",
     });

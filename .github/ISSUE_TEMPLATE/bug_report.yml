@@ -31,7 +31,7 @@ body:
     attributes:
       label: Where
       options:
-        - Live demo (delegate-beryl.vercel.app)
+        - Live demo (trydelegate.app)
         - Local run (pnpm dev)
         - Self-hosted
     validations:
